@@ -1,8 +1,8 @@
 # Privacy
 
-*Last changed on 12 October 2026.*
+*Last changed on 17 October 2026.*
 
-**Orbit keeps your maps on your phone.** It has no accounts, no ads and no tracking. It doesn't send your maps, or anything about you, to us or to anyone else. What leaves your phone is only what you send, as below.
+**Orbit keeps your maps on your phone.** It has no accounts, no ads and no tracking. It doesn't send your maps, or anything about you, to us or to anyone else. Apart from a daily look for new versions when you downloaded Orbit from its website (see Updates), what leaves your phone is only what you send, as below.
 
 ## What stays on your phone
 
@@ -21,6 +21,10 @@
 - **YouTube and Vimeo videos** play inside Orbit, in YouTube's and Vimeo's own players: YouTube's in its privacy-enhanced mode, so what you watch there doesn't shape what YouTube shows you, and Vimeo's told not to track, with no third-party cookies in either. They see what your phone plays, and that it's played in Orbit, as YouTube asks apps to say, under their own privacy policies. Vimeo protects its videos, so its player may ask your phone's protected-content system, as a browser's would, and nothing else of your phone.
 - **Links** open in your browser.
 - **Backups.** If your phone backs up its apps (Android's backup, or moving to a new phone), your maps and settings are part of it, under your phone's backup settings. Their versions are left out of online backups, as are pictures and videos that don't fit in them.
+
+## Updates
+
+When you download Orbit from its website or from GitHub, no app store updates it, so it looks for new versions itself: once a day, it asks GitHub for its latest release. GitHub sees that a phone asked, and from which internet address, as any website would. Orbit sends nothing about you, your phone or your maps, and you can turn it off in Settings. Orbit from Google Play, F-Droid or AppGallery never asks: its store updates it.
 
 ## Children
 

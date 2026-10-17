@@ -253,6 +253,14 @@ fun SettingsScreen(onAbout: () -> Unit, onTrash: () -> Unit, onBack: () -> Unit)
             FolderSettings()
 
             Heading(stringResource(R.string.app_name))
+
+            // Only in the copies no store updates: see UPDATES_URL in app/build.gradle.kts.
+            if (context.container.updates.available) {
+                Toggle(stringResource(R.string.settings_check_for_updates), stringResource(R.string.settings_check_for_updates_description), settings.checkForUpdates) { on ->
+                    change { it.copy(checkForUpdates = on) }
+                }
+            }
+
             val shortcuts = LocalShortcuts.current
 
             if (shortcuts != null && hasHardwareKeyboard()) {

@@ -305,6 +305,7 @@ fun HomeScreen(
         // Reading the phone's WebView starts it: off the main thread, the first time.
         val webView by produceState<SystemWebView?>(null) { value = withContext(Dispatchers.Default) { SystemWebView.of(context) } }
         var crash by rememberUnseenCrash()
+        val release = rememberAnnouncedRelease()
 
         LazyVerticalGrid(
             state = grid,
@@ -333,6 +334,10 @@ fun HomeScreen(
 
             crash?.let { report ->
                 item(key = "crash", span = { GridItemSpan(maxLineSpan) }) { CrashCard(report, onDone = { crash = null }, Modifier.animateItem()) }
+            }
+
+            release?.let { new ->
+                item(key = "update", span = { GridItemSpan(maxLineSpan) }) { UpdateCard(new, Modifier.animateItem()) }
             }
 
             val results = state.results

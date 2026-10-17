@@ -1,8 +1,8 @@
 # Privacidad
 
-*Última actualización: 12 de octubre de 2026.*
+*Última actualización: 17 de octubre de 2026.*
 
-**Orbit guarda tus mapas en tu teléfono.** No tiene cuentas, anuncios ni rastreo. No nos envía tus mapas, ni nada sobre ti, a nosotros ni a nadie más. Lo único que sale de tu teléfono es lo que tú envías, como se explica abajo.
+**Orbit guarda tus mapas en tu teléfono.** No tiene cuentas, anuncios ni rastreo. No nos envía tus mapas, ni nada sobre ti, a nosotros ni a nadie más. Aparte de la búsqueda diaria de versiones nuevas cuando descargas Orbit de su sitio web (ver Actualizaciones), lo único que sale de tu teléfono es lo que tú envías, como se explica abajo.
 
 ## Lo que se queda en tu teléfono
 
@@ -21,6 +21,10 @@
 - **Los videos de YouTube y Vimeo** se reproducen dentro de Orbit, en los reproductores de YouTube y de Vimeo: el de YouTube en su modo de privacidad mejorada, para que lo que veas ahí no influya en lo que YouTube te muestra, y el de Vimeo con la indicación de no rastrear, sin cookies de terceros en ninguno de los dos. Ven lo que reproduce tu teléfono, y que se reproduce en Orbit, como YouTube pide que digan las apps, bajo sus propias políticas de privacidad. Vimeo protege sus videos, así que su reproductor puede consultar el sistema de contenido protegido de tu teléfono, como lo haría el de un navegador, y nada más de tu teléfono.
 - **Los enlaces** se abren en tu navegador.
 - **Las copias de seguridad.** Si tu teléfono respalda sus apps (la copia de seguridad de Android, o al pasarte a un teléfono nuevo), tus mapas y tu configuración forman parte de ella, según la configuración de copias de seguridad de tu teléfono. Sus versiones quedan fuera de las copias en línea, igual que las imágenes y los videos que no caben en ellas.
+
+## Actualizaciones
+
+Cuando descargas Orbit de su sitio web o de GitHub, ninguna tienda de apps lo actualiza, así que busca versiones nuevas por su cuenta: una vez al día, le pregunta a GitHub por su versión más reciente. GitHub ve que un teléfono preguntó, y desde qué dirección de internet, como lo vería cualquier sitio web. Orbit no envía nada sobre ti, tu teléfono ni tus mapas, y puedes desactivarlo en Configuración. Orbit de Google Play, F-Droid o AppGallery nunca pregunta: su tienda lo actualiza.
 
 ## Niñas y niños
 

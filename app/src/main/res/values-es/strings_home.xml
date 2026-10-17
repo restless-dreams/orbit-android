@@ -104,4 +104,9 @@
     <string name="home_dismiss">Descartar</string>
     <string name="home_share_report">Compartir informe</string>
     <string name="home_share_the_crash_report">Compartir el informe del fallo</string>
+
+    <string name="home_update_title">Ya salió Orbit %1$s</string>
+    <string name="home_update_body">Esta copia de Orbit no viene de una tienda de apps, así que no se actualiza sola. Descarga la nueva versión e instálala sobre esta: tus mapas se quedan donde están.</string>
+    <string name="home_update_download">Descargar</string>
+    <string name="home_update_not_now">Ahora no</string>
 </resources>

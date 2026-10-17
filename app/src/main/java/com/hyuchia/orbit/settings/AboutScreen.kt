@@ -119,6 +119,11 @@ fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: 
             }
 
             Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                // Only in the copies no store updates: see UPDATES_URL in app/build.gradle.kts.
+                if (context.container.updates.available) {
+                    UpdatesItem()
+                }
+
                 ListItem(
                     onClick = { openLink(context, "https://orbit.hyuchia.com") },
                     supportingContent = { Text("orbit.hyuchia.com") },

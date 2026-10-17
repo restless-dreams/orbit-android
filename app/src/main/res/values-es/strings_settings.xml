@@ -36,6 +36,8 @@
     <string name="settings_keyboard_shortcuts_description">Ctrl+/ las muestra en cualquier parte de Orbit</string>
     <string name="settings_about_orbit">Acerca de Orbit</string>
     <string name="settings_about_orbit_description">La biblioteca que dibuja todos los mapas aquí</string>
+    <string name="settings_check_for_updates">Buscar actualizaciones</string>
+    <string name="settings_check_for_updates_description">Una vez al día, Orbit le pregunta a GitHub si salió una versión nueva. No envía nada sobre ti ni sobre tus mapas.</string>
 
     <string name="settings_trash">Papelera</string>
     <plurals name="settings_trash_wait_there">
@@ -162,6 +164,12 @@
     <string name="settings_orbit_on_the_web">Orbit en la web</string>
     <string name="settings_support_orbit">Apoya a Orbit</string>
     <string name="settings_support_orbit_description">Patrocina o dona si Orbit te ayuda</string>
+    <string name="settings_updates">Actualizaciones</string>
+    <string name="settings_updates_available">Ya salió Orbit %1$s. Toca para descargar la nueva versión</string>
+    <string name="settings_updates_latest">Esta es la versión más reciente. Toca para volver a buscar</string>
+    <string name="settings_updates_checking">Buscando una versión nueva…</string>
+    <string name="settings_updates_failed">No se pudo buscar una versión nueva. Toca para intentarlo de nuevo</string>
+    <string name="settings_updates_never">Toca para buscar una versión nueva</string>
     <string name="settings_how_maps_are_written">Cómo se escriben los mapas</string>
     <string name="settings_how_maps_are_written_description">El formato orbit-md, con todos sus atributos</string>
     <string name="settings_privacy">Privacidad</string>

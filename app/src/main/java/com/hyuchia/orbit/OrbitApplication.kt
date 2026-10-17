@@ -17,6 +17,7 @@ import com.hyuchia.orbit.data.Importer
 import com.hyuchia.orbit.data.MapRepository
 import com.hyuchia.orbit.data.SettingsRepository
 import com.hyuchia.orbit.data.TrashedMap
+import com.hyuchia.orbit.data.Updates
 import com.hyuchia.orbit.nearby.NearbyHost
 import com.hyuchia.orbit.page.MapPictures
 import com.hyuchia.orbit.page.OrbitBuild
@@ -67,6 +68,9 @@ class AppContainer(context: Context, /** Reports of crashes, kept on the phone. 
 
     /** Maps deleted from their own screen, for the home screen to offer back with Undo once it shows. */
     val deletedMaps = Channel<TrashedMap>(Channel.CONFLATED)
+
+    /** New versions, for the copies no store updates: the APK from the website and GitHub. */
+    val updates = Updates(context, settings)
 }
 
 class OrbitApplication : Application() {

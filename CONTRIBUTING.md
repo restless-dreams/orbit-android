@@ -14,6 +14,8 @@ There are two builds of the same app:
 
 About has "Support Orbit", a link to the donation page, in the libre build only: Google Play doesn't allow leading people to pay outside its billing, donations included. For another store that refuses donation links, `-Porbit.supportUrl=` leaves it out, and `-Porbit.supportUrl=https://…` points it somewhere else.
 
+The APK for the website and GitHub looks for new versions too, since no store updates it: once a day, it asks GitHub for the latest release, and Settings can turn it off. Only that build looks, made with `-Porbit.checkForUpdates=true`. Every other build leaves updates to its store, F-Droid's and AppGallery's included, and the play build never looks.
+
 ```bash
 ./gradlew assembleLibreDebug     # app/build/outputs/apk/libre/debug/app-libre-debug.apk
 ./gradlew assemblePlayDebug      # app/build/outputs/apk/play/debug/app-play-debug.apk

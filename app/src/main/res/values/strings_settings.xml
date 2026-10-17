@@ -39,6 +39,9 @@
     <string name="settings_keyboard_shortcuts_description">Ctrl+/ shows them anywhere in Orbit</string>
     <string name="settings_about_orbit">About Orbit</string>
     <string name="settings_about_orbit_description">The library that draws every map here</string>
+    <!-- A switch in the APK from the website and GitHub, which no store updates. -->
+    <string name="settings_check_for_updates">Check for updates</string>
+    <string name="settings_check_for_updates_description">Once a day, Orbit asks GitHub whether a new version is out. It sends nothing about you or your maps.</string>
 
     <!-- Keeping the maps safe: the trash, and every map in one zip -->
     <string name="settings_trash">Trash</string>
@@ -172,6 +175,14 @@
     <string name="settings_orbit_on_the_web">Orbit on the web</string>
     <string name="settings_support_orbit">Support Orbit</string>
     <string name="settings_support_orbit_description">Sponsor or donate if Orbit helps you</string>
+    <!-- The row about new versions, in the APK from the website and GitHub. -->
+    <string name="settings_updates">Updates</string>
+    <!-- %1$s is the new version, as 0.1.2. -->
+    <string name="settings_updates_available">Orbit %1$s is out. Tap to download it</string>
+    <string name="settings_updates_latest">This is the latest version. Tap to check again</string>
+    <string name="settings_updates_checking">Checking for a new version…</string>
+    <string name="settings_updates_failed">Couldn\'t check for a new version. Tap to try again</string>
+    <string name="settings_updates_never">Tap to check for a new version</string>
     <string name="settings_how_maps_are_written">How maps are written</string>
     <string name="settings_how_maps_are_written_description">The orbit-md format, with every attribute</string>
     <string name="settings_privacy">Privacy</string>

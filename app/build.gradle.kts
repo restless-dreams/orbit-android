@@ -35,8 +35,8 @@ android {
         minSdk = 29
         targetSdk = 36
         // One more with each release, whatever its name: stores and Android tie every update to it.
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
     }
 
     // The languages the app speaks (see TRANSLATING.md). Android lists them in the app's language
@@ -59,6 +59,12 @@ android {
             // Where About's "Support Orbit" goes: the donation page. -Porbit.supportUrl= leaves the
             // item out, for stores that may refuse apps with donation links, such as AppGallery.
             buildConfigField("String", "SUPPORT_URL", "\"${providers.gradleProperty("orbit.supportUrl").getOrElse("https://orbit.hyuchia.com/support")}\"")
+            // The APK for the website and GitHub looks for new versions there, since no store updates it:
+            // -Porbit.checkForUpdates=true (RELEASE.md). Every other build leaves updates to its store,
+            // F-Droid's and AppGallery's included, and so does anyone else's build of this source.
+            val checksForUpdates = providers.gradleProperty("orbit.checkForUpdates").orNull == "true"
+            val releases = "https://api.github.com/repos/restless-dreams/orbit-android/releases/latest"
+            buildConfigField("String", "UPDATES_URL", if (checksForUpdates) "\"$releases\"" else "\"\"")
         }
 
         create("play") {
@@ -66,6 +72,8 @@ android {
             // Google Play doesn't allow leading people to pay outside its billing, donations included,
             // so the play build never has "Support Orbit", whatever orbit.supportUrl says.
             buildConfigField("String", "SUPPORT_URL", "\"\"")
+            // Google Play updates the app, and doesn't allow it to be updated any other way.
+            buildConfigField("String", "UPDATES_URL", "\"\"")
             // The Cast receiver TVs present maps with: the site web/build.ts makes, registered with Google
             // Cast (see CONTRIBUTING.md, "Casting to TVs"). Pass it as -Porbit.castReceiverId=… or in ~/.gradle/gradle.properties;
             // without one, the app presents on second screens, and casts the phone's screen.

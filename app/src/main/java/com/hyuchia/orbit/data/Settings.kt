@@ -65,6 +65,9 @@ data class AppSettings(
 
     /** How many devices may open a shared map at once; 0 for no limit. */
     val shareLimit: Int = 0,
+
+    /** Copies no store updates (the APK from the website and GitHub) look for new versions once a day: see [Updates]. */
+    val checkForUpdates: Boolean = true,
 )
 
 private val Context.settingsStore: DataStore<Preferences> by preferencesDataStore(
@@ -91,6 +94,7 @@ private object Keys {
     val presentLimit = intPreferencesKey("present_limit")
     val shareRequirePin = booleanPreferencesKey("share_require_pin")
     val shareLimit = intPreferencesKey("share_limit")
+    val checkForUpdates = booleanPreferencesKey("check_for_updates")
 }
 
 class SettingsRepository(context: Context) {
@@ -120,6 +124,7 @@ class SettingsRepository(context: Context) {
             preferences[Keys.presentLimit] = next.presentLimit
             preferences[Keys.shareRequirePin] = next.shareRequirePin
             preferences[Keys.shareLimit] = next.shareLimit
+            preferences[Keys.checkForUpdates] = next.checkForUpdates
         }
     }
 
@@ -142,6 +147,7 @@ class SettingsRepository(context: Context) {
             presentLimit = preferences[Keys.presentLimit] ?: defaults.presentLimit,
             shareRequirePin = preferences[Keys.shareRequirePin] ?: defaults.shareRequirePin,
             shareLimit = preferences[Keys.shareLimit] ?: defaults.shareLimit,
+            checkForUpdates = preferences[Keys.checkForUpdates] ?: defaults.checkForUpdates,
         )
     }
 }

@@ -1,0 +1,1 @@
+La primera versión: mapas que recorres volando y construyes sobre el mapa, presentaciones en cualquier pantalla, dictado por voz, historial de versiones, carpetas sincronizadas, envío a dispositivos cercanos, widgets y estilos de papel a cristal líquido.

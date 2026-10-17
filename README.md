@@ -15,7 +15,7 @@
 
 ## Get it
 
-Coming soon to Google Play, F-Droid and AppGallery. Until then, you can build it yourself: see [Building](#building).
+Download the APK from [orbit.hyuchia.com/android](https://orbit.hyuchia.com/android) or this repository's [releases](https://github.com/restless-dreams/orbit-android/releases): it tells you when there's a new version. Coming soon to Google Play, F-Droid and AppGallery. Or build it yourself: see [Building](#building).
 
 ## What it does
 

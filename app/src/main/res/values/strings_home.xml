@@ -116,4 +116,10 @@
     <string name="home_dismiss">Dismiss</string>
     <string name="home_share_report">Share report</string>
     <string name="home_share_the_crash_report">Share the crash report</string>
+
+    <!-- The card about a new version, in the APK from the website and GitHub, which no store updates. %1$s is the version, as 0.1.2. -->
+    <string name="home_update_title">Orbit %1$s is out</string>
+    <string name="home_update_body">This copy of Orbit didn\'t come from an app store, so it doesn\'t update by itself. Download the new version and install it over this one: your maps stay where they are.</string>
+    <string name="home_update_download">Download</string>
+    <string name="home_update_not_now">Not now</string>
 </resources>
