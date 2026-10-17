@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Exporting and sharing a map: its pictures, drawings and files. See TRANSLATING.md. -->
+<resources>
+    <string name="export_and_share">Export and share</string>
+    <!-- The title a map is exported and shared under when it has none of its own. -->
+    <string name="export_default_title">Map</string>
+
+    <!-- Which part of the map pictures show, and whether they have a background. -->
+    <string name="export_pictures_show">Pictures show</string>
+    <string name="export_this_view">This view</string>
+    <string name="export_whole_map">Whole map</string>
+    <string name="export_as_it_opens">As it opens</string>
+    <string name="export_background">Background</string>
+
+    <!-- The ways to take the map out of the app, each with what it is. -->
+    <string name="export_web_page_description">Flies in any browser, even offline, and presents</string>
+    <string name="export_picture">Picture</string>
+    <string name="export_picture_description">A PNG, drawn by Orbit</string>
+    <string name="export_drawing">Drawing</string>
+    <string name="export_drawing_description">An SVG that stays sharp at any size</string>
+    <string name="export_markdown" translatable="false">Markdown</string>
+    <string name="export_markdown_description">The map as orbit-md, to edit anywhere</string>
+    <string name="export_yaml" translatable="false">YAML</string>
+    <string name="export_yaml_description">The map as data, for apps and scripts</string>
+    <string name="export_zip">Zip</string>
+    <string name="export_zip_description">The markdown with the pictures and videos it shows</string>
+
+    <!-- What TalkBack reads for each way's buttons. %1$s is one of the ways above: "Picture". -->
+    <string name="export_copy_format">Copy %1$s</string>
+    <string name="export_save_format">Save %1$s</string>
+    <string name="export_share_format">Share %1$s</string>
+</resources>

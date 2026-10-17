@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Escuchar ideas: lo que pide y por qué se dejó de escuchar. Consulta TRANSLATING.md. -->
+<resources>
+    <string name="voice_say_your_ideas">Di tus ideas</string>
+    <string name="voice_needs_microphone">Orbit necesita el micrófono para escuchar tus ideas.</string>
+    <string name="voice_microphone_busy">El micrófono está ocupado en este momento.</string>
+    <string name="voice_needs_connection">El servicio de voz de este teléfono necesita conexión.</string>
+    <string name="voice_language_missing">El servicio de voz de este teléfono todavía no tiene tu idioma.</string>
+    <string name="voice_service_busy">El servicio de voz está ocupado. Inténtalo de nuevo en un momento.</string>
+    <string name="voice_service_stopped">El servicio de voz dejó de escuchar.</string>
+</resources>

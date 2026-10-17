@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Listening for ideas: what it asks for, and why it stopped. See TRANSLATING.md. -->
+<resources>
+    <!-- What another app's listening screen shows while it listens. -->
+    <string name="voice_say_your_ideas">Say your ideas</string>
+    <string name="voice_needs_microphone">Orbit needs the microphone to hear your ideas.</string>
+    <string name="voice_microphone_busy">The microphone isn\'t free right now.</string>
+    <string name="voice_needs_connection">This phone\'s speech service needs a connection.</string>
+    <string name="voice_language_missing">This phone\'s speech service doesn\'t have its language yet.</string>
+    <string name="voice_service_busy">The speech service is busy. Try again in a moment.</string>
+    <string name="voice_service_stopped">The speech service stopped listening.</string>
+</resources>

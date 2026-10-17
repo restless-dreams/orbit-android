@@ -1,0 +1,9 @@
+{
+  "uniqueId": "fonts:google-sans-flex",
+  "artifactVersion": "5.000",
+  "name": "Google Sans Flex",
+  "description": "The typeface of the app and its maps.",
+  "website": "https://github.com/googlefonts/googlesans-flex",
+  "developers": [{ "name": "The Google Sans Flex Project Authors", "organisationUrl": "https://github.com/googlefonts/googlesans-flex" }],
+  "licenses": ["OFL-1.1"]
+}

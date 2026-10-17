@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pieces of the app's screens used in many places: keys, colors, sharing, notices. See TRANSLATING.md. -->
+<resources>
+    <!-- What the launcher says when a shortcut to a deleted map is tapped. -->
+    <string name="ui_map_deleted">This map was deleted</string>
+    <!-- The share sheet's title. %1$s is what's shared: a map's or idea's name. -->
+    <string name="ui_share_named">Share “%1$s”</string>
+    <string name="ui_no_icon">No icon</string>
+
+    <!-- When the phone's WebView is too old to draw maps. %1$s is its name, such as Android System WebView. -->
+    <string name="ui_web_view_update_to_see_maps">Update %1$s to see your maps</string>
+    <!-- %1$s is the WebView's name, %2$d its Chromium version, %3$d the version Orbit needs. -->
+    <string name="ui_web_view_too_old">Orbit draws maps with %1$s, and this phone\'s is too old: Chromium %2$d, where Orbit needs %3$d or later. Update it from your app store, or with a system update, and your maps will show. They\'re all still here.</string>
+    <string name="ui_web_view_update">Update %1$s</string>
+
+    <!-- A button's name with the keys that do the same, as a hint shows them: Undo (Ctrl+Z). -->
+    <string name="ui_hint_with_keys">%1$s (%2$s)</string>
+    <!-- Between two ways to press a shortcut, in the list of shortcuts. -->
+    <string name="ui_keys_or">or</string>
+    <!-- Two ways to press a shortcut, as screen readers say them: Ctrl Y or Ctrl Shift Z. -->
+    <string name="ui_keys_either">%1$s or %2$s</string>
+    <!-- The keys, as their caps on a keyboard name them. -->
+    <string name="ui_key_control">Ctrl</string>
+    <string name="ui_key_alt">Alt</string>
+    <string name="ui_key_shift">Shift</string>
+    <string name="ui_key_enter">Enter</string>
+    <string name="ui_key_space">Space</string>
+    <string name="ui_key_escape">Esc</string>
+    <string name="ui_key_backspace">Backspace</string>
+    <string name="ui_key_delete">Delete</string>
+    <string name="ui_key_tab">Tab</string>
+    <string name="ui_key_insert">Insert</string>
+    <string name="ui_key_menu">Menu</string>
+    <string name="ui_key_page_up">Page Up</string>
+    <string name="ui_key_page_down">Page Down</string>
+    <string name="ui_key_home">Home</string>
+    <string name="ui_key_end">End</string>
+    <string name="ui_key_play">Play</string>
+
+    <!-- The colors an idea can take, as screen readers name them. -->
+    <string name="ui_color_automatic">Automatic: the branch\'s color</string>
+    <string name="ui_color_coral">Coral</string>
+    <string name="ui_color_mint">Mint</string>
+    <string name="ui_color_sky">Sky</string>
+    <string name="ui_color_lilac">Lilac</string>
+    <string name="ui_color_apricot">Apricot</string>
+    <string name="ui_color_pink">Pink</string>
+    <string name="ui_color_teal">Teal</string>
+    <string name="ui_color_red">Red</string>
+    <string name="ui_color_orange">Orange</string>
+    <string name="ui_color_amber">Amber</string>
+    <string name="ui_color_green">Green</string>
+    <string name="ui_color_blue">Blue</string>
+    <string name="ui_color_violet">Violet</string>
+    <string name="ui_color_gray">Gray</string>
+    <!-- A color without a name of its own, by where it is among them. -->
+    <string name="ui_color_numbered">Color %1$d</string>
+</resources>

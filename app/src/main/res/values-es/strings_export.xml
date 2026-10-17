@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Exportar y compartir un mapa: sus imágenes, dibujos y archivos. Consulta TRANSLATING.md. -->
+<resources>
+    <string name="export_and_share">Exportar y compartir</string>
+    <string name="export_default_title">Mapa</string>
+
+    <string name="export_pictures_show">Las imágenes muestran</string>
+    <string name="export_this_view">Esta vista</string>
+    <string name="export_whole_map">Todo el mapa</string>
+    <string name="export_as_it_opens">Como se abre</string>
+    <string name="export_background">Fondo</string>
+
+    <string name="export_web_page_description">Vuela en cualquier navegador, incluso sin conexión, y presenta</string>
+    <string name="export_picture">Imagen</string>
+    <string name="export_picture_description">Un PNG, dibujado por Orbit</string>
+    <string name="export_drawing">Dibujo</string>
+    <string name="export_drawing_description">Un SVG que se ve nítido en cualquier tamaño</string>
+    <string name="export_markdown_description">El mapa en orbit-md, para editarlo donde quieras</string>
+    <string name="export_yaml_description">El mapa como datos, para apps y scripts</string>
+    <string name="export_zip">Archivo zip</string>
+    <string name="export_zip_description">El markdown con las imágenes y los videos que muestra</string>
+
+    <string name="export_copy_format">Copiar %1$s</string>
+    <string name="export_save_format">Guardar %1$s</string>
+    <string name="export_share_format">Compartir %1$s</string>
+</resources>

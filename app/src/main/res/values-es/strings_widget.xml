@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- El widget del mapa en la pantalla de inicio, y cómo elegir el mapa que muestra. Hay poco espacio: textos cortos. Consulta TRANSLATING.md. -->
+<resources>
+    <string name="widget_no_maps">Tus mapas aparecerán aquí. Abre Orbit para empezar uno.</string>
+    <string name="widget_map_picture">%1$s, como mapa</string>
+    <!-- Concuerda con las tareas y metas que cuenta: hecha, hechas. -->
+    <plurals name="widget_progress_done">
+        <item quantity="one">%1$d de %2$d hecha</item>
+        <item quantity="many">%1$d de %2$d hechas</item>
+        <item quantity="other">%1$d de %2$d hechas</item>
+    </plurals>
+    <plurals name="widget_progress_reached">
+        <item quantity="one">%1$d de %2$d alcanzada</item>
+        <item quantity="many">%1$d de %2$d alcanzadas</item>
+        <item quantity="other">%1$d de %2$d alcanzadas</item>
+    </plurals>
+    <string name="widget_add_idea">Agregar una idea a %1$s</string>
+    <string name="widget_choose_map">Un mapa para la pantalla de inicio</string>
+    <string name="widget_shown_now">Se muestra ahora</string>
+    <string name="widget_show_map">Mostrar %1$s</string>
+</resources>

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What the pages in the map's web views and in browsers say themselves, beyond Orbit's own words: the map's page, the audience's screens, the page that asks for a name, and a map shared as a web page (web/words.ts). See TRANSLATING.md. -->
+<resources>
+    <!-- The language these strings are in, as a BCP 47 language code: the pages' lang, which the map's own controls follow. Each language writes its own. -->
+    <string name="pages_language">en</string>
+
+    <!-- Inside a goal's ring, under its number: the target, an amount such as "5" or "$3K". -->
+    <string name="pages_goal_of_target">of %1$s</string>
+    <!-- Inside the ring of a goal counting down, such as a debt being paid off, under the amount still owed. -->
+    <string name="pages_goal_left">left</string>
+
+    <!-- Why the app can't change a map, or bring in text: it says what Orbit made of the text. -->
+    <string name="pages_no_ideas">Orbit found no ideas in this text.</string>
+    <string name="pages_text_not_read">Orbit couldn\'t read all of this text.</string>
+    <!-- Why ideas caught from the widget, the tile or another app weren't added to a map. -->
+    <string name="pages_map_not_added_to">Orbit couldn\'t read all of this map, so it didn\'t add to it.</string>
+    <string name="pages_map_from_a_newer_orbit">A newer version of Orbit made this map. Update Orbit to add to it.</string>
+
+    <!-- The audience's screen, on a second screen or in a browser, before a presentation starts or after it ends. -->
+    <string name="pages_waiting_for_the_presenter">Waiting for the presenter</string>
+    <!-- In a browser that lost the presenter's phone, while it looks for it again. -->
+    <string name="pages_looking_for_the_presenter">Looking for the presenter…</string>
+    <!-- Over a video in a browser that won't play its sound until someone touches the page. -->
+    <string name="pages_tap_for_sound">Tap for sound</string>
+
+    <!-- The page that asks people joining a presentation, or opening a map on a computer, for their name. -->
+    <string name="pages_your_name">Your name</string>
+
+    <!-- A map shared as a web page: its button to present it, with its key, and the presentation's buttons. -->
+    <string name="pages_present_key">Present (P)</string>
+    <string name="pages_presentation">Presentation</string>
+    <string name="pages_previous_idea">Previous idea</string>
+    <string name="pages_next_idea">Next idea</string>
+    <string name="pages_stop_presenting_key">Stop presenting (Esc)</string>
+    <!-- A button on a map's web page that a device on the same Wi-Fi serves: it downloads the map, to bring it into Orbit. -->
+    <string name="pages_download_for_orbit">Download for Orbit</string>
+    <!-- In a corner of a map's web page, a link to Orbit's site. -->
+    <string name="pages_drawn_with_orbit">Drawn with Orbit</string>
+</resources>

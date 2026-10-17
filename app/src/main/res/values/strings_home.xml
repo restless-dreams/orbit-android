@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The list of maps, their cards, starting a map, and the card about a crash. See TRANSLATING.md. -->
+<resources>
+    <!-- The list of maps -->
+    <plurals name="home_map_count">
+        <item quantity="one">%1$d map</item>
+        <item quantity="other">%1$d maps</item>
+    </plurals>
+    <!-- A map was moved to the trash; Undo brings it back. %1$s is its title. -->
+    <string name="home_deleted_map">Deleted “%1$s”</string>
+    <string name="home_add_widget_from_list">Add Orbit’s widget from your home screen’s list of widgets</string>
+    <string name="home_pinned_maps">Pinned</string>
+    <string name="home_everything_else">Everything else</string>
+    <string name="home_clear_the_search">Clear the search</string>
+    <!-- %1$s is what was searched for. -->
+    <string name="home_no_maps_match">No maps match “%1$s”</string>
+    <string name="home_search_looks_in">Search looks in titles, ideas and notes.</string>
+    <string name="home_sort_last_edited">Last edited</string>
+    <string name="home_sort_last_opened">Last opened</string>
+    <string name="home_sort_newest_first">Newest first</string>
+    <string name="home_sort_by_title">By title</string>
+    <!-- Read out on the order the maps are in now. -->
+    <string name="home_sort_current">Current</string>
+    <string name="home_empty_title">Your ideas, in orbit</string>
+    <string name="home_empty_body">Start with a blank map or a template. On a map, tap + to add ideas, and long-press any idea to change it.</string>
+    <string name="home_templates">Templates</string>
+    <!-- Beside the list on tablets, before a map is picked. -->
+    <string name="home_pick_a_map">Pick a map to fly through it here</string>
+
+    <!-- The + that opens into the ways to start a map -->
+    <string name="home_from_a_template">From a template</string>
+    <!-- Whether the + menu is open or closed, as TalkBack says it. -->
+    <string name="home_menu_open">Open</string>
+    <string name="home_menu_closed">Closed</string>
+    <string name="home_close_the_menu">Close the menu</string>
+
+    <!-- Asking for a map's title -->
+    <string name="home_what_is_it_about">What is it about?</string>
+    <string name="home_create">Create</string>
+    <string name="home_rename_map">Rename map</string>
+
+    <!-- Keyboard shortcuts -->
+    <string name="home_shortcut_new_map_from_template">New map from a template</string>
+    <string name="home_shortcut_group_map_card">On a map\'s card</string>
+    <string name="home_shortcut_open_it">Open it</string>
+    <string name="home_shortcut_its_menu">Its menu</string>
+    <string name="home_shortcut_delete_it">Delete it</string>
+
+    <!-- A map's card -->
+    <string name="home_more_options">More options</string>
+    <!-- %1$s is the map's title. -->
+    <string name="home_more_options_for_map">More options for %1$s</string>
+    <string name="home_pin">Pin</string>
+    <string name="home_pin_to_the_top">Pin to the top</string>
+    <string name="home_unpin">Unpin</string>
+    <!-- On a pinned map's picture. -->
+    <string name="home_pinned">Pinned</string>
+    <string name="home_add_to_home_screen">Add to home screen</string>
+    <string name="home_send_to_a_device">Send to a device</string>
+    <string name="home_share">Share</string>
+    <string name="home_unreadable_map">Orbit can\'t read its file, so it\'s left as it is</string>
+    <string name="home_unreadable_map_file">Orbit can\'t read this map\'s file</string>
+    <!-- How many ideas a map has, and when it was last changed: %2$s is home_just_now, home_minutes_ago… or a date. -->
+    <plurals name="home_map_summary">
+        <item quantity="one">%1$d idea · %2$s</item>
+        <item quantity="other">%1$d ideas · %2$s</item>
+    </plurals>
+    <!-- A map's to-dos and goals, when every one is done. Goals and to-dos are both ideas. -->
+    <plurals name="home_progress_all_done">
+        <item quantity="one">All %1$d done</item>
+        <item quantity="other">All %1$d done</item>
+    </plurals>
+    <!-- A map's goals, when every one is reached. -->
+    <plurals name="home_progress_all_reached">
+        <item quantity="one">All %1$d reached</item>
+        <item quantity="other">All %1$d reached</item>
+    </plurals>
+    <!-- %1$d of a map's %2$d to-dos and goals are done. The quantity is %1$d, the ones done. -->
+    <plurals name="home_progress_done">
+        <item quantity="one">%1$d of %2$d done</item>
+        <item quantity="other">%1$d of %2$d done</item>
+    </plurals>
+    <!-- %1$d of a map's %2$d goals are reached. The quantity is %1$d, the ones reached. -->
+    <plurals name="home_progress_reached">
+        <item quantity="one">%1$d of %2$d reached</item>
+        <item quantity="other">%1$d of %2$d reached</item>
+    </plurals>
+
+    <!-- How long ago something happened, in the middle of a sentence: "12 ideas · 5 minutes ago", "checked yesterday". -->
+    <string name="home_just_now">just now</string>
+    <plurals name="home_minutes_ago">
+        <item quantity="one">%1$d minute ago</item>
+        <item quantity="other">%1$d minutes ago</item>
+    </plurals>
+    <plurals name="home_hours_ago">
+        <item quantity="one">%1$d hour ago</item>
+        <item quantity="other">%1$d hours ago</item>
+    </plurals>
+    <string name="home_yesterday">yesterday</string>
+    <plurals name="home_days_ago">
+        <item quantity="one">%1$d day ago</item>
+        <item quantity="other">%1$d days ago</item>
+    </plurals>
+
+    <!-- Starting a map -->
+    <string name="home_start_a_map">Start a map</string>
+    <string name="home_templates_drawn_live">Templates are drawn live by Orbit, in their own styles</string>
+    <string name="home_blank_map_description">Just a title, and room for ideas</string>
+    <string name="home_open_a_file_description">Markdown, YAML or a zip with pictures</string>
+    <!-- What tapping a template does, as TalkBack says it. -->
+    <string name="home_start_a_map_from_template">Start a map from it</string>
+
+    <!-- The card about a crash -->
+    <string name="home_crash_title">Orbit closed unexpectedly last time</string>
+    <string name="home_crash_body">A report of what went wrong is on this phone: Orbit\'s and Android\'s versions and where in Orbit it happened, nothing from your maps. Sharing it helps fix it.</string>
+    <string name="home_dismiss">Dismiss</string>
+    <string name="home_share_report">Share report</string>
+    <string name="home_share_the_crash_report">Share the crash report</string>
+</resources>

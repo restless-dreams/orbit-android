@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": [],
+    "paths": {
+      "@restless-dreams/orbit": ["../../orbit/dist/index.d.ts"]
+    }
+  },
+  "include": ["bridge.ts", "second-screen.ts", "cast-receiver.ts", "web-page.ts", "browser-audience.ts"]
+}

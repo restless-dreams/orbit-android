@@ -1,0 +1,29 @@
+# Gradle and Android build output
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+captures/
+.externalNativeBuild/
+.cxx/
+
+# IDEs
+.idea/
+*.iml
+.kotlin/
+
+# Web bundle build cache, and the Cast receiver site it builds for hosting
+web/node_modules/
+web/dist/
+
+# Coding agents' local folders
+.agents/
+.claude/
+.codex/
+.kimi-code/
+
+# Signing keys and their passwords stay out of the repository
+*.jks
+*.keystore
+keystore.properties

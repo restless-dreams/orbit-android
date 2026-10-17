@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Palabras que usan todas las partes de la app. Consulta TRANSLATING.md. -->
+<resources>
+    <string name="common_cancel">Cancelar</string>
+    <string name="common_close">Cerrar</string>
+    <string name="common_done">Listo</string>
+    <string name="common_back">Atrás</string>
+    <string name="common_settings">Configuración</string>
+    <string name="common_undo">Deshacer</string>
+    <string name="common_redo">Rehacer</string>
+    <string name="common_open">Abrir</string>
+    <string name="common_delete">Eliminar</string>
+    <string name="common_rename">Cambiar nombre</string>
+    <string name="common_edit">Editar</string>
+    <string name="common_restore">Restaurar</string>
+    <string name="common_remove">Quitar</string>
+    <string name="common_duplicate">Duplicar</string>
+    <string name="common_present">Presentar</string>
+    <string name="common_stop_presenting">Dejar de presentar</string>
+    <string name="common_new_map">Mapa nuevo</string>
+    <string name="common_untitled_map">Mapa sin título</string>
+    <string name="common_untitled">Sin título</string>
+    <string name="common_blank_map">Mapa en blanco</string>
+    <string name="common_your_maps">Tus mapas</string>
+    <string name="common_search_your_maps">Buscar en tus mapas</string>
+    <string name="common_search_the_map">Buscar en el mapa</string>
+    <string name="common_outline">Esquema</string>
+    <string name="common_style_and_layout">Estilo y diseño</string>
+    <string name="common_keyboard_shortcuts">Combinaciones de teclas</string>
+    <string name="common_version_history">Historial de versiones</string>
+    <string name="common_web_page">Página web</string>
+    <string name="common_open_a_file">Abrir un archivo</string>
+    <string name="common_play_the_video">Reproducir el video</string>
+    <string name="common_show_the_picture">Mostrar la imagen</string>
+    <string name="common_color">Color</string>
+    <string name="common_status">Estado</string>
+    <string name="common_could_not_keep_that_map">Orbit no pudo guardar ese mapa.</string>
+    <string name="common_not_allowed_to_read_that_file">Orbit no tiene permiso para leer ese archivo.</string>
+
+    <!-- Mapas importados de un archivo zip de mapas. -->
+    <plurals name="common_added_maps">
+        <item quantity="one">Se agregó %1$d mapa.</item>
+        <item quantity="many">Se agregaron %1$d mapas.</item>
+        <item quantity="other">Se agregaron %1$d mapas.</item>
+    </plurals>
+    <plurals name="common_added_maps_with_one_already_here">
+        <item quantity="one">Se agregó %1$d mapa. 1 ya estaba aquí.</item>
+        <item quantity="many">Se agregaron %1$d mapas. 1 ya estaba aquí.</item>
+        <item quantity="other">Se agregaron %1$d mapas. 1 ya estaba aquí.</item>
+    </plurals>
+    <plurals name="common_added_maps_with_several_already_here">
+        <item quantity="one">Se agregó %1$d mapa. %2$d ya estaban aquí.</item>
+        <item quantity="many">Se agregaron %1$d mapas. %2$d ya estaban aquí.</item>
+        <item quantity="other">Se agregaron %1$d mapas. %2$d ya estaban aquí.</item>
+    </plurals>
+</resources>

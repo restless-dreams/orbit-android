@@ -1,0 +1,503 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher icon on a dusk disc: the orbit turns into place, the sun swells and the planets appear one after another. Drawn by art/logo.ts. -->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt">
+    <aapt:attr name="android:drawable">
+        <vector
+            android:width="108dp"
+            android:height="108dp"
+            android:viewportWidth="108"
+            android:viewportHeight="108">
+            <path android:pathData="M18,54 a36,36 0 1,0 72,0 a36,36 0 1,0 -72,0 Z">
+                <aapt:attr name="android:fillColor">
+                    <gradient
+                        android:type="radial"
+                        android:centerX="32.4"
+                        android:centerY="23.76"
+                        android:gradientRadius="102.6">
+                        <item android:offset="0" android:color="#4A35A8" />
+                        <item android:offset="1" android:color="#18134A" />
+                    </gradient>
+                </aapt:attr>
+            </path>
+            <path
+                android:fillColor="#FFFFFF"
+                android:fillAlpha="0.7"
+                android:pathData="M29.5,26 a0.5,0.5 0 1,0 1,0 a0.5,0.5 0 1,0 -1,0 Z" />
+            <path
+                android:fillColor="#FFFFFF"
+                android:fillAlpha="0.55"
+                android:pathData="M78.55,30 a0.45,0.45 0 1,0 0.9,0 a0.45,0.45 0 1,0 -0.9,0 Z" />
+            <path
+                android:fillColor="#FFFFFF"
+                android:fillAlpha="0.5"
+                android:pathData="M83.6,62 a0.4,0.4 0 1,0 0.8,0 a0.4,0.4 0 1,0 -0.8,0 Z" />
+            <path
+                android:fillColor="#FFFFFF"
+                android:fillAlpha="0.6"
+                android:pathData="M26.55,70 a0.45,0.45 0 1,0 0.9,0 a0.45,0.45 0 1,0 -0.9,0 Z" />
+            <path
+                android:fillColor="#FFFFFF"
+                android:fillAlpha="0.45"
+                android:pathData="M61.65,84 a0.35,0.35 0 1,0 0.7,0 a0.35,0.35 0 1,0 -0.7,0 Z" />
+            <path
+                android:fillColor="#FFFFFF"
+                android:fillAlpha="0.4"
+                android:pathData="M43.7,22 a0.3,0.3 0 1,0 0.6,0 a0.3,0.3 0 1,0 -0.6,0 Z" />
+            <path
+                android:fillColor="#FFFFFF"
+                android:fillAlpha="0.35"
+                android:pathData="M85.7,44 a0.3,0.3 0 1,0 0.6,0 a0.3,0.3 0 1,0 -0.6,0 Z" />
+            <path
+                android:fillColor="#FFFFFF"
+                android:fillAlpha="0.4"
+                android:pathData="M23.7,48 a0.3,0.3 0 1,0 0.6,0 a0.3,0.3 0 1,0 -0.6,0 Z" />
+            <path
+                android:fillColor="#FFFFFF"
+                android:fillAlpha="0.5"
+                android:pathData="M71.6,80 a0.4,0.4 0 1,0 0.8,0 a0.4,0.4 0 1,0 -0.8,0 Z" />
+            <path
+                android:fillColor="#FFFFFF"
+                android:fillAlpha="0.35"
+                android:pathData="M35.7,85 a0.3,0.3 0 1,0 0.6,0 a0.3,0.3 0 1,0 -0.6,0 Z" />
+            <group
+                android:name="system"
+                android:pivotX="54"
+                android:pivotY="54">
+                <path
+                    android:fillColor="#E2E6FF"
+                    android:name="orbit"
+                    android:fillAlpha="0.5"
+                    android:pathData="M67.53,35.36 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M69.84,37.38 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M71.86,39.69 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M76.52,57.07 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M75.92,60.08 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M74.93,62.99 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M62.21,75.71 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M59.3,76.7 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M56.29,77.3 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M38.91,72.64 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M36.6,70.62 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M34.58,68.31 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M29.92,50.93 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M30.52,47.92 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M31.51,45.01 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M44.23,32.29 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M47.14,31.3 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z M50.15,30.7 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z" />
+                <group
+                    android:name="sun"
+                    android:pivotX="54"
+                    android:pivotY="54">
+                    <path android:pathData="M34.75,54 a19.25,19.25 0 1,0 38.5,0 a19.25,19.25 0 1,0 -38.5,0 Z">
+                        <aapt:attr name="android:fillColor">
+                            <gradient
+                                android:type="radial"
+                                android:centerX="54"
+                                android:centerY="54"
+                                android:gradientRadius="19.25">
+                                <item android:offset="0.5" android:color="#80FAD86F" />
+                                <item android:offset="1" android:color="#00FAD86F" />
+                            </gradient>
+                        </aapt:attr>
+                    </path>
+                    <path
+                        android:fillColor="#00000000"
+                        android:strokeColor="#FCEAB0"
+                        android:strokeAlpha="0.5"
+                        android:strokeWidth="0.8"
+                        android:pathData="M40.58,54 a13.42,13.42 0 1,0 26.84,0 a13.42,13.42 0 1,0 -26.84,0 Z" />
+                    <path android:pathData="M43,54 a11,11 0 1,0 22,0 a11,11 0 1,0 -22,0 Z">
+                        <aapt:attr name="android:fillColor">
+                            <gradient
+                                android:type="radial"
+                                android:centerX="50.48"
+                                android:centerY="49.6"
+                                android:gradientRadius="17.16">
+                                <item android:offset="0" android:color="#FDEDBE" />
+                                <item android:offset="0.55" android:color="#FAD86F" />
+                                <item android:offset="1" android:color="#E6C766" />
+                            </gradient>
+                        </aapt:attr>
+                    </path>
+                </group>
+                <group
+                    android:name="planet0"
+                    android:pivotX="60.08"
+                    android:pivotY="31.3">
+                    <path android:pathData="M53.68,31.3 a6.4,6.4 0 1,0 12.8,0 a6.4,6.4 0 1,0 -12.8,0 Z">
+                        <aapt:attr name="android:fillColor">
+                            <gradient
+                                android:type="radial"
+                                android:centerX="58.03"
+                                android:centerY="28.74"
+                                android:gradientRadius="9.98">
+                                <item android:offset="0" android:color="#FFC7C2" />
+                                <item android:offset="0.55" android:color="#FF9E96" />
+                                <item android:offset="1" android:color="#D1827B" />
+                            </gradient>
+                        </aapt:attr>
+                    </path>
+                    <group
+                        android:pivotX="58.16"
+                        android:pivotY="28.87"
+                        android:rotation="-35">
+                        <path
+                            android:fillColor="#FFFFFF"
+                            android:fillAlpha="0.45"
+                            android:pathData="M55.73,28.87 a2.43,1.41 0 1,0 4.86,0 a2.43,1.41 0 1,0 -4.86,0 Z" />
+                    </group>
+                </group>
+                <group
+                    android:name="planet1"
+                    android:pivotX="76.7"
+                    android:pivotY="47.92">
+                    <path android:pathData="M70.3,47.92 a6.4,6.4 0 1,0 12.8,0 a6.4,6.4 0 1,0 -12.8,0 Z">
+                        <aapt:attr name="android:fillColor">
+                            <gradient
+                                android:type="radial"
+                                android:centerX="74.65"
+                                android:centerY="45.36"
+                                android:gradientRadius="9.98">
+                                <item android:offset="0" android:color="#FBD4B1" />
+                                <item android:offset="0.55" android:color="#F8B478" />
+                                <item android:offset="1" android:color="#CB9462" />
+                            </gradient>
+                        </aapt:attr>
+                    </path>
+                    <group
+                        android:pivotX="74.78"
+                        android:pivotY="45.49"
+                        android:rotation="-35">
+                        <path
+                            android:fillColor="#FFFFFF"
+                            android:fillAlpha="0.45"
+                            android:pathData="M72.35,45.49 a2.43,1.41 0 1,0 4.86,0 a2.43,1.41 0 1,0 -4.86,0 Z" />
+                    </group>
+                </group>
+                <group
+                    android:name="planet2"
+                    android:pivotX="70.62"
+                    android:pivotY="70.62">
+                    <path android:pathData="M64.22,70.62 a6.4,6.4 0 1,0 12.8,0 a6.4,6.4 0 1,0 -12.8,0 Z">
+                        <aapt:attr name="android:fillColor">
+                            <gradient
+                                android:type="radial"
+                                android:centerX="68.57"
+                                android:centerY="68.06"
+                                android:gradientRadius="9.98">
+                                <item android:offset="0" android:color="#B5EACE" />
+                                <item android:offset="0.55" android:color="#7FDAAB" />
+                                <item android:offset="1" android:color="#68B38C" />
+                            </gradient>
+                        </aapt:attr>
+                    </path>
+                    <group
+                        android:pivotX="68.7"
+                        android:pivotY="68.19"
+                        android:rotation="-35">
+                        <path
+                            android:fillColor="#FFFFFF"
+                            android:fillAlpha="0.45"
+                            android:pathData="M66.27,68.19 a2.43,1.41 0 1,0 4.86,0 a2.43,1.41 0 1,0 -4.86,0 Z" />
+                    </group>
+                </group>
+                <group
+                    android:name="planet3"
+                    android:pivotX="47.92"
+                    android:pivotY="76.7">
+                    <path android:pathData="M41.52,76.7 a6.4,6.4 0 1,0 12.8,0 a6.4,6.4 0 1,0 -12.8,0 Z">
+                        <aapt:attr name="android:fillColor">
+                            <gradient
+                                android:type="radial"
+                                android:centerX="45.87"
+                                android:centerY="74.14"
+                                android:gradientRadius="9.98">
+                                <item android:offset="0" android:color="#B9E2FF" />
+                                <item android:offset="0.55" android:color="#86CDFF" />
+                                <item android:offset="1" android:color="#6EA8D1" />
+                            </gradient>
+                        </aapt:attr>
+                    </path>
+                    <group
+                        android:pivotX="46"
+                        android:pivotY="74.27"
+                        android:rotation="-35">
+                        <path
+                            android:fillColor="#FFFFFF"
+                            android:fillAlpha="0.45"
+                            android:pathData="M43.57,74.27 a2.43,1.41 0 1,0 4.86,0 a2.43,1.41 0 1,0 -4.86,0 Z" />
+                    </group>
+                </group>
+                <group
+                    android:name="planet4"
+                    android:pivotX="31.3"
+                    android:pivotY="60.08">
+                    <path android:pathData="M24.9,60.08 a6.4,6.4 0 1,0 12.8,0 a6.4,6.4 0 1,0 -12.8,0 Z">
+                        <aapt:attr name="android:fillColor">
+                            <gradient
+                                android:type="radial"
+                                android:centerX="29.25"
+                                android:centerY="57.52"
+                                android:gradientRadius="9.98">
+                                <item android:offset="0" android:color="#E0D2FE" />
+                                <item android:offset="0.55" android:color="#C9B1FE" />
+                                <item android:offset="1" android:color="#A591D0" />
+                            </gradient>
+                        </aapt:attr>
+                    </path>
+                    <group
+                        android:pivotX="29.38"
+                        android:pivotY="57.65"
+                        android:rotation="-35">
+                        <path
+                            android:fillColor="#FFFFFF"
+                            android:fillAlpha="0.45"
+                            android:pathData="M26.95,57.65 a2.43,1.41 0 1,0 4.86,0 a2.43,1.41 0 1,0 -4.86,0 Z" />
+                    </group>
+                </group>
+                <group
+                    android:name="planet5"
+                    android:pivotX="37.38"
+                    android:pivotY="37.38">
+                    <path android:pathData="M30.98,37.38 a6.4,6.4 0 1,0 12.8,0 a6.4,6.4 0 1,0 -12.8,0 Z">
+                        <aapt:attr name="android:fillColor">
+                            <gradient
+                                android:type="radial"
+                                android:centerX="35.33"
+                                android:centerY="34.82"
+                                android:gradientRadius="9.98">
+                                <item android:offset="0" android:color="#FACAE6" />
+                                <item android:offset="0.55" android:color="#F7A3D4" />
+                                <item android:offset="1" android:color="#CB86AE" />
+                            </gradient>
+                        </aapt:attr>
+                    </path>
+                    <group
+                        android:pivotX="35.46"
+                        android:pivotY="34.95"
+                        android:rotation="-35">
+                        <path
+                            android:fillColor="#FFFFFF"
+                            android:fillAlpha="0.45"
+                            android:pathData="M33.03,34.95 a2.43,1.41 0 1,0 4.86,0 a2.43,1.41 0 1,0 -4.86,0 Z" />
+                    </group>
+                </group>
+            </group>
+        </vector>
+    </aapt:attr>
+    <target android:name="system">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:duration="900"
+                android:interpolator="@android:interpolator/decelerate_cubic"
+                android:propertyName="rotation"
+                android:valueFrom="-75"
+                android:valueTo="0" />
+        </aapt:attr>
+    </target>
+    <target android:name="orbit">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:duration="600"
+                android:interpolator="@android:interpolator/fast_out_slow_in"
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="0.5" />
+        </aapt:attr>
+    </target>
+    <target android:name="sun">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <objectAnimator
+                    android:duration="520"
+                    android:interpolator="@interpolator/splash_pop"
+                    android:propertyName="scaleX"
+                    android:valueFrom="0.4"
+                    android:valueTo="1" />
+                <objectAnimator
+                    android:duration="520"
+                    android:interpolator="@interpolator/splash_pop"
+                    android:propertyName="scaleY"
+                    android:valueFrom="0.4"
+                    android:valueTo="1" />
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="planet0">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <set android:ordering="sequentially">
+                    <objectAnimator
+                        android:duration="140"
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="0" />
+                    <objectAnimator
+                        android:duration="360"
+                        android:interpolator="@interpolator/splash_pop"
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="1" />
+                </set>
+                <set android:ordering="sequentially">
+                    <objectAnimator
+                        android:duration="140"
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="0" />
+                    <objectAnimator
+                        android:duration="360"
+                        android:interpolator="@interpolator/splash_pop"
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="1" />
+                </set>
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="planet1">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <set android:ordering="sequentially">
+                    <objectAnimator
+                        android:duration="210"
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="0" />
+                    <objectAnimator
+                        android:duration="360"
+                        android:interpolator="@interpolator/splash_pop"
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="1" />
+                </set>
+                <set android:ordering="sequentially">
+                    <objectAnimator
+                        android:duration="210"
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="0" />
+                    <objectAnimator
+                        android:duration="360"
+                        android:interpolator="@interpolator/splash_pop"
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="1" />
+                </set>
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="planet2">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <set android:ordering="sequentially">
+                    <objectAnimator
+                        android:duration="280"
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="0" />
+                    <objectAnimator
+                        android:duration="360"
+                        android:interpolator="@interpolator/splash_pop"
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="1" />
+                </set>
+                <set android:ordering="sequentially">
+                    <objectAnimator
+                        android:duration="280"
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="0" />
+                    <objectAnimator
+                        android:duration="360"
+                        android:interpolator="@interpolator/splash_pop"
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="1" />
+                </set>
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="planet3">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <set android:ordering="sequentially">
+                    <objectAnimator
+                        android:duration="350"
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="0" />
+                    <objectAnimator
+                        android:duration="360"
+                        android:interpolator="@interpolator/splash_pop"
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="1" />
+                </set>
+                <set android:ordering="sequentially">
+                    <objectAnimator
+                        android:duration="350"
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="0" />
+                    <objectAnimator
+                        android:duration="360"
+                        android:interpolator="@interpolator/splash_pop"
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="1" />
+                </set>
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="planet4">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <set android:ordering="sequentially">
+                    <objectAnimator
+                        android:duration="420"
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="0" />
+                    <objectAnimator
+                        android:duration="360"
+                        android:interpolator="@interpolator/splash_pop"
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="1" />
+                </set>
+                <set android:ordering="sequentially">
+                    <objectAnimator
+                        android:duration="420"
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="0" />
+                    <objectAnimator
+                        android:duration="360"
+                        android:interpolator="@interpolator/splash_pop"
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="1" />
+                </set>
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="planet5">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <set android:ordering="sequentially">
+                    <objectAnimator
+                        android:duration="490"
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="0" />
+                    <objectAnimator
+                        android:duration="360"
+                        android:interpolator="@interpolator/splash_pop"
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="1" />
+                </set>
+                <set android:ordering="sequentially">
+                    <objectAnimator
+                        android:duration="490"
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="0" />
+                    <objectAnimator
+                        android:duration="360"
+                        android:interpolator="@interpolator/splash_pop"
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="1" />
+                </set>
+            </set>
+        </aapt:attr>
+    </target>
+</animated-vector>

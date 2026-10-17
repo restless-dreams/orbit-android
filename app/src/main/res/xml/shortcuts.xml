@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_new_map"
+        android:shortcutId="new-map"
+        android:shortcutLongLabel="@string/shortcut_new_map_long"
+        android:shortcutShortLabel="@string/shortcut_new_map">
+        <intent
+            android:action="com.hyuchia.orbit.NEW_MAP"
+            android:targetClass="com.hyuchia.orbit.MainActivity"
+            android:targetPackage="@string/application_id" />
+    </shortcut>
+</shortcuts>

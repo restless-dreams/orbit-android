@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What the app says as maps come in: from a file, a zip of maps or a nearby device. See TRANSLATING.md. -->
+<resources>
+    <!-- %1$s is the name of the device or person that sent the map. -->
+    <string name="main_could_not_keep_sent_map">Orbit couldn\'t keep the map %1$s sent. Ask them to send it as a file instead.</string>
+    <string name="main_could_not_open_that">Couldn\'t open that</string>
+    <string name="main_ok">OK</string>
+
+    <!-- A zip of maps, brought in. -->
+    <string name="main_nothing_new">Nothing new</string>
+    <string name="main_maps_added">Maps added</string>
+    <string name="main_no_maps_in_zip">There are no maps in that zip.</string>
+    <string name="main_every_map_in_zip_already_here">Every map in that zip is here already.</string>
+</resources>

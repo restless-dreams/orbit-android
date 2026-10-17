@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A sun with a plus in its orbit, for the "New map" shortcut. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#1B1F3B"
+        android:pathData="M24,0 A24,24 0 1,1 23.99,0 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#9BC7F5"
+        android:strokeWidth="1.5"
+        android:pathData="M24,11 A13,13 0 1,1 23.99,11" />
+    <path
+        android:fillColor="#FAD86F"
+        android:pathData="M24,18 A6,6 0 1,1 23.99,18 Z" />
+    <path
+        android:fillColor="#99E0BA"
+        android:pathData="M34.5,7.5 h2 v3.5 h3.5 v2 h-3.5 v3.5 h-2 v-3.5 h-3.5 v-2 h3.5 z" />
+</vector>

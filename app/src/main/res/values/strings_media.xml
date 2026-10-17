@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pictures and videos full screen, and the video players. See TRANSLATING.md. -->
+<resources>
+    <!-- What screen readers say for a picture or video without a description or caption. %1$s is the idea's name. -->
+    <string name="media_picture_of">Picture of %1$s</string>
+    <string name="media_video_of">Video of %1$s</string>
+    <string name="media_picture_missing">This picture isn\'t on this phone.</string>
+    <string name="media_picture_unreadable">This picture couldn\'t be shown.</string>
+    <!-- The play button, for screen readers. %1$s is the video's caption. -->
+    <string name="media_play_captioned">Play %1$s</string>
+    <!-- The play button of a video without a caption. %1$s is the idea's name. -->
+    <string name="media_play_video_of">Play the video of %1$s</string>
+    <!-- Which picture or video this is, of how many: 2 of 5. -->
+    <string name="media_position">%1$d of %2$d</string>
+    <string name="media_share_picture">Share the picture</string>
+    <string name="media_share_video">Share the video</string>
+    <string name="media_video_missing">This video isn\'t on this phone.</string>
+    <string name="media_video_unplayable">This video couldn\'t be played here.</string>
+    <plurals name="media_seek_back">
+        <item quantity="one">Back %d second</item>
+        <item quantity="other">Back %d seconds</item>
+    </plurals>
+    <plurals name="media_seek_forward">
+        <item quantity="one">Forward %d second</item>
+        <item quantity="other">Forward %d seconds</item>
+    </plurals>
+    <string name="media_open_in_another_app">Open in another app</string>
+    <!-- %1$s is the video's site: YouTube or Vimeo. -->
+    <string name="media_watch_on">Watch on %1$s</string>
+</resources>

@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings, About, the trash and the open-source licenses. See TRANSLATING.md. -->
+<resources>
+    <!-- Settings -->
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme_like_the_phone">Like the phone</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_wallpaper_colors">Wallpaper colors</string>
+    <string name="settings_wallpaper_colors_description">The app and maps without a style take your wallpaper\'s colors</string>
+    <string name="settings_new_maps">New maps</string>
+    <string name="settings_new_map_style_description">The style a new blank map starts in</string>
+    <string name="settings_on_the_map">On the map</string>
+    <string name="settings_haptics">Haptics</string>
+    <string name="settings_haptics_description">A tick as planets pass the top, and a tap as ideas join the map</string>
+    <string name="settings_snap_to_planets">Snap to planets</string>
+    <string name="settings_snap_to_planets_description">A flicked orbit stops with a planet at the top</string>
+    <string name="settings_presenting">Presenting</string>
+    <!-- Followed by choices: settings_presentation_only_when_i_tap, or a number of seconds. -->
+    <string name="settings_presentation_advance">Move on to the next idea on its own after</string>
+    <string name="settings_presentation_only_when_i_tap">Only when I tap</string>
+    <plurals name="settings_presentation_seconds">
+        <item quantity="one">%1$d second</item>
+        <item quantity="other">%1$d seconds</item>
+    </plurals>
+    <string name="settings_nearby_devices">Nearby devices</string>
+    <string name="settings_take_maps_from_nearby_devices">Take maps from nearby devices</string>
+    <string name="settings_take_maps_from_nearby_devices_description">Your other devices with Orbit open on the same Wi-Fi can send you maps. You choose whether to take each one.</string>
+    <string name="settings_your_name_on_nearby_devices">Your name on nearby devices</string>
+    <string name="settings_your_name_on_nearby_devices_description">Devices on the same Wi-Fi see it while Orbit is taking maps.</string>
+    <!-- What tapping the name does, as TalkBack says it. -->
+    <string name="settings_change_it">Change it</string>
+    <string name="settings_nearby_name_empty_hint">Left empty, it\'s this device\'s own name.</string>
+    <string name="settings_save">Save</string>
+    <!-- %1$s is an address on the local network, such as 192.168.1.20:8421. -->
+    <string name="settings_this_device_address">This device\'s address is %1$s</string>
+    <string name="settings_connect_to_wifi">Connect it to Wi-Fi to reach your other devices.</string>
+    <string name="settings_folder">Folder</string>
+    <string name="settings_keyboard_shortcuts_description">Ctrl+/ shows them anywhere in Orbit</string>
+    <string name="settings_about_orbit">About Orbit</string>
+    <string name="settings_about_orbit_description">The library that draws every map here</string>
+
+    <!-- Keeping the maps safe: the trash, and every map in one zip -->
+    <string name="settings_trash">Trash</string>
+    <!-- The trash is empty. The quantity is how many days deleted maps are kept. -->
+    <plurals name="settings_trash_wait_there">
+        <item quantity="one">Deleted maps wait there for %1$d day</item>
+        <item quantity="other">Deleted maps wait there for %1$d days</item>
+    </plurals>
+    <!-- %1$d maps are in the trash; %2$s is how long each is kept, from settings_day_count. -->
+    <plurals name="settings_trash_maps_kept">
+        <item quantity="one">%1$d map, kept for %2$s after it was deleted</item>
+        <item quantity="other">%1$d maps, each kept for %2$s after it was deleted</item>
+    </plurals>
+    <plurals name="settings_day_count">
+        <item quantity="one">%1$d day</item>
+        <item quantity="other">%1$d days</item>
+    </plurals>
+    <string name="settings_export_all_maps">Export all maps</string>
+    <string name="settings_export_all_maps_description">Every map, with its pictures, videos and history, in one file to keep anywhere</string>
+    <!-- The name offered for the zip of every map, without its .zip. %1$s is today's date, as 2026-10-15. -->
+    <string name="settings_all_maps_file_name">Orbit maps %1$s</string>
+    <plurals name="settings_exported_maps">
+        <item quantity="one">Exported %1$d map.</item>
+        <item quantity="other">Exported %1$d maps.</item>
+    </plurals>
+    <string name="settings_could_not_write_file">Orbit couldn\'t write that file. Try another place.</string>
+    <string name="settings_not_allowed_to_write">Orbit isn\'t allowed to write there. Try another place.</string>
+    <string name="settings_import_maps">Import maps</string>
+    <string name="settings_import_maps_description">From a file of maps exported here or on another device. Maps already here stay as they are.</string>
+    <string name="settings_no_maps_in_file">There are no maps in that file.</string>
+    <string name="settings_every_map_in_file_already_here">Every map in that file is here already.</string>
+    <!-- %1$s is what went wrong, as Android or the zip said it. -->
+    <string name="settings_could_not_read_file">Orbit couldn\'t read that file: %1$s.</string>
+    <string name="settings_could_not_read_file_not_zip">Orbit couldn\'t read that file: it isn\'t a zip of maps.</string>
+    <string name="settings_newer_version_keeps_maps">A newer version of Orbit keeps your maps, in a way this one can\'t change safely. Update Orbit to edit them; until then they\'re only shown.</string>
+
+    <!-- Keeping the maps in a folder -->
+    <string name="settings_keep_maps_in_folder">Keep maps in a folder</string>
+    <string name="settings_keep_maps_in_folder_description">Each map as a markdown file in a folder you choose, kept in step both ways: changes made there, by a sync app or on a computer, come back here.</string>
+    <!-- In place of the folder's name, until Orbit has reached the folder. -->
+    <string name="settings_your_folder">Your folder</string>
+    <string name="settings_check_folder_now">Check the folder now</string>
+    <!-- "media" is the name of the folder the pictures and videos go in. -->
+    <string name="settings_folder_how_it_works">Each map is a markdown file there, and pictures and videos go in a media folder beside them. A map changed both here and there is kept twice, so nothing\'s lost.</string>
+    <string name="settings_folder_syncing">Bringing your maps and the folder in step…</string>
+    <string name="settings_folder_checking">Checking the folder…</string>
+    <!-- %1$s is how long ago the folder was checked: home_just_now, home_minutes_ago… -->
+    <string name="settings_folder_in_step">In step with your maps, checked %1$s</string>
+    <!-- %1$s is the date the folder was checked, more than a week ago, as Oct 3, 2026. -->
+    <string name="settings_folder_in_step_on_date">In step with your maps, checked %1$s</string>
+    <!-- The notes below end with a list of maps' titles, each as settings_quoted_map_title. The quantity is how many. -->
+    <plurals name="settings_folder_kept_both">
+        <item quantity="one">Changed both here and in the folder, so both are kept: %1$s.</item>
+        <item quantity="other">Changed both here and in the folder, so both are kept: %1$s.</item>
+    </plurals>
+    <plurals name="settings_folder_removed">
+        <item quantity="one">Moved to the trash, as their files were deleted from the folder: %1$s.</item>
+        <item quantity="other">Moved to the trash, as their files were deleted from the folder: %1$s.</item>
+    </plurals>
+    <plurals name="settings_folder_restored">
+        <item quantity="one">Emptied in the folder, so Orbit kept their ideas and wrote them back: %1$s.</item>
+        <item quantity="other">Emptied in the folder, so Orbit kept their ideas and wrote them back: %1$s.</item>
+    </plurals>
+    <!-- %1$s lists the pictures and videos, with the maps they're in. %2$s and %3$s are sizes, as 50 MB. The quantity is how many pictures and videos. -->
+    <plurals name="settings_folder_too_big">
+        <item quantity="one">Too big for a map, so they\'re only in the folder: %1$s. A map keeps videos of up to %2$s, and up to %3$s of pictures and videos in all, so it always fits in its zip.</item>
+        <item quantity="other">Too big for a map, so they\'re only in the folder: %1$s. A map keeps videos of up to %2$s, and up to %3$s of pictures and videos in all, so it always fits in its zip.</item>
+    </plurals>
+    <!-- A map's title in a list of them. -->
+    <string name="settings_quoted_map_title">“%1$s”</string>
+    <string name="settings_got_it">Got it</string>
+    <string name="settings_change_folder">Change folder</string>
+    <string name="settings_stop_keeping_maps_there">Stop keeping maps there</string>
+    <!-- %1$s is the folder's name. -->
+    <string name="settings_keep_maps_in_named_folder">Keep maps in “%1$s”?</string>
+    <plurals name="settings_folder_has_markdown_files">
+        <item quantity="one">It has a markdown file already. Orbit adds it as a map, unless it\'s one of yours, and from then on keeps it and your maps in step. The file as it is now stays in the map\'s history for good.</item>
+        <item quantity="other">It has %1$d markdown files already. Orbit adds each as a map, unless it\'s one of yours, and from then on keeps them and your maps in step. Each file as it is now stays in its map\'s history for good.</item>
+    </plurals>
+    <string name="settings_keep_maps_here">Keep maps here</string>
+    <string name="settings_folder_access_refused">Android didn\'t let Orbit keep using that folder. Try another one.</string>
+    <string name="settings_folder_could_not_open">Orbit couldn\'t open that folder. Try another one.</string>
+
+    <!-- The trash -->
+    <string name="settings_empty_trash">Empty trash</string>
+    <string name="settings_nothing_in_trash">Nothing in the trash</string>
+    <!-- The quantity is how many days deleted maps are kept. -->
+    <plurals name="settings_trash_empty_body">
+        <item quantity="one">Deleted maps wait here for %1$d day, with their history, in case you want them back.</item>
+        <item quantity="other">Deleted maps wait here for %1$d days, with their history, in case you want them back.</item>
+    </plurals>
+    <plurals name="settings_trash_explanation">
+        <item quantity="one">Deleted maps wait here for %1$d day, with their history. Then they\'re gone for good.</item>
+        <item quantity="other">Deleted maps wait here for %1$d days, with their history. Then they\'re gone for good.</item>
+    </plurals>
+    <!-- A map in the trash: how many ideas, when it was deleted (home_just_now, home_minutes_ago…), and %3$s, settings_trash_days_left. -->
+    <plurals name="settings_trash_map_summary">
+        <item quantity="one">%1$d idea · deleted %2$s · %3$s</item>
+        <item quantity="other">%1$d ideas · deleted %2$s · %3$s</item>
+    </plurals>
+    <!-- The same, deleted more than a week ago: %2$s is the date, as Oct 3, 2026. -->
+    <plurals name="settings_trash_map_summary_on_date">
+        <item quantity="one">%1$d idea · deleted %2$s · %3$s</item>
+        <item quantity="other">%1$d ideas · deleted %2$s · %3$s</item>
+    </plurals>
+    <plurals name="settings_trash_days_left">
+        <item quantity="one">%1$d day left</item>
+        <item quantity="other">%1$d days left</item>
+    </plurals>
+    <!-- %1$s is the map's title. -->
+    <string name="settings_restored">Restored “%1$s”</string>
+    <string name="settings_could_not_restore">Orbit couldn\'t restore “%1$s”.</string>
+    <string name="settings_delete_named_for_good">Delete “%1$s” for good</string>
+    <string name="settings_delete_named_for_good_question">Delete “%1$s” for good?</string>
+    <string name="settings_delete_for_good_body">It won\'t come back, and neither will its history.</string>
+    <string name="settings_delete_for_good">Delete for good</string>
+    <string name="settings_empty_the_trash_question">Empty the trash?</string>
+    <plurals name="settings_empty_trash_body">
+        <item quantity="one">The map in the trash will be gone for good.</item>
+        <item quantity="other">The %1$d maps in the trash will be gone for good.</item>
+    </plurals>
+
+    <!-- About -->
+    <string name="settings_about">About</string>
+    <!-- %1$s is the app's version, as 0.1.0. -->
+    <string name="settings_version">Version %1$s</string>
+    <string name="settings_about_body">Mind maps you fly through. Every map is a plain markdown file on your phone, and it can live in a folder of yours too.</string>
+    <string name="settings_maps_drawn_by_library">Maps drawn by the Orbit library</string>
+    <!-- %1$s is the library's version, its commit, or both, as 1.2.0 4fd84ca. -->
+    <string name="settings_maps_drawn_by_library_version">Maps drawn by the Orbit library %1$s</string>
+    <string name="settings_orbit_on_the_web">Orbit on the web</string>
+    <string name="settings_support_orbit">Support Orbit</string>
+    <string name="settings_support_orbit_description">Sponsor or donate if Orbit helps you</string>
+    <string name="settings_how_maps_are_written">How maps are written</string>
+    <string name="settings_how_maps_are_written_description">The orbit-md format, with every attribute</string>
+    <string name="settings_privacy">Privacy</string>
+    <string name="settings_privacy_description">Your maps stay on your phone</string>
+    <string name="settings_source_code">Source code</string>
+    <string name="settings_source_code_description">Free software under the GNU GPL, version 3 or later</string>
+    <string name="settings_open_source_licenses">Open-source licenses</string>
+    <string name="settings_open_source_licenses_description">The libraries and font Orbit is built with</string>
+    <string name="settings_welcome_map">The welcome map</string>
+    <string name="settings_welcome_map_description">A tour of what you can do</string>
+    <string name="settings_licenses_introduction">Orbit for Android is free software under the GNU General Public License, version 3 or later. It\'s built with these:</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_language_phone">Phone’s language</string>
+</resources>

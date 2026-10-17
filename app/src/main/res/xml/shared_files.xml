@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path name="exports" path="exports/" />
+    <!-- Videos added to a map, played in the phone's video app. -->
+    <files-path name="maps" path="maps/" />
+</paths>

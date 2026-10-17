@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Enviar mapas entre dispositivos, presentaciones y mapas abiertos en navegadores, y las páginas en que el teléfono los sirve. Consulta TRANSLATING.md. -->
+<resources>
+    <!-- Enviar un mapa a otro dispositivo -->
+    <string name="nearby_send_map">Enviar “%1$s”</string>
+    <string name="nearby_devices_nearby">Dispositivos cercanos</string>
+    <string name="nearby_looking_for_devices">Buscando dispositivos con Orbit abierto en esta red Wi-Fi. Abre Orbit en tu tablet o en tu otro teléfono.</string>
+    <string name="nearby_tap_to_send">Toca para enviar</string>
+    <string name="nearby_sending">Enviando…</string>
+    <string name="nearby_other_device_should_show">El otro dispositivo debería mostrar %1$s</string>
+    <string name="nearby_opened">Abierto</string>
+    <string name="nearby_opened_there">Se abrió allá</string>
+    <string name="nearby_not_taken">No se aceptó</string>
+    <string name="nearby_not_listed_enter_its_address">¿No aparece? Escribe su dirección</string>
+    <string name="nearby_other_ways">Otras formas</string>
+    <string name="nearby_share_as_a_file">Compartir como archivo</string>
+    <string name="nearby_share_as_a_file_description">Por Quick Share, Huawei Share, Bluetooth, correo o un chat. Se abre en Orbit.</string>
+    <string name="nearby_open_on_a_computer">Abrir en una computadora</string>
+    <string name="nearby_open_on_a_computer_description">Una Chromebook o laptop lo abre en su navegador para explorarlo, presentarlo o descargarlo.</string>
+    <string name="nearby_send_to_an_address">Enviar a una dirección</string>
+    <string name="nearby_send_to_an_address_explanation">En el otro dispositivo, la configuración de Orbit muestra su dirección en Dispositivos cercanos.</string>
+    <string name="nearby_send">Enviar</string>
+
+    <!-- Por qué un mapa no llegó al otro dispositivo -->
+    <string name="nearby_send_could_not_get_the_map_ready">No se pudo preparar el mapa para enviarlo. ¿Está lleno el almacenamiento de este dispositivo?</string>
+    <string name="nearby_send_too_big">El mapa es demasiado grande para enviarlo así: mejor envíalo como archivo.</string>
+    <string name="nearby_send_could_not_reach">No se pudo conectar. ¿Orbit está abierto allá, en la misma red Wi-Fi?</string>
+    <string name="nearby_send_no_answer">No respondió.</string>
+    <string name="nearby_send_not_taking_maps">En este momento no está aceptando mapas.</string>
+    <string name="nearby_send_update_the_other_device">Actualiza Orbit en el otro dispositivo y vuelve a intentarlo.</string>
+    <string name="nearby_send_could_not_open">No pudo abrir el mapa. Actualiza Orbit en ambos dispositivos y vuelve a intentarlo.</string>
+    <string name="nearby_send_maps_already_waiting">Ya tiene mapas esperando respuesta. Vuelve a intentarlo cuando se respondan.</string>
+
+    <!-- Un mapa que llegó de otro dispositivo, o de un archivo de un mapa que ya está aquí -->
+    <string name="nearby_arrival_newer_version_from">%2$s te envió una versión más reciente de “%1$s”</string>
+    <string name="nearby_arrival_another_version">Otra versión de “%1$s”</string>
+    <string name="nearby_arrival_sent_you_a_map">%1$s te envió un mapa</string>
+    <string name="nearby_arrival_a_map_arrived">Llegó un mapa</string>
+    <string name="nearby_arrival_update_yours">Ya tienes este mapa. ¿Actualizar el tuyo con esta versión? Tu versión actual queda en su historial.</string>
+    <plurals name="nearby_arrival_update_yours_with_pictures">
+        <item quantity="one">Ya tienes este mapa. ¿Actualizar el tuyo con esta versión, que trae %1$d imagen? Tu versión actual queda en su historial.</item>
+        <item quantity="many">Ya tienes este mapa. ¿Actualizar el tuyo con esta versión, que trae %1$d imágenes? Tu versión actual queda en su historial.</item>
+        <item quantity="other">Ya tienes este mapa. ¿Actualizar el tuyo con esta versión, que trae %1$d imágenes? Tu versión actual queda en su historial.</item>
+    </plurals>
+    <string name="nearby_arrival_title">“%1$s”.</string>
+    <plurals name="nearby_arrival_title_with_pictures">
+        <item quantity="one">“%1$s” con %2$d imagen.</item>
+        <item quantity="many">“%1$s” con %2$d imágenes.</item>
+        <item quantity="other">“%1$s” con %2$d imágenes.</item>
+    </plurals>
+    <string name="nearby_arrival_sent_from_address">Enviado desde %1$s en esta red.</string>
+    <string name="nearby_check_code">Código de verificación %1$s</string>
+    <string name="nearby_update">Actualizar</string>
+    <string name="nearby_decline">Rechazar</string>
+    <string name="nearby_keep_both">Conservar ambos</string>
+
+    <!-- Un mapa abierto en el navegador de una computadora -->
+    <string name="nearby_connect_to_the_computer_wifi">Conecta este dispositivo a la misma red Wi-Fi que la computadora y luego vuelve aquí.</string>
+    <string name="nearby_open_in_the_computer_browser">En el navegador de la computadora, en la misma red Wi-Fi, abre:</string>
+    <string name="nearby_shared_map_stays_while_this_is_open">Seguirá ahí mientras esto esté abierto. En la página, Descargar para Orbit importa el mapa a Orbit en la computadora.</string>
+    <string name="nearby_lockout_stop_sharing">Un dispositivo escribió demasiados códigos incorrectos, así que debe esperar antes de volver a intentarlo. Si no fue nadie de aquí, cierra esto para dejar de compartir el mapa.</string>
+
+    <!-- Quién está en una presentación que se sigue en navegadores, o en un mapa abierto en una computadora, y quién puede entrar -->
+    <string name="nearby_pin">PIN</string>
+    <string name="nearby_pin_read_aloud">PIN %1$s</string>
+    <string name="nearby_pin_say_it_aloud">Dilo en voz alta. No está en la dirección ni en el código QR.</string>
+    <string name="nearby_pin_type_it_on_the_computer">Escríbelo en la computadora. No está en la dirección ni en el código QR.</string>
+    <string name="nearby_new_pin">PIN nuevo</string>
+    <string name="nearby_who_is_watching">Quién está viendo</string>
+    <string name="nearby_who_opened_it">Quién lo abrió</string>
+    <string name="nearby_no_one_is_watching_yet">Nadie está viendo todavía</string>
+    <string name="nearby_no_one_has_opened_it_yet">Nadie lo ha abierto todavía</string>
+    <string name="nearby_joined_just_now">Se unió hace un momento</string>
+    <plurals name="nearby_joined_minutes_ago">
+        <item quantity="one">Se unió hace %1$d minuto</item>
+        <item quantity="many">Se unió hace %1$d minutos</item>
+        <item quantity="other">Se unió hace %1$d minutos</item>
+    </plurals>
+    <plurals name="nearby_joined_hours_ago">
+        <item quantity="one">Se unió hace %1$d hora</item>
+        <item quantity="many">Se unió hace %1$d horas</item>
+        <item quantity="other">Se unió hace %1$d horas</item>
+    </plurals>
+    <string name="nearby_guest">Participante %1$d</string>
+    <string name="nearby_remove_member">Quitar a %1$s</string>
+    <string name="nearby_remove_member_question">¿Quitar a %1$s?</string>
+    <string name="nearby_remove_from_the_presentation_explanation">Su navegador dejará de seguir la presentación y no podrá volver a unirse a ella.</string>
+    <string name="nearby_remove_from_the_shared_map_explanation">No podrá volver a abrir el mapa desde aquí ni descargarlo.</string>
+    <string name="nearby_who_can_join">Quién puede unirse</string>
+    <string name="nearby_who_can_open_it">Quién puede abrirlo</string>
+    <string name="nearby_ask_for_names">Pedir nombres</string>
+    <string name="nearby_ask_for_names_description">Cada persona escribe un nombre antes de unirse.</string>
+    <string name="nearby_require_a_pin">Pedir un PIN</string>
+    <string name="nearby_require_a_pin_to_join_description">Además del código, para unirse hace falta el PIN que aparece aquí.</string>
+    <string name="nearby_require_a_pin_to_open_description">Además del código, para abrirlo hace falta el PIN que aparece aquí.</string>
+    <string name="nearby_how_many_at_once">Cuántas personas a la vez</string>
+    <string name="nearby_no_limit">Sin límite</string>
+    <string name="nearby_let_new_people_in">Dejar entrar a personas nuevas</string>
+    <string name="nearby_let_new_people_in_description">Desactívalo cuando ya haya entrado todo el mundo. Quienes ya entraron se quedan.</string>
+    <string name="nearby_lockout_make_a_new_pin">Un dispositivo escribió demasiados PIN incorrectos, así que debe esperar antes de volver a intentarlo. Si no fue nadie de la sala, crea un PIN nuevo.</string>
+
+    <!-- La página que pide el código o el PIN, en los navegadores de quienes se unen -->
+    <string name="nearby_code_on_the_presenter_phone">El código que aparece en el teléfono de quien presenta</string>
+    <string name="nearby_code_is_not_on_the_presenter_phone">Ese código no aparece en el teléfono de quien presenta.</string>
+    <string name="nearby_code_on_the_other_device">El código que aparece en el otro dispositivo</string>
+    <string name="nearby_code_is_not_on_the_other_device">Ese código no aparece en el otro dispositivo.</string>
+    <plurals name="nearby_too_many_wrong_codes">
+        <item quantity="one">Demasiados códigos incorrectos. Vuelve a intentarlo en un minuto con el código que aparece en el teléfono.</item>
+        <item quantity="many">Demasiados códigos incorrectos. Vuelve a intentarlo en %1$d minutos con el código que aparece en el teléfono.</item>
+        <item quantity="other">Demasiados códigos incorrectos. Vuelve a intentarlo en %1$d minutos con el código que aparece en el teléfono.</item>
+    </plurals>
+    <string name="nearby_join_the_presentation">Unirse a la presentación</string>
+    <string name="nearby_join">Unirse</string>
+    <string name="nearby_pin_on_the_presenter_phone">El PIN que aparece en el teléfono de quien presenta</string>
+    <string name="nearby_wrong_pin_for_the_presentation">Ese no es el PIN que aparece en el teléfono de quien presenta.</string>
+    <plurals name="nearby_too_many_wrong_pins_for_the_presentation">
+        <item quantity="one">Demasiados PIN incorrectos. Vuelve a intentarlo en un minuto con el PIN que aparece en el teléfono de quien presenta.</item>
+        <item quantity="many">Demasiados PIN incorrectos. Vuelve a intentarlo en %1$d minutos con el PIN que aparece en el teléfono de quien presenta.</item>
+        <item quantity="other">Demasiados PIN incorrectos. Vuelve a intentarlo en %1$d minutos con el PIN que aparece en el teléfono de quien presenta.</item>
+    </plurals>
+    <string name="nearby_presentation_is_full">Ya no hay lugar en esta presentación.</string>
+    <string name="nearby_presenter_is_not_letting_anyone_new_in">Quien presenta no está dejando entrar a nadie más.</string>
+    <string name="nearby_presenter_removed_you">Quien presenta te quitó de la presentación.</string>
+    <string name="nearby_presentation_ended">La presentación terminó.</string>
+    <string name="nearby_open_the_map">Abrir el mapa</string>
+    <string name="nearby_pin_on_the_other_device">El PIN que aparece en el otro dispositivo</string>
+    <string name="nearby_wrong_pin_for_the_shared_map">Ese no es el PIN que aparece en el otro dispositivo.</string>
+    <plurals name="nearby_too_many_wrong_pins_for_the_shared_map">
+        <item quantity="one">Demasiados PIN incorrectos. Vuelve a intentarlo en un minuto con el PIN que aparece en el otro dispositivo.</item>
+        <item quantity="many">Demasiados PIN incorrectos. Vuelve a intentarlo en %1$d minutos con el PIN que aparece en el otro dispositivo.</item>
+        <item quantity="other">Demasiados PIN incorrectos. Vuelve a intentarlo en %1$d minutos con el PIN que aparece en el otro dispositivo.</item>
+    </plurals>
+    <string name="nearby_shared_map_is_full">Este mapa ya no se puede abrir en más dispositivos.</string>
+    <string name="nearby_other_device_is_not_letting_anyone_new_in">El otro dispositivo no está dejando entrar a nadie más.</string>
+    <string name="nearby_other_device_removed_you">El otro dispositivo te quitó el acceso.</string>
+    <string name="nearby_other_device_stopped_sharing">El otro dispositivo dejó de compartir este mapa.</string>
+    <string name="nearby_try_again">Volver a intentarlo</string>
+
+    <!-- Nombres -->
+    <string name="nearby_a_nearby_device">Un dispositivo cercano</string>
+    <string name="nearby_map_without_a_title">Mapa</string>
+</resources>

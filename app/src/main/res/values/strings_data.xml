@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The maps and their files: the templates new maps start from, the titles Orbit gives maps, and why a file, a zip, a picture or a video can't come in. See TRANSLATING.md. -->
+<resources>
+    <string name="data_template_brainstorm_title">Brainstorm</string>
+    <string name="data_template_brainstorm_description">A topic in the middle, and room for every idea</string>
+    <string name="data_template_project_plan_title">Project plan</string>
+    <string name="data_template_project_plan_description">Milestones and tasks, with rings that fill as they\'re done</string>
+    <string name="data_template_study_notes_title">Study notes</string>
+    <string name="data_template_study_notes_description">Key ideas, questions and sources for a topic</string>
+    <string name="data_template_talk_outline_title">Talk outline</string>
+    <string name="data_template_talk_outline_description">An opening, three points and a close, ready to present</string>
+    <string name="data_template_meeting_notes_title">Meeting notes</string>
+    <string name="data_template_meeting_notes_description">Agenda, decisions and who does what</string>
+    <string name="data_template_decision_title">Decision</string>
+    <string name="data_template_decision_description">Options with their pros, cons and risks</string>
+    <string name="data_template_goals_title">Goals</string>
+    <string name="data_template_goals_description">Objectives with key results that fill as you go</string>
+    <string name="data_template_swot_analysis_title">SWOT analysis</string>
+    <string name="data_template_swot_analysis_description">Strengths, weaknesses, opportunities and threats</string>
+    <string name="data_template_book_notes_title">Book notes</string>
+    <string name="data_template_book_notes_description">Characters, themes and the lines worth keeping</string>
+    <string name="data_template_trip_planner_title">Trip planner</string>
+    <string name="data_template_trip_planner_description">Places, food and a packing list</string>
+    <string name="data_template_week_plan_title">Week plan</string>
+    <string name="data_template_week_plan_description">Each day\'s focus and tasks</string>
+
+    <!-- Titles Orbit gives maps. %1$s is the map's own title. -->
+    <string name="data_copy_title">%1$s (copy)</string>
+    <!-- The folder's version of a map changed both here and in the folder, kept as a map of its own. -->
+    <string name="data_changed_elsewhere_title">%1$s (changed elsewhere)</string>
+    <!-- The title of a map brought in when it has none. -->
+    <string name="data_map_without_a_title">Map</string>
+
+    <!-- Bringing maps in from files and text -->
+    <string name="data_file_unreadable">That file couldn\'t be read.</string>
+    <string name="data_file_too_big_for_map">That file is too big to be a map.</string>
+    <string name="data_no_map_in_zip">There\'s no map in that zip.</string>
+    <string name="data_nothing_to_make_a_map_from">There\'s nothing to make a map from.</string>
+    <!-- %1$s is what went wrong, as Orbit's reader says it. -->
+    <string name="data_could_not_read_that">Orbit couldn\'t read that: %1$s</string>
+    <!-- %1$s is what went wrong, as Orbit's reader says it. -->
+    <string name="data_yaml_unreadable">Orbit couldn\'t read all of that YAML, so it didn\'t make a map of it: %1$s</string>
+    <!-- %1$s is what went wrong, as Orbit's reader says it, and %2$d the line of the file it went wrong on. -->
+    <string name="data_yaml_unreadable_at_line">Orbit couldn\'t read all of that YAML, so it didn\'t make a map of it: %1$s (line %2$d)</string>
+    <string name="data_newer_version_keeps_maps">A newer version of Orbit keeps these maps: update Orbit to change them.</string>
+
+    <!-- Zips Orbit won't take in -->
+    <string name="data_zip_too_many_files">That zip holds too many files to be maps.</string>
+    <string name="data_zip_too_big">That zip unpacks to more than maps hold.</string>
+    <string name="data_zip_points_outside">That zip has a file that points outside it.</string>
+    <string name="data_zip_file_too_big">A file in that zip is too big to be part of a map.</string>
+    <string name="data_no_room_for_zip_maps">There isn\'t room on this device for the maps in that zip.</string>
+
+    <!-- Pictures and videos a map can't take. Sizes read as data_megabytes does: 50 MB. -->
+    <!-- %1$s is the video's size, %2$s the most a video can be. -->
+    <string name="data_video_too_big">That video is %1$s, and a map keeps videos of up to %2$s, so it can still go to your other devices. Trim it in your gallery, or add it as a YouTube or Vimeo link.</string>
+    <!-- %1$s is the most a video can be. -->
+    <string name="data_video_past_limit">That video is more than %1$s, and a map keeps videos of up to that, so it can still go to your other devices. Trim it in your gallery, or add it as a YouTube or Vimeo link.</string>
+    <!-- %1$s is what the map's pictures and videos come to, %2$s the most they can. -->
+    <string name="data_video_past_map_room">This map\'s pictures and videos come to %1$s already. With this video they\'d be more than the %2$s a map can carry when it\'s shared or backed up. Choose a shorter one, or add it as a YouTube or Vimeo link.</string>
+    <!-- %1$s is what the map's pictures and videos come to. -->
+    <string name="data_picture_past_map_room">This map\'s pictures and videos come to %1$s, all a map can carry when it\'s shared or backed up. Take one off to make room, or add this one as a web address.</string>
+    <!-- %1$s is the video's type as computers name it, such as video/x-matroska. -->
+    <string name="data_video_kind_refused">Orbit keeps videos as MP4, WebM or QuickTime files, and this one is %1$s.</string>
+    <string name="data_video_kind_unknown">Orbit keeps videos as MP4, WebM or QuickTime files, and this one is of a kind it doesn\'t know.</string>
+    <string name="data_no_room_for_video">There isn\'t room on this phone for that video.</string>
+    <string name="data_more_than_a_map_keeps">That\'s more than a map keeps.</string>
+    <!-- A size: %1$s is a number of megabytes, such as 64.5. -->
+    <string name="data_megabytes">%1$s MB</string>
+
+    <!-- Keeping the maps in a folder -->
+    <!-- The folder's name, when Orbit can't learn it. -->
+    <string name="data_folder">Folder</string>
+    <string name="data_folder_unreachable">Orbit can\'t reach the folder anymore. Choose it again to keep your maps there.</string>
+    <string name="data_folder_unreadable">Orbit couldn\'t read the folder. It tries again in a moment.</string>
+    <plurals name="data_folder_maps_not_in_step">
+        <item quantity="one">One map couldn\'t be brought in step with the folder.</item>
+        <item quantity="other">%1$d maps couldn\'t be brought in step with the folder.</item>
+    </plurals>
+    <plurals name="data_folder_files_unreadable">
+        <item quantity="one">One file in the folder couldn\'t be read.</item>
+        <item quantity="other">%1$d files in the folder couldn\'t be read.</item>
+    </plurals>
+    <!-- Follows the sentences above. -->
+    <string name="data_folder_tries_again">Orbit tries again in a moment.</string>
+    <!-- A picture or video too big to join its map, in the list settings_folder_too_big ends with: %1$s is its file's name, %2$s the map's title. -->
+    <string name="data_folder_too_big_file">%1$s, in “%2$s”</string>
+</resources>

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Words every part of the app uses. See TRANSLATING.md. -->
+<resources>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_close">Close</string>
+    <string name="common_done">Done</string>
+    <string name="common_back">Back</string>
+    <string name="common_settings">Settings</string>
+    <string name="common_undo">Undo</string>
+    <string name="common_redo">Redo</string>
+    <string name="common_open">Open</string>
+    <string name="common_delete">Delete</string>
+    <string name="common_rename">Rename</string>
+    <string name="common_edit">Edit</string>
+    <string name="common_restore">Restore</string>
+    <string name="common_remove">Remove</string>
+    <string name="common_duplicate">Duplicate</string>
+    <string name="common_present">Present</string>
+    <string name="common_stop_presenting">Stop presenting</string>
+    <string name="common_new_map">New map</string>
+    <string name="common_untitled_map">Untitled map</string>
+    <!-- An idea without a name. -->
+    <string name="common_untitled">Untitled</string>
+    <string name="common_blank_map">Blank map</string>
+    <string name="common_your_maps">Your maps</string>
+    <string name="common_search_your_maps">Search your maps</string>
+    <string name="common_search_the_map">Search the map</string>
+    <string name="common_outline">Outline</string>
+    <string name="common_style_and_layout">Style and layout</string>
+    <string name="common_keyboard_shortcuts">Keyboard shortcuts</string>
+    <string name="common_version_history">Version history</string>
+    <string name="common_web_page">Web page</string>
+    <string name="common_open_a_file">Open a file</string>
+    <string name="common_play_the_video">Play the video</string>
+    <string name="common_show_the_picture">Show the picture</string>
+    <string name="common_color">Color</string>
+    <string name="common_status">Status</string>
+    <string name="common_could_not_keep_that_map">Orbit couldn\'t keep that map.</string>
+    <string name="common_not_allowed_to_read_that_file">Orbit isn\'t allowed to read that file.</string>
+
+    <!-- Maps brought in from a zip of them. -->
+    <plurals name="common_added_maps">
+        <item quantity="one">Added %1$d map.</item>
+        <item quantity="other">Added %1$d maps.</item>
+    </plurals>
+    <!-- %1$d maps were added, and one more was here already. -->
+    <plurals name="common_added_maps_with_one_already_here">
+        <item quantity="one">Added %1$d map. 1 was here already.</item>
+        <item quantity="other">Added %1$d maps. 1 was here already.</item>
+    </plurals>
+    <!-- %1$d maps were added, and %2$d more (always 2 or more) were here already. -->
+    <plurals name="common_added_maps_with_several_already_here">
+        <item quantity="one">Added %1$d map. %2$d were here already.</item>
+        <item quantity="other">Added %1$d maps. %2$d were here already.</item>
+    </plurals>
+</resources>

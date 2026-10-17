@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit</title>
+<style>
+/* The audience's page: what a second screen, a TV or a shared web page shows while a map is presented. */
+
+:root {
+  --audience-surface: #f7f7fb;
+  --audience-card: rgba(255, 255, 255, 0.9);
+  --audience-text: #141826;
+  --audience-muted: rgba(20, 24, 38, 0.74);
+  --audience-accent: #4f5fa8;
+  --audience-on-accent: #ffffff;
+  --audience-track: rgba(20, 24, 38, 0.12);
+  --audience-shadow: 0 12px 40px rgba(16, 24, 40, 0.14);
+  --audience-margin: clamp(16px, 3vmin, 48px);
+  --audience-ring: #c6c8d6;
+  --audience-sun: #dde1ff;
+}
+
+.audience--dark {
+  --audience-surface: #0e1220;
+  --audience-card: rgba(22, 27, 44, 0.86);
+  --audience-text: #eef1fb;
+  --audience-muted: rgba(238, 241, 251, 0.76);
+  --audience-accent: #aeb9ff;
+  --audience-on-accent: #0e1220;
+  --audience-track: rgba(238, 241, 251, 0.16);
+  --audience-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  --audience-ring: #3b4258;
+  --audience-sun: #2c3561;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* A screen for an audience: nothing to select, no pointer. */
+body {
+  background: var(--audience-surface);
+  color: var(--audience-text);
+  font-family: Roboto, "Google Sans", system-ui, sans-serif;
+  cursor: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.audience__map {
+  position: fixed;
+  inset: 0;
+}
+
+.audience__progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: clamp(3px, 0.5vmin, 6px);
+  background: var(--audience-track);
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.audience--showing .audience__progress {
+  opacity: 1;
+}
+
+.audience__progress-bar {
+  height: 100%;
+  background: var(--audience-idea, var(--audience-accent));
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 600ms cubic-bezier(0.2, 0, 0, 1), background-color 600ms ease;
+}
+
+.audience__caption {
+  position: fixed;
+  left: 50%;
+  bottom: var(--audience-margin);
+  box-sizing: border-box;
+  width: min(92vw, 1100px);
+  padding: clamp(16px, 2.6vmin, 44px);
+  border-radius: clamp(16px, 2.4vmin, 36px);
+  background: var(--audience-card);
+  box-shadow: var(--audience-shadow);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  transform: translateX(-50%);
+  transition: opacity 320ms ease;
+}
+
+.audience--beside .audience__caption {
+  top: 50%;
+  right: var(--audience-margin);
+  bottom: auto;
+  left: auto;
+  width: min(34vw, 720px);
+  transform: translateY(-50%);
+}
+
+.audience:not(.audience--captions) .audience__caption,
+.audience:not(.audience--showing) .audience__caption {
+  display: none;
+}
+
+.audience__caption--swapping {
+  opacity: 0;
+  transition-duration: 160ms;
+}
+
+/* An idea with nothing to say keeps the caption's room, so the map stays put. */
+.audience__caption--empty {
+  visibility: hidden;
+}
+
+.audience__title {
+  margin: 0 0 0.4em;
+  font-size: clamp(24px, 5vmin, 72px);
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+.audience__note {
+  max-height: 46vh;
+  overflow: hidden;
+  color: var(--audience-muted);
+  font-size: clamp(17px, 3.4vmin, 48px);
+  line-height: 1.45;
+}
+
+.audience__note:empty {
+  display: none;
+}
+
+.audience__note p,
+.audience__note ul,
+.audience__note ol,
+.audience__note blockquote,
+.audience__note pre {
+  margin: 0 0 0.6em;
+}
+
+.audience__note ul,
+.audience__note ol {
+  padding-left: 1.2em;
+}
+
+.audience__note a {
+  color: var(--audience-accent);
+  text-decoration: none;
+}
+
+.audience__note img {
+  max-width: 100%;
+  max-height: 30vh;
+  border-radius: 12px;
+}
+
+.audience__note code {
+  padding: 0 0.25em;
+  border-radius: 4px;
+  background: var(--audience-track);
+  font-family: "Roboto Mono", monospace;
+  font-size: 0.9em;
+}
+
+.audience__note pre {
+  white-space: pre-wrap;
+}
+
+.audience__idle {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: clamp(16px, 3vmin, 40px);
+  transition: opacity 400ms ease;
+}
+
+.audience--showing .audience__idle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.audience__glyph {
+  width: clamp(120px, 24vmin, 300px);
+  height: auto;
+}
+
+.audience__glyph-ring {
+  fill: none;
+  stroke: var(--audience-ring);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+}
+
+.audience__glyph-sun {
+  fill: var(--audience-sun);
+}
+
+.audience__waiting {
+  color: var(--audience-muted);
+  font-size: clamp(18px, 2.8vmin, 40px);
+  letter-spacing: 0.01em;
+}
+
+/* A video this screen can't reach, as a TV can't reach the phone's files: its poster, title and caption instead. */
+.audience__still {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: clamp(12px, 2.4vmin, 32px);
+  box-sizing: border-box;
+  margin: 0;
+  padding: var(--audience-margin);
+  background: var(--audience-surface);
+}
+
+.audience__still[hidden],
+.audience__still-picture[hidden],
+.audience__still-text[hidden] {
+  display: none;
+}
+
+.audience__still-picture {
+  max-width: min(92vw, 1600px);
+  max-height: 68vh;
+  border-radius: clamp(12px, 2vmin, 28px);
+  box-shadow: var(--audience-shadow);
+  object-fit: contain;
+}
+
+.audience__still-caption {
+  max-width: min(92vw, 1100px);
+  text-align: center;
+}
+
+.audience__still-title {
+  margin: 0;
+  font-size: clamp(22px, 4.4vmin, 64px);
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+.audience__still-text {
+  margin: 0.4em 0 0;
+  color: var(--audience-muted);
+  font-size: clamp(16px, 3vmin, 40px);
+  line-height: 1.4;
+}
+
+/*
+ * "Tap for sound", over a video a browser started muted or wouldn't start.
+ * A modal dialog of its own, over the media viewer's: the whole of it takes
+ * the tap, around the button too.
+ */
+.audience__sound {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.audience__sound[open] {
+  display: grid;
+  place-items: center;
+}
+
+.audience__sound::backdrop {
+  background: transparent;
+}
+
+.audience__sound:focus {
+  outline: none;
+}
+
+.audience__sound-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.85em 1.5em;
+  border: 0;
+  border-radius: 999px;
+  background: var(--audience-accent);
+  color: var(--audience-on-accent);
+  box-shadow: var(--audience-shadow);
+  font: 600 clamp(18px, 3.2vmin, 30px) / 1.2 Roboto, "Google Sans", system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.audience__sound-button:focus-visible {
+  outline: 3px solid var(--audience-text);
+  outline-offset: 3px;
+}
+
+.audience__sound-icon {
+  width: 1.3em;
+  height: 1.3em;
+  fill: currentColor;
+}
+</style>
+<style>
+  /* Joining: the code, for someone who typed only the address; then a name, or the PIN, when the room asks. */
+  .join {
+    cursor: auto;
+  }
+
+  /* Taller than the screen, as on a phone on its side or with the keyboard up, it starts at the top and scrolls. */
+  .join .audience__idle {
+    box-sizing: border-box;
+    grid-template-columns: minmax(0, 1fr);
+    align-content: safe center;
+    padding: 24px 16px;
+    overflow-y: auto;
+  }
+
+  .join .audience__glyph {
+    width: clamp(88px, 20vmin, 220px);
+    height: clamp(88px, 20vmin, 220px);
+  }
+
+  @media (max-height: 520px) {
+    .join .audience__glyph {
+      display: none;
+    }
+  }
+
+  .join__form {
+    display: grid;
+    justify-items: center;
+    gap: 16px;
+    width: min(100%, 360px);
+  }
+
+  .join__title {
+    margin: 0;
+    font-weight: 500;
+    text-align: center;
+  }
+
+  .join__label {
+    justify-self: stretch;
+    margin-bottom: -8px;
+    color: var(--audience-muted);
+    font: 15px/1.4 Roboto, "Google Sans", system-ui, sans-serif;
+  }
+
+  .join__code,
+  .join__field {
+    box-sizing: border-box;
+    border: 2px solid var(--audience-track);
+    border-radius: 16px;
+    background: var(--audience-card);
+    color: var(--audience-text);
+  }
+
+  .join__code {
+    width: 9ch;
+    padding: 12px 16px;
+    font: 600 clamp(28px, 6vmin, 48px)/1 "Roboto Mono", monospace;
+    letter-spacing: 0.2em;
+    text-align: center;
+  }
+
+  .join__code--pin {
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .join__field {
+    justify-self: stretch;
+    width: 100%;
+    min-height: 52px;
+    padding: 12px 16px;
+    font: 500 20px/1.2 Roboto, "Google Sans", system-ui, sans-serif;
+  }
+
+  .join__code:focus,
+  .join__field:focus {
+    border-color: var(--audience-accent);
+    outline: none;
+  }
+
+  .join__button {
+    min-width: 120px;
+    min-height: 48px;
+    padding: 0 28px;
+    border: 0;
+    border-radius: 24px;
+    background: var(--audience-accent);
+    color: #ffffff;
+    font: 500 17px/1 Roboto, "Google Sans", system-ui, sans-serif;
+    cursor: pointer;
+  }
+
+  .join__button:focus-visible {
+    outline: 3px solid var(--audience-text);
+    outline-offset: 2px;
+  }
+
+  .join__problem {
+    min-height: 1.4em;
+    color: #c62828;
+    font: 15px/1.4 Roboto, "Google Sans", system-ui, sans-serif;
+    text-align: center;
+  }
+</style>
+</head>
+<body class="audience join">
+<div class="audience__idle">
+  <svg class="audience__glyph" viewBox="0 0 200 200" aria-hidden="true">
+    <circle class="audience__glyph-ring" cx="100" cy="100" r="70"/>
+    <circle class="audience__glyph-sun" cx="100" cy="100" r="33.6"/>
+    <circle cx="100" cy="30" r="15.4" fill="#FEBAB6"/>
+    <circle cx="160.6" cy="65" r="15.4" fill="#99E0BA"/>
+    <circle cx="160.6" cy="135" r="15.4" fill="#9ED5FD"/>
+    <circle cx="100" cy="170" r="15.4" fill="#D6C2FE"/>
+    <circle cx="39.4" cy="135" r="15.4" fill="#F9C191"/>
+    <circle cx="39.4" cy="65" r="15.4" fill="#FCB6D6"/>
+  </svg>
+  <!-- code -->
+  <form class="join__form join__form--code">
+    <label class="audience__waiting" for="code"><!-- label --></label>
+    <input class="join__code" id="code" name="code" inputmode="numeric" autocomplete="off" maxlength="6" pattern="[0-9]{6}" required autofocus>
+    <div class="join__problem" role="alert"><!-- problem --></div>
+  </form>
+  <!-- /code -->
+  <!-- room -->
+  <form class="join__form" method="post" action="join">
+    <h1 class="audience__waiting join__title"><!-- title --></h1>
+    <!-- name field -->
+    <label class="join__label" for="name"><!-- name label --></label>
+    <input class="join__field" id="name" name="name" maxlength="40" autocomplete="nickname" autocapitalize="words" enterkeyhint="go" value="<!-- typed name -->"<!-- name focus -->>
+    <!-- /name field -->
+    <!-- pin field -->
+    <label class="join__label" for="pin"><!-- pin label --></label>
+    <input class="join__code join__code--pin" id="pin" name="pin" inputmode="numeric" autocomplete="off" maxlength="4" pattern="[0-9]{4}" enterkeyhint="go" required<!-- pin focus -->>
+    <!-- /pin field -->
+    <!-- button -->
+    <button class="join__button" type="submit"><!-- button label --></button>
+    <!-- /button -->
+    <div class="join__problem" role="alert"><!-- problem --></div>
+  </form>
+  <!-- /room -->
+</div>
+<script>
+  const code = document.querySelector('.join__form--code');
+  if (code) {
+    code.addEventListener('submit', (event) => {
+      event.preventDefault();
+      location.href = '/' + document.getElementById('code').value.trim() + '/';
+    });
+    document.getElementById('code').addEventListener('input', (event) => {
+      if (/^[0-9]{6}$/.test(event.target.value)) {
+        location.href = '/' + event.target.value + '/';
+      }
+    });
+  }
+</script>
+</body>
+</html>

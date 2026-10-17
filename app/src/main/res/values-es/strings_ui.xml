@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Partes de las pantallas de la app que se usan en muchos lugares: teclas, colores, compartir, avisos. Consulta TRANSLATING.md. -->
+<resources>
+    <string name="ui_map_deleted">Este mapa se eliminó</string>
+    <string name="ui_share_named">Compartir “%1$s”</string>
+    <string name="ui_no_icon">Sin ícono</string>
+
+    <string name="ui_web_view_update_to_see_maps">Actualiza %1$s para ver tus mapas</string>
+    <string name="ui_web_view_too_old">Orbit dibuja los mapas con %1$s, y el de este teléfono es muy antiguo: Chromium %2$d, y Orbit necesita la versión %3$d o una posterior. Actualízalo desde tu tienda de apps o con una actualización del sistema, y tus mapas aparecerán. Todos siguen aquí.</string>
+    <string name="ui_web_view_update">Actualizar %1$s</string>
+
+    <string name="ui_hint_with_keys">%1$s (%2$s)</string>
+    <string name="ui_keys_or">o</string>
+    <string name="ui_keys_either">%1$s o %2$s</string>
+    <!-- Los nombres impresos en las teclas de los teclados en español. -->
+    <string name="ui_key_control">Ctrl</string>
+    <string name="ui_key_alt">Alt</string>
+    <string name="ui_key_shift">Mayús</string>
+    <string name="ui_key_enter">Enter</string>
+    <string name="ui_key_space">Espacio</string>
+    <string name="ui_key_escape">Esc</string>
+    <string name="ui_key_backspace">Retroceso</string>
+    <string name="ui_key_delete">Supr</string>
+    <string name="ui_key_tab">Tab</string>
+    <string name="ui_key_insert">Insert</string>
+    <string name="ui_key_menu">Menú</string>
+    <string name="ui_key_page_up">Re Pág</string>
+    <string name="ui_key_page_down">Av Pág</string>
+    <string name="ui_key_home">Inicio</string>
+    <string name="ui_key_end">Fin</string>
+    <string name="ui_key_play">Reproducir</string>
+
+    <string name="ui_color_automatic">Automático: el color de la rama</string>
+    <string name="ui_color_coral">Coral</string>
+    <string name="ui_color_mint">Menta</string>
+    <string name="ui_color_sky">Cielo</string>
+    <string name="ui_color_lilac">Lila</string>
+    <string name="ui_color_apricot">Durazno</string>
+    <string name="ui_color_pink">Rosa</string>
+    <string name="ui_color_teal">Turquesa</string>
+    <string name="ui_color_red">Rojo</string>
+    <string name="ui_color_orange">Naranja</string>
+    <string name="ui_color_amber">Ámbar</string>
+    <string name="ui_color_green">Verde</string>
+    <string name="ui_color_blue">Azul</string>
+    <string name="ui_color_violet">Violeta</string>
+    <string name="ui_color_gray">Gris</string>
+    <string name="ui_color_numbered">Color %1$d</string>
+</resources>

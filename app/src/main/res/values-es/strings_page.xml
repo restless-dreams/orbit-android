@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lo que dice la página que dibuja los mapas cuando no puede. Consulta TRANSLATING.md. -->
+<resources>
+    <string name="page_webview_too_old">El WebView de este teléfono es demasiado antiguo para dibujar mapas. Actualízalo desde tu tienda de apps.</string>
+    <string name="page_stopped">La página se detuvo</string>
+    <string name="page_closed">La página se cerró</string>
+    <string name="page_sent_nothing_back">La página no devolvió nada</string>
+</resources>

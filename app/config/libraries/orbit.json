@@ -1,0 +1,16 @@
+{
+  "uniqueId": "@restless-dreams/orbit",
+  "artifactVersion": "0.1.0",
+  "name": "Orbit",
+  "description": "The mind map library that draws every map in the app.",
+  "website": "https://orbit.hyuchia.com",
+  "developers": [
+    {
+      "name": "Diana Islas Ocampo",
+      "organisationUrl": "https://orbit.hyuchia.com"
+    }
+  ],
+  "licenses": [
+    "MIT-Orbit"
+  ]
+}

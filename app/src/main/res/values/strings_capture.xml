@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The sheet that catches ideas into a map without opening it. See TRANSLATING.md. -->
+<resources>
+    <string name="capture_title">Add to a map</string>
+    <string name="capture_no_maps">There are no maps yet. Open Orbit to start one.</string>
+    <string name="capture_map">Map</string>
+    <string name="capture_your_idea">Your idea</string>
+    <!-- The field's label once it holds more than one idea. -->
+    <plurals name="capture_ideas_one_on_each_line">
+        <item quantity="one">%d idea, one on each line</item>
+        <item quantity="other">%d ideas, one on each line</item>
+    </plurals>
+    <string name="capture_one_idea_on_each_line">One idea on each line</string>
+    <string name="capture_add">Add</string>
+    <!-- The button once the field holds more than one idea. -->
+    <plurals name="capture_add_ideas">
+        <item quantity="one">Add %d idea</item>
+        <item quantity="other">Add %d ideas</item>
+    </plurals>
+    <!-- %1$s is the map's title. -->
+    <string name="capture_added_idea">Added to %1$s</string>
+    <!-- %2$s is the map's title. -->
+    <plurals name="capture_added_ideas">
+        <item quantity="one">Added %1$d idea to %2$s</item>
+        <item quantity="other">Added %1$d ideas to %2$s</item>
+    </plurals>
+    <!-- %1$s is the map's title. -->
+    <string name="capture_problem">Orbit couldn\'t add to %1$s. Your ideas are still here.</string>
+    <!-- %1$s is the map's title, %2$s what went wrong, as the system says it. -->
+    <string name="capture_problem_with_reason">Orbit couldn\'t add to %1$s. %2$s. Your ideas are still here.</string>
+    <!-- The map can only be read here: a newer Orbit keeps the maps, or its file couldn't be read. -->
+    <string name="capture_problem_refused">Orbit couldn\'t add to %1$s, because the map can\'t be changed here. Your ideas are still here.</string>
+    <string name="capture_problem_missing">Orbit couldn\'t add to %1$s. The map isn\'t here anymore. Your ideas are still here.</string>
+    <string name="capture_problem_kept_changing">Orbit couldn\'t add to %1$s. The map kept changing. Your ideas are still here.</string>
+</resources>

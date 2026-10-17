@@ -1,0 +1,14 @@
+{
+  "name": "orbit-android-map",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.3",
+  "scripts": {
+    "build": "bun run build.ts",
+    "lint": "cd .. && eslint --config web/eslint.config.js web art"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.4",
+    "typescript-eslint": "^8.61.0"
+  }
+}

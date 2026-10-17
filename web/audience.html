@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Orbit</title>
+<style>
+<!-- styles -->
+</style>
+</head>
+<body class="audience audience--captions">
+<div id="map" class="audience__map"></div>
+<div class="audience__progress"><div class="audience__progress-bar"></div></div>
+<section class="audience__caption audience__caption--empty" aria-live="polite">
+  <h1 class="audience__title"></h1>
+  <div class="audience__note"></div>
+</section>
+<figure class="audience__still" hidden>
+  <img class="audience__still-picture" alt="">
+  <figcaption class="audience__still-caption">
+    <h2 class="audience__still-title"></h2>
+    <p class="audience__still-text"></p>
+  </figcaption>
+</figure>
+<div class="audience__idle">
+  <svg class="audience__glyph" viewBox="0 0 200 200" aria-hidden="true">
+    <circle class="audience__glyph-ring" cx="100" cy="100" r="70"/>
+    <circle class="audience__glyph-sun" cx="100" cy="100" r="33.6"/>
+    <circle cx="100" cy="30" r="15.4" fill="#FEBAB6"/>
+    <circle cx="160.6" cy="65" r="15.4" fill="#99E0BA"/>
+    <circle cx="160.6" cy="135" r="15.4" fill="#9ED5FD"/>
+    <circle cx="100" cy="170" r="15.4" fill="#D6C2FE"/>
+    <circle cx="39.4" cy="135" r="15.4" fill="#F9C191"/>
+    <circle cx="39.4" cy="65" r="15.4" fill="#FCB6D6"/>
+  </svg>
+  <div class="audience__waiting"><!-- waiting --></div>
+</div>
+<!-- scripts -->
+</body>
+</html>

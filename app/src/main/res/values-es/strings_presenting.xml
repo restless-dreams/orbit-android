@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Presentar un mapa: en esta pantalla, en una segunda pantalla, en una TV o en navegadores; su recorrido y sus ensayos; y dictar ideas al mapa. Consulta TRANSLATING.md. -->
+<resources>
+    <string name="present_previous_idea">Idea anterior</string>
+    <string name="present_next_idea">Idea siguiente</string>
+    <string name="present_pause">Pausar</string>
+    <string name="present_play_on_its_own">Avanzar automáticamente</string>
+    <string name="present_show_the_captions">Mostrar los subtítulos</string>
+    <string name="present_hide_the_captions">Ocultar los subtítulos</string>
+    <string name="present_show_in_a_browser">Mostrar en un navegador</string>
+    <string name="present_show_on_a_tv">Mostrar en una TV</string>
+    <string name="present_rehearsing">Ensayando</string>
+    <string name="present_position">%1$d / %2$d</string>
+    <string name="present_on_pace">A tiempo</string>
+    <string name="present_behind">%1$s de retraso</string>
+    <string name="present_ahead">%1$s de adelanto</string>
+    <string name="present_time_left">Quedan %1$s</string>
+    <string name="present_time_over">%1$s de más</string>
+
+    <string name="present_on_screen">En %1$s</string>
+    <string name="present_on_the_tv">En la TV</string>
+    <plurals name="present_browsers_watching">
+        <item quantity="one">%d navegador</item>
+        <item quantity="many">%d navegadores</item>
+        <item quantity="other">%d navegadores</item>
+    </plurals>
+    <string name="present_video_of">El video de %1$s</string>
+    <string name="present_picture_of">La imagen de %1$s</string>
+    <string name="present_video_not_on_tv">Este video se reproduce en una segunda pantalla y en navegadores, no en la TV.</string>
+    <string name="present_video_playing">Reproduciendo · %1$s</string>
+    <string name="present_video_ended">Terminado · %1$s</string>
+    <string name="present_video_paused">En pausa · %1$s</string>
+    <string name="present_back_to_the_map">Volver al mapa</string>
+    <string name="present_start_over">Empezar de nuevo</string>
+    <string name="present_pause_the_video">Pausar el video</string>
+    <string name="present_no_notes">Esta idea no tiene notas.</string>
+    <string name="present_up_next">A continuación</string>
+    <string name="present_the_end">Fin</string>
+    <string name="present_this_idea">Esta idea</string>
+
+    <string name="present_connect_to_the_wifi">Conecta este teléfono al Wi-Fi de la sala, o activa su hotspot y conecta la laptop a él; luego vuelve aquí.</string>
+    <string name="present_open_in_a_browser">En una laptop, el navegador de una TV o los teléfonos de la sala, con el mismo Wi-Fi, abre:</string>
+    <string name="present_lockout">Un dispositivo escribió demasiados códigos incorrectos, así que debe esperar antes de volver a intentarlo. Si no fue nadie de la sala, deja de mostrar y vuelve a mostrar para tener un código nuevo.</string>
+    <string name="present_stop_showing">Dejar de mostrar</string>
+
+    <string name="present_path">Recorrido de la presentación</string>
+    <string name="present_path_no_ideas">Aún no hay ideas</string>
+    <plurals name="present_path_ideas">
+        <item quantity="one">%d idea</item>
+        <item quantity="many">%d ideas, en este orden</item>
+        <item quantity="other">%d ideas, en este orden</item>
+    </plurals>
+    <string name="present_path_find_an_idea">Buscar una idea para el recorrido</string>
+    <string name="present_path_start_over">Empezar el recorrido de nuevo</string>
+    <string name="present_path_how_to">Ahora toca las ideas en el orden en que las vas a presentar</string>
+    <string name="present_path_add_again">Agregar de nuevo</string>
+    <string name="present_path_add_idea">Agregar %1$s</string>
+    <string name="present_path_fly_to_idea">Volar a %1$s</string>
+    <string name="present_path_move_idea">Mover %1$s en el recorrido</string>
+    <string name="present_path_take_idea_off">Quitar %1$s del recorrido</string>
+    <string name="present_path_earlier">Antes</string>
+    <string name="present_path_later">Después</string>
+    <string name="present_path_take_off">Quitar del recorrido</string>
+
+    <string name="present_rehearsed_in">Duración del ensayo</string>
+    <string name="present_rehearsal_sets_the_pace">Al presentar, verás si mantienes este ritmo.</string>
+    <string name="present_idea_no_longer_on_the_map">Una idea que ya no está en el mapa</string>
+    <string name="present_longest">La más larga</string>
+    <string name="present_rehearse_again">Ensayar de nuevo</string>
+
+    <string name="present_talk_ideas_onto_the_map">Dictar ideas al mapa</string>
+    <string name="present_talk_needs_the_microphone">Orbit necesita el micrófono para escuchar tus ideas.</string>
+    <string name="present_talk_no_speech_service">Este teléfono no tiene reconocimiento de voz: escribe la idea o usa el micrófono de tu teclado.</string>
+    <string name="present_talk_adding_the_last_idea">Agregando la última idea…</string>
+    <string name="present_talk_say_an_idea">Di una idea y haz una pausa</string>
+    <string name="present_talk_listening">Escuchando…</string>
+    <string name="present_talk_let_go_or_slide_up">Suelta para terminar o desliza hacia arriba para seguir escuchando</string>
+    <plurals name="present_talk_ideas_listening_until_done">
+        <item quantity="one">%d idea · escuchando hasta que toques Listo</item>
+        <item quantity="many">%d ideas · escuchando hasta que toques Listo</item>
+        <item quantity="other">%d ideas · escuchando hasta que toques Listo</item>
+    </plurals>
+    <plurals name="present_talk_ideas_let_go_to_finish">
+        <item quantity="one">%d idea · suelta para terminar</item>
+        <item quantity="many">%d ideas · suelta para terminar</item>
+        <item quantity="other">%d ideas · suelta para terminar</item>
+    </plurals>
+</resources>

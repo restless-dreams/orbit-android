@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">Orbit</string>
+    <string name="shortcut_new_map">New map</string>
+    <string name="shortcut_new_map_long">Start a new map</string>
+    <string name="share_new_map">New Orbit map</string>
+    <string name="share_add_to_map">Add to an Orbit map</string>
+    <string name="capture_label">Add an idea</string>
+    <string name="tile_capture">Add an idea</string>
+    <string name="widget_label">Orbit map</string>
+    <string name="widget_description">A map on your home screen: its picture, its progress, and + to add an idea</string>
+</resources>

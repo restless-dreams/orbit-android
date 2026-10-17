@@ -1,0 +1,5 @@
+root = true
+
+[*.{kt,kts}]
+# ktlint runs only the app's own style rules (code-style/), not its standard ones.
+ktlint_standard = disabled

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The styles maps can take and the color sets for their branches. See TRANSLATING.md, "Styles and colors". -->
+<resources>
+    <string name="theme_style_app_colors_label">App colors</string>
+    <string name="theme_style_app_colors_description">Your wallpaper\'s colors, light or dark with the phone</string>
+    <string name="theme_style_paper_label">Paper</string>
+    <string name="theme_style_paper_description">Soft planets on a page</string>
+    <string name="theme_style_night_label">Night</string>
+    <string name="theme_style_night_description">A deep blue sky</string>
+    <string name="theme_style_flat_label">Flat</string>
+    <string name="theme_style_flat_description">Solid colors, no shadows</string>
+    <string name="theme_style_flat_night_label">Flat night</string>
+    <string name="theme_style_flat_night_description">Solid colors after dark</string>
+    <string name="theme_style_material_label">Material</string>
+    <string name="theme_style_material_description">Material\'s tonal colors</string>
+    <string name="theme_style_material_night_label">Material night</string>
+    <string name="theme_style_material_night_description">Material\'s tonal colors, dark</string>
+    <string name="theme_style_liquid_glass_label">Liquid glass</string>
+    <string name="theme_style_liquid_glass_description">Clear glass on a bright wallpaper</string>
+    <string name="theme_style_liquid_glass_night_label">Liquid glass night</string>
+    <string name="theme_style_liquid_glass_night_description">Glass that glows on a dark wallpaper</string>
+    <string name="theme_style_glass_label">Glass</string>
+    <string name="theme_style_glass_description">Frosted planets on a light glow</string>
+    <string name="theme_style_glass_night_label">Glass night</string>
+    <string name="theme_style_glass_night_description">Frosted planets at night</string>
+    <string name="theme_style_cosmos_label">Cosmos</string>
+    <string name="theme_style_cosmos_description">Bold worlds among the stars</string>
+    <string name="theme_style_blueprint_label">Blueprint</string>
+    <string name="theme_style_blueprint_description">White lines on drafting blue</string>
+    <string name="theme_style_ink_label">Ink</string>
+    <string name="theme_style_ink_description">Black and white, for print</string>
+    <string name="theme_style_high_contrast_label">High contrast</string>
+    <string name="theme_style_high_contrast_description">Strong colors and edges, easiest to read</string>
+
+    <!-- The colors a map's style comes with, instead of a set of its own. -->
+    <string name="theme_palette_style_own">The style\'s own</string>
+    <string name="theme_palette_sorbet">Sorbet</string>
+    <string name="theme_palette_ocean">Ocean</string>
+    <string name="theme_palette_forest">Forest</string>
+    <string name="theme_palette_sunset">Sunset</string>
+    <string name="theme_palette_vivid">Vivid</string>
+    <string name="theme_palette_mono">Mono</string>
+</resources>

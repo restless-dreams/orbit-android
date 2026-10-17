@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What the page that draws maps says when it can't. See TRANSLATING.md. -->
+<resources>
+    <string name="page_webview_too_old">This phone\'s WebView is too old to draw maps. Update it from your app store.</string>
+    <!-- Why a job the page was doing didn't finish: the app can say it after "Orbit couldn't read that:". -->
+    <string name="page_stopped">The page stopped</string>
+    <string name="page_closed">The page closed</string>
+    <string name="page_sent_nothing_back">The page sent nothing back</string>
+</resources>

@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- La lista de mapas, sus tarjetas, empezar un mapa y la tarjeta sobre un cierre inesperado. Consulta TRANSLATING.md. -->
+<resources>
+    <plurals name="home_map_count">
+        <item quantity="one">%1$d mapa</item>
+        <item quantity="many">%1$d mapas</item>
+        <item quantity="other">%1$d mapas</item>
+    </plurals>
+    <string name="home_deleted_map">Se eliminó “%1$s”</string>
+    <string name="home_add_widget_from_list">Agrega el widget de Orbit desde la lista de widgets de tu pantalla de inicio</string>
+    <string name="home_pinned_maps">Fijados</string>
+    <string name="home_everything_else">Todo lo demás</string>
+    <string name="home_clear_the_search">Borrar la búsqueda</string>
+    <string name="home_no_maps_match">Ningún mapa coincide con “%1$s”</string>
+    <string name="home_search_looks_in">Se busca en los títulos, las ideas y las notas.</string>
+    <string name="home_sort_last_edited">Última edición</string>
+    <string name="home_sort_last_opened">Última apertura</string>
+    <string name="home_sort_newest_first">Más nuevos primero</string>
+    <string name="home_sort_by_title">Por título</string>
+    <string name="home_sort_current">Actual</string>
+    <string name="home_empty_title">Tus ideas, en órbita</string>
+    <string name="home_empty_body">Empieza con un mapa en blanco o una plantilla. En un mapa, toca + para agregar ideas y mantén presionada cualquier idea para cambiarla.</string>
+    <string name="home_templates">Plantillas</string>
+    <string name="home_pick_a_map">Elige un mapa para recorrerlo aquí</string>
+
+    <string name="home_from_a_template">Desde una plantilla</string>
+    <string name="home_menu_open">Abierto</string>
+    <string name="home_menu_closed">Cerrado</string>
+    <string name="home_close_the_menu">Cerrar el menú</string>
+
+    <string name="home_what_is_it_about">¿De qué se trata?</string>
+    <string name="home_create">Crear</string>
+    <string name="home_rename_map">Cambiar nombre del mapa</string>
+
+    <string name="home_shortcut_new_map_from_template">Mapa nuevo desde una plantilla</string>
+    <string name="home_shortcut_group_map_card">En la tarjeta de un mapa</string>
+    <string name="home_shortcut_open_it">Abrirlo</string>
+    <string name="home_shortcut_its_menu">Su menú</string>
+    <string name="home_shortcut_delete_it">Eliminarlo</string>
+
+    <string name="home_more_options">Más opciones</string>
+    <string name="home_more_options_for_map">Más opciones para %1$s</string>
+    <string name="home_pin">Fijar</string>
+    <string name="home_pin_to_the_top">Fijar arriba</string>
+    <string name="home_unpin">Dejar de fijar</string>
+    <string name="home_pinned">Fijado</string>
+    <string name="home_add_to_home_screen">Agregar a la pantalla de inicio</string>
+    <string name="home_send_to_a_device">Enviar a un dispositivo</string>
+    <string name="home_share">Compartir</string>
+    <string name="home_unreadable_map">Orbit no puede leer su archivo, así que lo deja como está</string>
+    <string name="home_unreadable_map_file">Orbit no puede leer el archivo de este mapa</string>
+    <plurals name="home_map_summary">
+        <item quantity="one">%1$d idea · %2$s</item>
+        <item quantity="many">%1$d ideas · %2$s</item>
+        <item quantity="other">%1$d ideas · %2$s</item>
+    </plurals>
+    <plurals name="home_progress_all_done">
+        <item quantity="one">%1$d de %1$d hecha</item>
+        <item quantity="many">%1$d de %1$d hechas</item>
+        <item quantity="other">%1$d de %1$d hechas</item>
+    </plurals>
+    <plurals name="home_progress_all_reached">
+        <item quantity="one">%1$d de %1$d alcanzada</item>
+        <item quantity="many">%1$d de %1$d alcanzadas</item>
+        <item quantity="other">%1$d de %1$d alcanzadas</item>
+    </plurals>
+    <plurals name="home_progress_done">
+        <item quantity="one">%1$d de %2$d hecha</item>
+        <item quantity="many">%1$d de %2$d hechas</item>
+        <item quantity="other">%1$d de %2$d hechas</item>
+    </plurals>
+    <plurals name="home_progress_reached">
+        <item quantity="one">%1$d de %2$d alcanzada</item>
+        <item quantity="many">%1$d de %2$d alcanzadas</item>
+        <item quantity="other">%1$d de %2$d alcanzadas</item>
+    </plurals>
+
+    <string name="home_just_now">hace un momento</string>
+    <plurals name="home_minutes_ago">
+        <item quantity="one">hace %1$d minuto</item>
+        <item quantity="many">hace %1$d minutos</item>
+        <item quantity="other">hace %1$d minutos</item>
+    </plurals>
+    <plurals name="home_hours_ago">
+        <item quantity="one">hace %1$d hora</item>
+        <item quantity="many">hace %1$d horas</item>
+        <item quantity="other">hace %1$d horas</item>
+    </plurals>
+    <string name="home_yesterday">ayer</string>
+    <plurals name="home_days_ago">
+        <item quantity="one">hace %1$d día</item>
+        <item quantity="many">hace %1$d días</item>
+        <item quantity="other">hace %1$d días</item>
+    </plurals>
+
+    <string name="home_start_a_map">Empezar un mapa</string>
+    <string name="home_templates_drawn_live">Orbit dibuja las plantillas en vivo, cada una con su estilo</string>
+    <string name="home_blank_map_description">Solo un título y espacio para ideas</string>
+    <string name="home_open_a_file_description">Markdown, YAML o un archivo zip con imágenes</string>
+    <string name="home_start_a_map_from_template">Empezar un mapa con esta plantilla</string>
+
+    <string name="home_crash_title">Orbit se cerró inesperadamente la última vez</string>
+    <string name="home_crash_body">En este teléfono hay un informe de lo que falló: las versiones de Orbit y de Android y en qué parte de Orbit pasó, nada de tus mapas. Compartirlo ayuda a corregirlo.</string>
+    <string name="home_dismiss">Descartar</string>
+    <string name="home_share_report">Compartir informe</string>
+    <string name="home_share_the_crash_report">Compartir el informe del fallo</string>
+</resources>

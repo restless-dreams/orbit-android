@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A map on the home screen; which one is asked as it's placed, and can be changed later.
+    The sizes in cells and the largest size are Android 12's; before, the smallest sizes stand in.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:description="@string/widget_description"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:minWidth="180dp"
+    android:minHeight="110dp"
+    android:minResizeWidth="72dp"
+    android:minResizeHeight="40dp"
+    android:maxResizeWidth="560dp"
+    android:maxResizeHeight="480dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="2"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:updatePeriodMillis="0"
+    android:previewImage="@drawable/ic_shortcut_map"
+    android:configure="com.hyuchia.orbit.widget.MapWidgetConfigureActivity"
+    android:widgetFeatures="reconfigurable|configuration_optional"
+    tools:ignore="UnusedAttribute" />

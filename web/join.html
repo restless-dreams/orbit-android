@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit</title>
+<style>
+<!-- styles -->
+</style>
+<style>
+  /* Joining: the code, for someone who typed only the address; then a name, or the PIN, when the room asks. */
+  .join {
+    cursor: auto;
+  }
+
+  /* Taller than the screen, as on a phone on its side or with the keyboard up, it starts at the top and scrolls. */
+  .join .audience__idle {
+    box-sizing: border-box;
+    grid-template-columns: minmax(0, 1fr);
+    align-content: safe center;
+    padding: 24px 16px;
+    overflow-y: auto;
+  }
+
+  .join .audience__glyph {
+    width: clamp(88px, 20vmin, 220px);
+    height: clamp(88px, 20vmin, 220px);
+  }
+
+  @media (max-height: 520px) {
+    .join .audience__glyph {
+      display: none;
+    }
+  }
+
+  .join__form {
+    display: grid;
+    justify-items: center;
+    gap: 16px;
+    width: min(100%, 360px);
+  }
+
+  .join__title {
+    margin: 0;
+    font-weight: 500;
+    text-align: center;
+  }
+
+  .join__label {
+    justify-self: stretch;
+    margin-bottom: -8px;
+    color: var(--audience-muted);
+    font: 15px/1.4 Roboto, "Google Sans", system-ui, sans-serif;
+  }
+
+  .join__code,
+  .join__field {
+    box-sizing: border-box;
+    border: 2px solid var(--audience-track);
+    border-radius: 16px;
+    background: var(--audience-card);
+    color: var(--audience-text);
+  }
+
+  .join__code {
+    width: 9ch;
+    padding: 12px 16px;
+    font: 600 clamp(28px, 6vmin, 48px)/1 "Roboto Mono", monospace;
+    letter-spacing: 0.2em;
+    text-align: center;
+  }
+
+  .join__code--pin {
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .join__field {
+    justify-self: stretch;
+    width: 100%;
+    min-height: 52px;
+    padding: 12px 16px;
+    font: 500 20px/1.2 Roboto, "Google Sans", system-ui, sans-serif;
+  }
+
+  .join__code:focus,
+  .join__field:focus {
+    border-color: var(--audience-accent);
+    outline: none;
+  }
+
+  .join__button {
+    min-width: 120px;
+    min-height: 48px;
+    padding: 0 28px;
+    border: 0;
+    border-radius: 24px;
+    background: var(--audience-accent);
+    color: #ffffff;
+    font: 500 17px/1 Roboto, "Google Sans", system-ui, sans-serif;
+    cursor: pointer;
+  }
+
+  .join__button:focus-visible {
+    outline: 3px solid var(--audience-text);
+    outline-offset: 2px;
+  }
+
+  .join__problem {
+    min-height: 1.4em;
+    color: #c62828;
+    font: 15px/1.4 Roboto, "Google Sans", system-ui, sans-serif;
+    text-align: center;
+  }
+</style>
+</head>
+<body class="audience join">
+<div class="audience__idle">
+  <svg class="audience__glyph" viewBox="0 0 200 200" aria-hidden="true">
+    <circle class="audience__glyph-ring" cx="100" cy="100" r="70"/>
+    <circle class="audience__glyph-sun" cx="100" cy="100" r="33.6"/>
+    <circle cx="100" cy="30" r="15.4" fill="#FEBAB6"/>
+    <circle cx="160.6" cy="65" r="15.4" fill="#99E0BA"/>
+    <circle cx="160.6" cy="135" r="15.4" fill="#9ED5FD"/>
+    <circle cx="100" cy="170" r="15.4" fill="#D6C2FE"/>
+    <circle cx="39.4" cy="135" r="15.4" fill="#F9C191"/>
+    <circle cx="39.4" cy="65" r="15.4" fill="#FCB6D6"/>
+  </svg>
+  <!-- code -->
+  <form class="join__form join__form--code">
+    <label class="audience__waiting" for="code"><!-- label --></label>
+    <input class="join__code" id="code" name="code" inputmode="numeric" autocomplete="off" maxlength="6" pattern="[0-9]{6}" required autofocus>
+    <div class="join__problem" role="alert"><!-- problem --></div>
+  </form>
+  <!-- /code -->
+  <!-- room -->
+  <form class="join__form" method="post" action="join">
+    <h1 class="audience__waiting join__title"><!-- title --></h1>
+    <!-- name field -->
+    <label class="join__label" for="name"><!-- name label --></label>
+    <input class="join__field" id="name" name="name" maxlength="40" autocomplete="nickname" autocapitalize="words" enterkeyhint="go" value="<!-- typed name -->"<!-- name focus -->>
+    <!-- /name field -->
+    <!-- pin field -->
+    <label class="join__label" for="pin"><!-- pin label --></label>
+    <input class="join__code join__code--pin" id="pin" name="pin" inputmode="numeric" autocomplete="off" maxlength="4" pattern="[0-9]{4}" enterkeyhint="go" required<!-- pin focus -->>
+    <!-- /pin field -->
+    <!-- button -->
+    <button class="join__button" type="submit"><!-- button label --></button>
+    <!-- /button -->
+    <div class="join__problem" role="alert"><!-- problem --></div>
+  </form>
+  <!-- /room -->
+</div>
+<script>
+  const code = document.querySelector('.join__form--code');
+  if (code) {
+    code.addEventListener('submit', (event) => {
+      event.preventDefault();
+      location.href = '/' + document.getElementById('code').value.trim() + '/';
+    });
+    document.getElementById('code').addEventListener('input', (event) => {
+      if (/^[0-9]{6}$/.test(event.target.value)) {
+        location.href = '/' + event.target.value + '/';
+      }
+    });
+  }
+</script>
+</body>
+</html>

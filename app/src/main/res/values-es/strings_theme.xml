@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Los estilos que pueden tener los mapas y los juegos de colores de sus ramas. Consulta TRANSLATING.md, "Styles and colors". -->
+<resources>
+    <string name="theme_style_app_colors_label">Colores de la app</string>
+    <string name="theme_style_app_colors_description">Los colores de tu fondo de pantalla, claros u oscuros según el teléfono</string>
+    <string name="theme_style_paper_label">Papel</string>
+    <string name="theme_style_paper_description">Planetas suaves sobre una página</string>
+    <string name="theme_style_night_label">Noche</string>
+    <string name="theme_style_night_description">Un cielo azul profundo</string>
+    <string name="theme_style_flat_label">Plano</string>
+    <string name="theme_style_flat_description">Colores sólidos, sin sombras</string>
+    <string name="theme_style_flat_night_label">Plano nocturno</string>
+    <string name="theme_style_flat_night_description">Colores sólidos de noche</string>
+    <string name="theme_style_material_label">Material</string>
+    <string name="theme_style_material_description">Los colores tonales de Material</string>
+    <string name="theme_style_material_night_label">Material nocturno</string>
+    <string name="theme_style_material_night_description">Los colores tonales de Material, en oscuro</string>
+    <string name="theme_style_liquid_glass_label">Cristal líquido</string>
+    <string name="theme_style_liquid_glass_description">Cristal transparente sobre un fondo luminoso</string>
+    <string name="theme_style_liquid_glass_night_label">Cristal líquido nocturno</string>
+    <string name="theme_style_liquid_glass_night_description">Cristal que brilla sobre un fondo oscuro</string>
+    <string name="theme_style_glass_label">Cristal</string>
+    <string name="theme_style_glass_description">Planetas esmerilados sobre un brillo claro</string>
+    <string name="theme_style_glass_night_label">Cristal nocturno</string>
+    <string name="theme_style_glass_night_description">Planetas esmerilados de noche</string>
+    <string name="theme_style_cosmos_label">Cosmos</string>
+    <string name="theme_style_cosmos_description">Mundos intensos entre las estrellas</string>
+    <string name="theme_style_blueprint_label">Cianotipo</string>
+    <string name="theme_style_blueprint_description">Líneas blancas sobre azul de plano</string>
+    <string name="theme_style_ink_label">Tinta</string>
+    <string name="theme_style_ink_description">Blanco y negro, para imprimir</string>
+    <string name="theme_style_high_contrast_label">Alto contraste</string>
+    <string name="theme_style_high_contrast_description">Colores y bordes marcados, lo más fácil de leer</string>
+
+    <string name="theme_palette_style_own">Los del estilo</string>
+    <string name="theme_palette_sorbet">Sorbete</string>
+    <string name="theme_palette_ocean">Océano</string>
+    <string name="theme_palette_forest">Bosque</string>
+    <string name="theme_palette_sunset">Atardecer</string>
+    <string name="theme_palette_vivid">Vivos</string>
+    <string name="theme_palette_mono">Monocromo</string>
+</resources>

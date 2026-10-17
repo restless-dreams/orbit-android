@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Imágenes y videos en pantalla completa, y los reproductores de video. Consulta TRANSLATING.md. -->
+<resources>
+    <string name="media_picture_of">Imagen de %1$s</string>
+    <string name="media_video_of">Video de %1$s</string>
+    <string name="media_picture_missing">Esta imagen no está en este teléfono.</string>
+    <string name="media_picture_unreadable">No se pudo mostrar esta imagen.</string>
+    <string name="media_play_captioned">Reproducir %1$s</string>
+    <string name="media_play_video_of">Reproducir el video de %1$s</string>
+    <string name="media_position">%1$d de %2$d</string>
+    <string name="media_share_picture">Compartir la imagen</string>
+    <string name="media_share_video">Compartir el video</string>
+    <string name="media_video_missing">Este video no está en este teléfono.</string>
+    <string name="media_video_unplayable">Este video no se pudo reproducir aquí.</string>
+    <plurals name="media_seek_back">
+        <item quantity="one">Retroceder %d segundo</item>
+        <item quantity="many">Retroceder %d segundos</item>
+        <item quantity="other">Retroceder %d segundos</item>
+    </plurals>
+    <plurals name="media_seek_forward">
+        <item quantity="one">Avanzar %d segundo</item>
+        <item quantity="many">Avanzar %d segundos</item>
+        <item quantity="other">Avanzar %d segundos</item>
+    </plurals>
+    <string name="media_open_in_another_app">Abrir en otra app</string>
+    <string name="media_watch_on">Ver en %1$s</string>
+</resources>

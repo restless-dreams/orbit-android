@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Presenting a map: on this screen, a second screen, a TV or in browsers; its path and rehearsals; and talking ideas onto the map. See TRANSLATING.md. -->
+<resources>
+    <!-- The presentation's controls. -->
+    <string name="present_previous_idea">Previous idea</string>
+    <string name="present_next_idea">Next idea</string>
+    <string name="present_pause">Pause</string>
+    <string name="present_play_on_its_own">Play on its own</string>
+    <string name="present_show_the_captions">Show the captions</string>
+    <string name="present_hide_the_captions">Hide the captions</string>
+    <string name="present_show_in_a_browser">Show in a browser</string>
+    <string name="present_show_on_a_tv">Show on a TV</string>
+    <string name="present_rehearsing">Rehearsing</string>
+    <!-- Where the presentation is: the idea on screen's place among them all, "3 / 10". -->
+    <string name="present_position">%1$d / %2$d</string>
+    <!-- How the presentation keeps to the last rehearsal's pace. %1$s is a time, like 0:42. -->
+    <string name="present_on_pace">On pace</string>
+    <string name="present_behind">%1$s behind</string>
+    <string name="present_ahead">%1$s ahead</string>
+    <!-- What's left of the idea on screen's rehearsed time, or how far over it is. %1$s is a time, like 0:42. -->
+    <string name="present_time_left">%1$s left</string>
+    <string name="present_time_over">%1$s over</string>
+
+    <!-- The presenter's screen, while the audience watches a second screen, a TV or browsers. -->
+    <!-- %1$s is the screen's name, as the phone or the TV calls it: "HDMI screen", "Living room TV". -->
+    <string name="present_on_screen">On %1$s</string>
+    <string name="present_on_the_tv">On the TV</string>
+    <plurals name="present_browsers_watching">
+        <item quantity="one">%d browser</item>
+        <item quantity="other">%d browsers</item>
+    </plurals>
+    <!-- %1$s is the idea's name. -->
+    <string name="present_video_of">The video of %1$s</string>
+    <string name="present_picture_of">The picture of %1$s</string>
+    <string name="present_video_not_on_tv">This video plays on a second screen and in browsers, not on the TV.</string>
+    <!-- %1$s is where the video is, and its length once known: "0:42 / 3:10". -->
+    <string name="present_video_playing">Playing · %1$s</string>
+    <string name="present_video_ended">Ended · %1$s</string>
+    <string name="present_video_paused">Paused · %1$s</string>
+    <string name="present_back_to_the_map">Back to the map</string>
+    <string name="present_start_over">Start over</string>
+    <string name="present_pause_the_video">Pause the video</string>
+    <string name="present_no_notes">No notes for this idea.</string>
+    <string name="present_up_next">Up next</string>
+    <string name="present_the_end">The end</string>
+    <string name="present_this_idea">This idea</string>
+
+    <!-- Showing the presentation in browsers on the local network. -->
+    <string name="present_connect_to_the_wifi">Connect this phone to the room\'s Wi-Fi, or turn on its hotspot and connect the laptop to it, then come back here.</string>
+    <string name="present_open_in_a_browser">On a laptop, a TV\'s browser or the phones in the room, on the same Wi-Fi, open:</string>
+    <!-- A device kept from guessing the code. -->
+    <string name="present_lockout">A device typed too many wrong codes, so it has to wait before trying again. If no one in the room did, stop showing, and show again for a new code.</string>
+    <string name="present_stop_showing">Stop showing</string>
+
+    <!-- The presentation's path, while it's made. %1$s is an idea's name. -->
+    <string name="present_path">Presentation path</string>
+    <string name="present_path_no_ideas">No ideas yet</string>
+    <plurals name="present_path_ideas">
+        <item quantity="one">%d idea</item>
+        <item quantity="other">%d ideas, in this order</item>
+    </plurals>
+    <string name="present_path_find_an_idea">Find an idea for the path</string>
+    <string name="present_path_start_over">Start the path over</string>
+    <string name="present_path_how_to">Now tap the ideas in the order you\'ll present them</string>
+    <string name="present_path_add_again">Add again</string>
+    <string name="present_path_add_idea">Add %1$s</string>
+    <string name="present_path_fly_to_idea">Fly to %1$s</string>
+    <string name="present_path_move_idea">Move %1$s on the path</string>
+    <string name="present_path_take_idea_off">Take %1$s off the path</string>
+    <string name="present_path_earlier">Earlier</string>
+    <string name="present_path_later">Later</string>
+    <string name="present_path_take_off">Take off the path</string>
+
+    <!-- How a rehearsal went: how long it took, above the time. -->
+    <string name="present_rehearsed_in">Rehearsed in</string>
+    <string name="present_rehearsal_sets_the_pace">Presenting, you\'ll see whether you\'re keeping to this pace.</string>
+    <string name="present_idea_no_longer_on_the_map">An idea no longer on the map</string>
+    <!-- The idea that took longest. -->
+    <string name="present_longest">Longest</string>
+    <string name="present_rehearse_again">Rehearse again</string>
+
+    <!-- Talking ideas onto the map, holding the + button. -->
+    <string name="present_talk_ideas_onto_the_map">Talk ideas onto the map</string>
+    <string name="present_talk_needs_the_microphone">Orbit needs the microphone to hear your ideas.</string>
+    <string name="present_talk_no_speech_service">This phone has no speech service: type the idea, or use your keyboard\'s microphone.</string>
+    <string name="present_talk_adding_the_last_idea">Adding the last idea…</string>
+    <string name="present_talk_say_an_idea">Say an idea, then pause</string>
+    <string name="present_talk_listening">Listening…</string>
+    <string name="present_talk_let_go_or_slide_up">Let go to finish, or slide up to keep listening</string>
+    <!-- How many ideas joined the map; Done is the button that ends the talk. -->
+    <plurals name="present_talk_ideas_listening_until_done">
+        <item quantity="one">%d idea · listening until Done</item>
+        <item quantity="other">%d ideas · listening until Done</item>
+    </plurals>
+    <plurals name="present_talk_ideas_let_go_to_finish">
+        <item quantity="one">%d idea · let go to finish</item>
+        <item quantity="other">%d ideas · let go to finish</item>
+    </plurals>
+</resources>

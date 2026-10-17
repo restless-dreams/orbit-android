@@ -1,0 +1,13 @@
+Orbit turns your ideas into a map you fly through. Tap an idea and the map zooms in to show what's around it, flick an orbit to spin it, and zoom out to see everything at once.
+
+Build a map right on the map. Add ideas around the one in the middle, type their names where they are, drag them where they belong, and give each one a color, a status, a note, a picture or a link. Or hold the + button and say your ideas instead of typing them.
+
+Present it. Orbit plays your map full screen, step by step along a path you pick, with a presenter view on your phone while everyone else sees the map on a second screen, a TV or any browser in the room. Rehearse with a timer that tells you when you're running behind.
+
+Your maps are yours. Each one is a plain markdown file that any text editor can open. Keep them in a folder you choose and they stay in step with your other apps and devices; when Orbit saves a file, it changes only what you edited and leaves the rest as you wrote it. Every map has a version history, and deleted maps wait in the trash for 30 days.
+
+Send a map to your tablet or another phone nearby without an account, open it in a browser on your computer, or share it as a web page anyone can fly through.
+
+Orbit works with or without Google services, on phones, tablets and Chromebooks, and with a keyboard and mouse too. Styles range from paper and night to flat, Material and liquid glass, and "App colors" follows your wallpaper.
+
+No ads, no accounts, no tracking. Orbit is free software under the GNU GPL, and its source code is public.

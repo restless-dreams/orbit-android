@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Quick Settings tile: a sun with a planet, and a + beside them. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M10,13m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.5"
+        android:pathData="M10,5.5a7.5,7.5 0,1 0,7.5 7.5" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18,2h1.6v3.2h3.2v1.6h-3.2v3.2h-1.6v-3.2h-3.2v-1.6h3.2z" />
+</vector>

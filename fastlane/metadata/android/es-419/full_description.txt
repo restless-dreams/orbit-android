@@ -1,0 +1,15 @@
+Orbit convierte tus ideas en un mapa que recorres volando. Toca una idea y el mapa se acerca para mostrar lo que hay a su alrededor, dale un impulso a una órbita para hacerla girar y aléjate para ver todo a la vez.
+
+Construye un mapa sobre el mapa. Agrega ideas alrededor de la del centro, escribe sus nombres ahí mismo, arrástralas a donde pertenecen y dale a cada una un color, un estado, una nota, una imagen o un enlace. O mantén presionado el botón + y di tus ideas en vez de escribirlas.
+
+Preséntalo. Orbit muestra tu mapa en pantalla completa, paso a paso por el recorrido que elijas, con una vista de quien presenta en tu teléfono mientras los demás ven el mapa en una segunda pantalla, una TV o cualquier navegador de la sala. Ensaya con un cronómetro que te avisa cuando vas atrasado.
+
+Tus mapas son tuyos. Cada uno es un archivo markdown sencillo que cualquier editor de texto puede abrir. Guárdalos en una carpeta que elijas y se mantendrán sincronizados con tus otras apps y dispositivos; cuando Orbit guarda un archivo, cambia solo lo que editaste y deja el resto como lo escribiste. Cada mapa tiene un historial de versiones, y los mapas eliminados esperan 30 días en la papelera.
+
+Envía un mapa a tu tablet o a otro teléfono cercano sin necesidad de cuenta, ábrelo en un navegador de tu computadora o compártelo como una página web que cualquiera puede recorrer.
+
+Orbit funciona con o sin los servicios de Google, en teléfonos, tablets y Chromebooks, y también con teclado y mouse. Los estilos van de papel y noche a plano, Material y cristal líquido, y "Colores de la app" sigue los de tu fondo de pantalla.
+
+Sin anuncios, sin cuentas, sin rastreo. Orbit es software libre bajo la licencia GNU GPL, y su código fuente es público.
+
+Orbit está en español y en inglés.

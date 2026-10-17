@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="generator" content="Orbit for Android">
+<title><!-- title --></title>
+<style>
+<!-- styles -->
+</style>
+<style>
+  /* A map shared as a web page: explored with Orbit's own controls, or presented with captions. */
+  .page {
+    cursor: auto;
+    -webkit-user-select: auto;
+    user-select: auto;
+  }
+
+  .page__explore {
+    position: fixed;
+    inset: 0;
+  }
+
+  .page:not(.page--presenting) .audience__map,
+  .page:not(.page--presenting) .audience__progress,
+  .page:not(.page--presenting) .audience__caption,
+  .page--presenting .page__explore,
+  .page--presenting .page__present,
+  .page--presenting .page__credit,
+  .page__download[hidden] {
+    display: none;
+  }
+
+  /* Served by a device on the local network, the page offers the map itself too, beside Present. */
+  .page--downloadable .page__present {
+    transform: translateX(calc(-100% - 6px));
+  }
+
+  .page--downloadable .page__download {
+    transform: translateX(6px);
+    text-decoration: none;
+  }
+
+  .page--presenting {
+    cursor: none;
+  }
+
+  .page--controls {
+    cursor: auto;
+  }
+
+  .page__present,
+  .page__button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    border: 0;
+    border-radius: 22px;
+    background: var(--audience-card);
+    box-shadow: var(--audience-shadow);
+    color: var(--audience-text);
+    font: 500 15px/1 Roboto, "Google Sans", system-ui, sans-serif;
+    cursor: pointer;
+  }
+
+  /* Bottom center: Orbit's own controls hold the corners. */
+  .page__present {
+    position: fixed;
+    left: 50%;
+    bottom: max(16px, env(safe-area-inset-bottom));
+    padding: 0 18px 0 14px;
+    transform: translateX(-50%);
+  }
+
+  .page__present:hover,
+  .page__button:hover {
+    filter: brightness(0.97);
+  }
+
+  .page__present svg,
+  .page__button svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+  }
+
+  .page__controls {
+    position: fixed;
+    left: 50%;
+    bottom: max(16px, env(safe-area-inset-bottom));
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transform: translateX(-50%);
+    transition: opacity 300ms ease;
+  }
+
+  .page--presenting:not(.page--controls) .page__controls {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .page:not(.page--presenting) .page__controls {
+    display: none;
+  }
+
+  .page__button {
+    justify-content: center;
+    width: 44px;
+    padding: 0;
+  }
+
+  .page__count {
+    min-width: 64px;
+    color: var(--audience-muted);
+    font: 500 14px/1 Roboto, "Google Sans", system-ui, sans-serif;
+    text-align: center;
+  }
+
+  .page__credit {
+    position: fixed;
+    left: max(12px, env(safe-area-inset-left));
+    bottom: max(10px, env(safe-area-inset-bottom));
+    color: var(--audience-muted);
+    font: 12px/1 Roboto, "Google Sans", system-ui, sans-serif;
+    text-decoration: none;
+    opacity: 0.8;
+  }
+
+  .page__credit:hover {
+    opacity: 1;
+  }
+</style>
+</head>
+<body class="page audience audience--captions">
+<div id="explore" class="page__explore"></div>
+<div id="map" class="audience__map"></div>
+<div class="audience__progress"><div class="audience__progress-bar"></div></div>
+<section class="audience__caption audience__caption--empty" aria-live="polite">
+  <h1 class="audience__title"></h1>
+  <div class="audience__note"></div>
+</section>
+<button class="page__present" type="button" title="<!-- present key -->">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+  <!-- present -->
+</button>
+<nav class="page__controls" aria-label="<!-- presentation -->">
+  <button class="page__button" type="button" data-step="-1" aria-label="<!-- previous idea -->">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z"/></svg>
+  </button>
+  <span class="page__count"></span>
+  <button class="page__button" type="button" data-step="1" aria-label="<!-- next idea -->">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11h12.17l-5.59-5.59L12 4l8 8-8 8-1.41-1.41L16.17 13H4z"/></svg>
+  </button>
+  <button class="page__button" type="button" data-close aria-label="<!-- stop presenting key -->">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+  </button>
+</nav>
+<a class="page__download page__present" hidden download>
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/></svg>
+  <!-- download for orbit -->
+</a>
+<a class="page__credit" href="https://orbit.hyuchia.com" target="_blank" rel="noopener"><!-- drawn with orbit --></a>
+<!-- data -->
+<!-- script -->
+</body>
+</html>

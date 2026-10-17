@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- La hoja que captura ideas en un mapa sin abrirlo. Consulta TRANSLATING.md. -->
+<resources>
+    <string name="capture_title">Agregar a un mapa</string>
+    <string name="capture_no_maps">Todavía no hay mapas. Abre Orbit para empezar uno.</string>
+    <string name="capture_map">Mapa</string>
+    <string name="capture_your_idea">Tu idea</string>
+    <plurals name="capture_ideas_one_on_each_line">
+        <item quantity="one">%d idea, una en cada línea</item>
+        <item quantity="many">%d ideas, una en cada línea</item>
+        <item quantity="other">%d ideas, una en cada línea</item>
+    </plurals>
+    <string name="capture_one_idea_on_each_line">Una idea en cada línea</string>
+    <string name="capture_add">Agregar</string>
+    <plurals name="capture_add_ideas">
+        <item quantity="one">Agregar %d idea</item>
+        <item quantity="many">Agregar %d ideas</item>
+        <item quantity="other">Agregar %d ideas</item>
+    </plurals>
+    <string name="capture_added_idea">Se agregó a %1$s</string>
+    <plurals name="capture_added_ideas">
+        <item quantity="one">Se agregó %1$d idea a %2$s</item>
+        <item quantity="many">Se agregaron %1$d ideas a %2$s</item>
+        <item quantity="other">Se agregaron %1$d ideas a %2$s</item>
+    </plurals>
+    <string name="capture_problem">Orbit no pudo agregar a %1$s. Tus ideas siguen aquí.</string>
+    <string name="capture_problem_with_reason">Orbit no pudo agregar a %1$s. %2$s. Tus ideas siguen aquí.</string>
+    <string name="capture_problem_refused">Orbit no pudo agregar a %1$s porque el mapa no se puede cambiar en este dispositivo. Tus ideas siguen aquí.</string>
+    <string name="capture_problem_missing">Orbit no pudo agregar a %1$s. El mapa ya no está aquí. Tus ideas siguen aquí.</string>
+    <string name="capture_problem_kept_changing">Orbit no pudo agregar a %1$s. El mapa no dejaba de cambiar. Tus ideas siguen aquí.</string>
+</resources>

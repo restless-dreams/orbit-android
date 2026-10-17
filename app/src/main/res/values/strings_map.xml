@@ -1,0 +1,264 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A map's screen: its bars, menus, panels and messages. See TRANSLATING.md. -->
+<resources>
+    <!-- The top bar, the toolbar and the map's menu -->
+    <string name="map_back_to_your_maps">Back to your maps</string>
+    <string name="map_rename_the_map">Rename the map</string>
+    <string name="map_what_the_idea_holds">What %1$s holds</string>
+    <string name="map_edit_the_idea">Edit %1$s</string>
+    <string name="map_view_the_picture_in">View the picture in %1$s</string>
+    <string name="map_play_the_video_in">Play the video in %1$s</string>
+    <string name="map_more">More</string>
+    <string name="map_presentation_path">Presentation path</string>
+    <string name="map_rehearse">Rehearse</string>
+    <string name="map_edit_as_text">Edit as text</string>
+    <string name="map_send_to_a_device">Send to a device</string>
+    <string name="map_export_and_share">Export and share</string>
+    <string name="map_rename_map">Rename map</string>
+    <string name="map_delete_map">Delete map</string>
+    <string name="map_focus_on_one_idea">Focus on one idea</string>
+    <string name="map_show_the_whole_map">Show the whole map</string>
+    <string name="map_add_an_idea_to_the_idea_or_talk">Add an idea to %1$s, or hold to talk ideas</string>
+    <string name="map_add_an_idea_to_the_map_or_talk">Add an idea to the map, or hold to talk ideas</string>
+
+    <!-- Over the map -->
+    <string name="map_first_idea_hint">Tap + in the orbit to add your first idea, or hold the + below and say your ideas. Long-press any idea to rename, color or move it.</string>
+    <string name="map_stopped">The map stopped while Android freed memory. Your changes are saved.</string>
+    <string name="map_load_it_again">Load it again</string>
+    <string name="map_icon_for">Icon for %1$s</string>
+    <string name="map_delete_dialog_title">Delete “%1$s”?</string>
+    <plurals name="map_delete_dialog_body">
+        <item quantity="one">It goes to the trash with its history, and stays there for %d day in case you want it back.</item>
+        <item quantity="other">It goes to the trash with its history, and stays there for %d days in case you want it back.</item>
+    </plurals>
+
+    <!-- A map that can only be looked at -->
+    <string name="map_read_only_unreadable_title">Orbit couldn\'t read part of this map, so it won\'t change it</string>
+    <string name="map_read_only_unreadable_body">Fix the text, or bring back an earlier version. The file stays as it is until then.</string>
+    <string name="map_read_only_unreadable_body_with_problem">%1$s Fix the text, or bring back an earlier version. The file stays as it is until then.</string>
+    <string name="map_read_only_newer_title">A newer version of Orbit made this map</string>
+    <string name="map_read_only_newer_body">It may hold things this version doesn\'t know, so it\'s only shown here. Update Orbit to edit it.</string>
+    <string name="map_read_only_deleted_title">This map is in the trash</string>
+    <string name="map_read_only_deleted_body">Restore it to keep editing. Until then, nothing you do here changes it.</string>
+    <string name="map_read_only_storage_title">A newer version of Orbit keeps your maps</string>
+    <string name="map_read_only_storage_body">Update Orbit to edit them. Until then, they\'re only shown.</string>
+    <string name="map_edit_the_text">Edit the text</string>
+    <string name="map_update_orbit">Update Orbit</string>
+
+    <!-- Messages -->
+    <string name="map_missing">This map isn\'t here anymore.</string>
+    <string name="map_unreadable_file">Orbit couldn\'t read this map\'s file. It\'s left as it is.</string>
+    <string name="map_changed_elsewhere">This map changed elsewhere as you edited it. Your version is in its history, and Undo brings it back.</string>
+    <string name="map_change_not_saved">Orbit didn\'t save that change, because it would have emptied the map. Undo takes it back.</string>
+    <string name="map_deleted_idea">Deleted “%1$s”</string>
+    <string name="map_moved_idea_into_idea">Moved %1$s into %2$s</string>
+    <string name="map_moved_the_idea_into_idea">Moved the idea into %1$s</string>
+    <string name="map_moved_idea_into_another_idea">Moved %1$s into another idea</string>
+    <string name="map_moved_the_idea_into_another_idea">Moved the idea into another idea</string>
+    <string name="map_picture_unreadable">That picture couldn\'t be read.</string>
+    <string name="map_video_unreadable">That video couldn\'t be read.</string>
+    <plurals name="map_added_ideas">
+        <item quantity="one">Added %d idea</item>
+        <item quantity="other">Added %d ideas</item>
+    </plurals>
+    <string name="map_path_started_over">Path started over</string>
+    <string name="map_picture_not_drawn">Orbit couldn\'t draw that picture.</string>
+    <!-- The title of the map's web page when the map has none. -->
+    <string name="map_web_page_title">Map</string>
+
+    <!-- Keyboard shortcuts -->
+    <string name="map_shortcuts_this_map">This map</string>
+    <string name="map_shortcuts_on_the_map">On the map</string>
+    <string name="map_shortcuts_typing_an_idea">Typing an idea</string>
+    <string name="map_shortcuts_presenting">Presenting</string>
+    <string name="map_shortcut_the_orbit">The orbit</string>
+    <string name="map_shortcut_the_whole_map">The whole map</string>
+    <string name="map_shortcut_edit_the_idea_in_focus">Edit the idea in focus</string>
+    <string name="map_shortcut_back_up_a_level">Back up a level, or to your maps</string>
+    <string name="map_shortcut_move_between_ideas">Move between ideas</string>
+    <string name="map_shortcut_into_the_orbit">Into the orbit, back to the sun</string>
+    <string name="map_shortcut_fly_into_the_idea">Fly into the idea</string>
+    <string name="map_shortcut_add_an_idea_under_it">Add an idea under it</string>
+    <string name="map_shortcut_add_an_idea_beside_it">Add an idea beside it</string>
+    <string name="map_shortcut_rename_it">Rename it</string>
+    <string name="map_shortcut_delete_it">Delete it</string>
+    <string name="map_shortcut_its_menu">Its menu</string>
+    <string name="map_shortcut_zoom_in">Zoom in</string>
+    <string name="map_shortcut_zoom_out">Zoom out</string>
+    <string name="map_shortcut_fit_the_view">Fit the view</string>
+    <string name="map_shortcut_add_it_and_type_the_next">Add it and type the next</string>
+    <string name="map_shortcut_add_it_and_go_under_it">Add it and go under it</string>
+    <string name="map_shortcut_add_it_and_go_back_up">Add it and go back up</string>
+    <string name="map_shortcut_stop_typing">Stop</string>
+    <string name="map_shortcut_next">Next</string>
+    <string name="map_shortcut_play_or_pause">Play or pause</string>
+    <string name="map_shortcut_back_to_the_map">Back to the map from a picture or video</string>
+
+    <!-- The long-press menu -->
+    <string name="map_add_an_idea">Add an idea</string>
+    <string name="map_add_one_next_to_it">Add one next to it</string>
+    <string name="map_edit_details">Edit details</string>
+    <string name="map_add_an_icon">Add an icon</string>
+    <string name="map_change_the_icon">Change the icon</string>
+    <string name="map_show_its_ideas">Show its ideas</string>
+    <string name="map_fold_its_ideas_away">Fold its ideas away</string>
+    <string name="map_move">Move</string>
+    <plurals name="map_delete_with_its_ideas">
+        <item quantity="one">Delete, with its idea</item>
+        <item quantity="other">Delete, with its %d ideas</item>
+    </plurals>
+    <string name="map_no_status">No status</string>
+    <string name="map_earlier_in_its_orbit">Earlier in its orbit</string>
+    <string name="map_under_the_idea_before_it">Under the idea before it</string>
+    <string name="map_later_in_its_orbit">Later in its orbit</string>
+    <string name="map_out_next_to">Out, next to %1$s</string>
+    <string name="map_current">Current</string>
+
+    <!-- Status words, as people say them -->
+    <string name="map_status_to_do">To do</string>
+    <string name="map_status_in_progress">In progress</string>
+    <string name="map_status_done">Done</string>
+    <string name="map_status_blocked">Blocked</string>
+
+    <!-- Kinds of idea -->
+    <string name="map_kind_idea">Idea</string>
+    <string name="map_kind_milestone">Milestone</string>
+    <string name="map_kind_question">Question</string>
+    <string name="map_kind_decision">Decision</string>
+    <string name="map_kind_risk">Risk</string>
+    <string name="map_kind_source">Source</string>
+    <string name="map_kind_person">Person</string>
+    <string name="map_kind_progress">Progress</string>
+    <string name="map_kind_goal">Goal</string>
+
+    <!-- An idea's editor -->
+    <string name="map_editor_title_center">The map\'s center</string>
+    <string name="map_editor_title_idea">Idea</string>
+    <string name="map_choose_an_icon">Choose an icon</string>
+    <string name="map_text">Text</string>
+    <string name="map_section_goal">Goal</string>
+    <string name="map_section_priority">Priority</string>
+    <string name="map_section_kind">Kind</string>
+    <string name="map_section_tags">Tags</string>
+    <string name="map_section_note">Note</string>
+    <string name="map_section_link">Link</string>
+    <string name="map_section_picture">Picture</string>
+    <string name="map_section_video">Video</string>
+    <string name="map_status_none">None</string>
+    <string name="map_priority_none">None</string>
+    <string name="map_goes_to">Goes to %1$s</string>
+    <string name="map_remove_the_link">Remove the link</string>
+    <string name="map_web_address">Web address</string>
+    <string name="map_link_to_another_idea">Link to another idea</string>
+    <string name="map_link_to_an_idea">Link to an idea</string>
+    <string name="map_describe_the_picture">Describe it, for screen readers</string>
+    <string name="map_caption">Caption</string>
+    <string name="map_replace">Replace</string>
+    <string name="map_add_a_photo">Add a photo</string>
+    <string name="map_or_a_picture_web_address">Or a picture\'s web address</string>
+    <string name="map_choose_a_video">Choose a video</string>
+    <string name="map_or_a_video_address">Or a YouTube, Vimeo or video address</string>
+    <string name="map_video_address">Video address</string>
+    <string name="map_page_to_show">A page to show in its details</string>
+    <string name="map_folded_description">They show as a count until you fly into it</string>
+    <string name="map_copying_the_video">Copying the video…</string>
+    <string name="map_copying_the_video_percent">Copying the video… %1$s</string>
+    <string name="map_remove_tag">Remove %1$s</string>
+    <string name="map_add_a_tag">Add a tag</string>
+    <string name="map_bold">Bold</string>
+    <string name="map_italic">Italic</string>
+    <string name="map_bulleted_list">Bulleted list</string>
+    <string name="map_preview">Preview</string>
+    <string name="map_nothing_written_yet">Nothing written yet</string>
+    <string name="map_note_placeholder">Details, sources, what to say… **Bold**, *italics*, - lists and [links](https://…) work.</string>
+    <string name="map_find_an_idea">Find an idea</string>
+
+    <!-- An idea's details -->
+    <string name="map_priority">Priority %1$d</string>
+    <string name="map_go_to">Go to %1$s</string>
+    <string name="map_open_link">Open link</string>
+    <string name="map_no_note_yet">No note yet.</string>
+    <string name="map_write_one">Write one</string>
+    <string name="map_in_its_orbit">In its orbit</string>
+    <string name="map_view_it_full_screen">View it full screen</string>
+    <string name="map_play">Play</string>
+
+    <!-- The outline -->
+    <string name="map_fly_to_it">Fly to it</string>
+    <plurals name="map_ideas">
+        <item quantity="one">%d idea</item>
+        <item quantity="other">%d ideas</item>
+    </plurals>
+    <plurals name="map_folded_ideas">
+        <item quantity="one">Folded, %d idea</item>
+        <item quantity="other">Folded, %d ideas</item>
+    </plurals>
+    <string name="map_fold_its_ideas">Fold its ideas</string>
+    <!-- How many of the to-dos and goals under an idea are done, of how many. -->
+    <plurals name="map_done_of_total">
+        <item quantity="one">%1$d/%2$d done</item>
+        <item quantity="other">%1$d/%2$d done</item>
+    </plurals>
+    <string name="map_reached">Reached</string>
+    <string name="map_of_the_way">%1$s of the way</string>
+
+    <!-- Search -->
+    <string name="map_search_placeholder">Ideas, tags or notes</string>
+    <string name="map_clear">Clear</string>
+    <string name="map_nothing_matches">Nothing on this map matches “%1$s”.</string>
+
+    <!-- Version history -->
+    <string name="map_history_now">Now</string>
+    <string name="map_history_empty">Earlier versions show here as you work: the map as it was when you opened it, every ten minutes of editing, and before big changes, kept for months.</string>
+    <string name="map_history_today">Today</string>
+    <string name="map_history_yesterday">Yesterday</string>
+    <!-- A version kept as its file came in from elsewhere, after the time it was kept. -->
+    <string name="map_history_original_file">%1$s · the file as it came in</string>
+    <plurals name="map_history_more_than_now">
+        <item quantity="one">%d more than now</item>
+        <item quantity="other">%d more than now</item>
+    </plurals>
+    <plurals name="map_history_fewer_than_now">
+        <item quantity="one">%d fewer than now</item>
+        <item quantity="other">%d fewer than now</item>
+    </plurals>
+    <!-- A version made the map again: a time today, yesterday, a weekday and a time this week, a date and a time this year, or a date. -->
+    <string name="map_restored_today">Restored the map as it was today at %1$s</string>
+    <string name="map_restored_yesterday">Restored the map as it was yesterday at %1$s</string>
+    <string name="map_restored_on_weekday">Restored the map as it was on %1$s at %2$s</string>
+    <string name="map_restored_on_date_at">Restored the map as it was on %1$s at %2$s</string>
+    <string name="map_restored_on_date">Restored the map as it was on %1$s</string>
+
+    <!-- Editing the map as text -->
+    <plurals name="map_problems">
+        <item quantity="one">%d problem</item>
+        <item quantity="other">%d problems</item>
+    </plurals>
+    <plurals name="map_notes_from_orbit">
+        <item quantity="one">%d note from Orbit</item>
+        <item quantity="other">%d notes from Orbit</item>
+    </plurals>
+    <string name="map_orbit_reads_it_all">Orbit reads it all</string>
+    <string name="map_hide">Hide</string>
+    <string name="map_show">Show</string>
+    <string name="map_line">Line %1$d</string>
+
+    <!-- Style and layout -->
+    <string name="map_colors">Colors</string>
+    <string name="map_layout">Layout</string>
+    <string name="map_opens_in">Opens in</string>
+    <string name="map_focus">Focus</string>
+    <string name="map_overview">Overview</string>
+    <string name="map_orbit_rings">Orbit rings</string>
+    <string name="map_orbit_rings_description">The dashed paths the planets follow</string>
+    <string name="map_progress_rings">Progress rings</string>
+    <string name="map_progress_rings_description">Ideas with to-dos or goals show how far along they are</string>
+    <string name="map_drift">Drift</string>
+    <string name="map_drift_description">The orbit turns slowly on its own</string>
+    <plurals name="map_one_turn_every">
+        <item quantity="one">One turn every %d second</item>
+        <item quantity="other">One turn every %d seconds</item>
+    </plurals>
+    <string name="map_levels_to_show">Levels to show</string>
+    <string name="map_all_levels">All</string>
+</resources>

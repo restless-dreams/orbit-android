@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Backups before Android 12: the maps without their history, as cloud backups on newer versions (data_extraction_rules.xml, which says how OrbitBackupAgent picks the files). -->
+<full-backup-content>
+    <include domain="file" path="maps/" />
+    <include domain="file" path="datastore/" />
+</full-backup-content>

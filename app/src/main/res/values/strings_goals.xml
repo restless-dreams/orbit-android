@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Goals and their numbers, and how far along the goals and to-dos under an idea are. See TRANSLATING.md. -->
+<resources>
+    <!-- How a goal counts, as the editor offers it. -->
+    <string name="goal_way_saving_up">Saving up</string>
+    <string name="goal_way_paying_off">Paying off</string>
+    <string name="goal_way_counting">Counting</string>
+
+    <!-- The numbers each way of counting asks for. -->
+    <string name="goal_target">Target</string>
+    <string name="goal_owed_at_the_start">Owed at the start</string>
+    <string name="goal_how_many">How many</string>
+    <string name="goal_saved_so_far">Saved so far</string>
+    <string name="goal_owed_now">Owed now</string>
+    <string name="goal_have_so_far">Have so far</string>
+    <string name="goal_currency">Currency</string>
+    <!-- %1$s is the currency's name. -->
+    <string name="goal_currency_change">Currency: %1$s. Change it</string>
+    <string name="goal_find_a_currency">Find a currency</string>
+    <!-- Beside the currency the goal counts in, in the list of currencies. -->
+    <string name="goal_current_currency">Current</string>
+    <string name="goal_whats_counted">What\'s counted (optional)</string>
+    <!-- An example of what a goal counts, in its field until something is typed. -->
+    <string name="goal_whats_counted_example">apples</string>
+    <!-- A number and the word for what's counted, which the map has in its own language: "5 apples". -->
+    <string name="goal_amount_with_word">%1$s %2$s</string>
+
+    <!-- Numbers and amounts that can't be taken. %1$s is a number or an amount of money. -->
+    <string name="goal_write_a_number">Write a number, like %1$s</string>
+    <string name="goal_number_too_big">That\'s too big a number</string>
+    <string name="goal_number_zero_or_more">Use a number of 0 or more</string>
+    <string name="goal_amount_above_zero">Write an amount above 0</string>
+    <string name="goal_more_than_saved">That\'s more than the %1$s saved</string>
+    <string name="goal_more_than_owed">That\'s more than the %1$s owed</string>
+
+    <!-- Moving a goal on: by one, or by an amount, in its menu, its details and a dialog. -->
+    <string name="goal_amount">Amount</string>
+    <string name="goal_add_an_amount">Add an amount</string>
+    <string name="goal_menu_add_an_amount">Add an amount…</string>
+    <string name="goal_add">Add</string>
+    <string name="goal_take_off_an_amount">Take off an amount</string>
+    <string name="goal_menu_take_off_an_amount">Take off an amount…</string>
+    <string name="goal_take_off">Take off</string>
+    <string name="goal_paid_an_amount">Paid an amount</string>
+    <string name="goal_menu_paid_an_amount">Paid an amount…</string>
+    <string name="goal_take_one_off">Take one off</string>
+    <string name="goal_add_one">Add one</string>
+    <string name="goal_menu_goal">Goal…</string>
+    <string name="goal_menu_set_the_target">Set the target…</string>
+    <string name="goal_set_a_target">Set a target</string>
+    <string name="goal_details_add">Add…</string>
+    <string name="goal_details_add_a_payment">Add a payment…</string>
+
+    <!-- A goal's numbers in words. %1$s is where it is and %2$s what it started at or is after, as amounts. -->
+    <string name="goal_no_target_yet">No target yet</string>
+    <!-- %3$s is a percentage. -->
+    <string name="goal_summary_paying_off">%1$s left of %2$s · %3$s paid</string>
+    <string name="goal_summary_paid_off">%1$s left of %2$s · Paid off</string>
+    <string name="goal_summary_reached">%1$s of %2$s · Reached</string>
+    <!-- %3$s is a percentage. -->
+    <string name="goal_summary_saving_up">%1$s of %2$s · %3$s</string>
+    <!-- %3$s is a percentage, and %4$s the amount still to go, which picks the plural. -->
+    <plurals name="goal_summary_saving_up_to_go">
+        <item quantity="one">%1$s of %2$s · %3$s · %4$s to go</item>
+        <item quantity="other">%1$s of %2$s · %3$s · %4$s to go</item>
+    </plurals>
+    <!-- %3$s is how many are still to go, which picks the plural. -->
+    <plurals name="goal_summary_counting_to_go">
+        <item quantity="one">%1$s of %2$s · %3$s to go</item>
+        <item quantity="other">%1$s of %2$s · %3$s to go</item>
+    </plurals>
+    <string name="goal_amount_of_target">%1$s of %2$s</string>
+    <!-- Briefly, in the outline: what's left to pay, and a count as 2/5. -->
+    <string name="goal_brief_left">%1$s left</string>
+    <string name="goal_brief_counting">%1$s/%2$s</string>
+
+    <!-- How many of the goals and to-dos under an idea are done (%1$s) of how many (%2$s), and how far along they are (%3$s). The plural follows %1$s. -->
+    <plurals name="goal_progress_done">
+        <item quantity="one">%1$s of %2$s done · %3$s</item>
+        <item quantity="other">%1$s of %2$s done · %3$s</item>
+    </plurals>
+    <!-- The same, when they're all goals. -->
+    <plurals name="goal_progress_reached">
+        <item quantity="one">%1$s of %2$s reached · %3$s</item>
+        <item quantity="other">%1$s of %2$s reached · %3$s</item>
+    </plurals>
+    <!-- %1$s says how far along they are: "2 of 4 done · 63%". -->
+    <string name="goal_follows_the_ideas_under_it">Follows the goals and to-dos under it: %1$s</string>
+    <string name="goal_no_target_follows_the_ideas_under_it">No target yet. Without one, it follows the goals and to-dos under it.</string>
+    <string name="goal_no_to_dos_or_goals_under_it">No to-dos or goals under it yet.</string>
+</resources>

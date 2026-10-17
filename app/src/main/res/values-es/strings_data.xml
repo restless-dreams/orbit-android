@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Los mapas y sus archivos: las plantillas con las que empiezan los mapas nuevos, los títulos que Orbit les da a los mapas y por qué un archivo, un archivo zip, una imagen o un video no pueden entrar. Consulta TRANSLATING.md. -->
+<resources>
+    <string name="data_template_brainstorm_title">Lluvia de ideas</string>
+    <string name="data_template_brainstorm_description">Un tema en el centro y espacio para cada idea</string>
+    <string name="data_template_project_plan_title">Plan de proyecto</string>
+    <string name="data_template_project_plan_description">Hitos y tareas, con anillos que se llenan a medida que se completan</string>
+    <string name="data_template_study_notes_title">Notas de estudio</string>
+    <string name="data_template_study_notes_description">Ideas clave, preguntas y fuentes sobre un tema</string>
+    <string name="data_template_talk_outline_title">Esquema de charla</string>
+    <string name="data_template_talk_outline_description">Una apertura, tres puntos y un cierre, listo para presentar</string>
+    <string name="data_template_meeting_notes_title">Notas de reunión</string>
+    <string name="data_template_meeting_notes_description">Agenda, decisiones y quién hace qué</string>
+    <string name="data_template_decision_title">Decisión</string>
+    <string name="data_template_decision_description">Opciones con sus pros, contras y riesgos</string>
+    <string name="data_template_goals_title">Metas</string>
+    <string name="data_template_goals_description">Objetivos con resultados clave que se llenan a medida que avanzas</string>
+    <string name="data_template_swot_analysis_title">Análisis FODA</string>
+    <string name="data_template_swot_analysis_description">Fortalezas, debilidades, oportunidades y amenazas</string>
+    <string name="data_template_book_notes_title">Notas de lectura</string>
+    <string name="data_template_book_notes_description">Personajes, temas y las frases que vale la pena guardar</string>
+    <string name="data_template_trip_planner_title">Plan de viaje</string>
+    <string name="data_template_trip_planner_description">Lugares, comida y una lista de equipaje</string>
+    <string name="data_template_week_plan_title">Plan semanal</string>
+    <string name="data_template_week_plan_description">Las prioridades y tareas de cada día</string>
+
+    <!-- Títulos que Orbit les da a los mapas -->
+    <string name="data_copy_title">%1$s (copia)</string>
+    <string name="data_changed_elsewhere_title">%1$s (cambiado en otro lugar)</string>
+    <string name="data_map_without_a_title">Mapa</string>
+
+    <!-- Importar mapas de archivos y textos -->
+    <string name="data_file_unreadable">No se pudo leer ese archivo.</string>
+    <string name="data_file_too_big_for_map">Ese archivo es demasiado grande para ser un mapa.</string>
+    <string name="data_no_map_in_zip">No hay ningún mapa en ese archivo zip.</string>
+    <string name="data_nothing_to_make_a_map_from">No hay nada con qué hacer un mapa.</string>
+    <string name="data_could_not_read_that">Orbit no pudo leer eso: %1$s</string>
+    <string name="data_yaml_unreadable">Orbit no pudo leer todo ese YAML, así que no hizo un mapa con él: %1$s</string>
+    <string name="data_yaml_unreadable_at_line">Orbit no pudo leer todo ese YAML, así que no hizo un mapa con él: %1$s (línea %2$d)</string>
+    <string name="data_newer_version_keeps_maps">Una versión más reciente de Orbit guarda estos mapas: actualiza Orbit para cambiarlos.</string>
+
+    <!-- Archivos zip que Orbit no acepta -->
+    <string name="data_zip_too_many_files">Ese archivo zip tiene demasiados archivos para ser mapas.</string>
+    <string name="data_zip_too_big">Descomprimido, ese archivo zip ocupa más de lo que admiten los mapas.</string>
+    <string name="data_zip_points_outside">Ese archivo zip tiene un archivo que apunta fuera de él.</string>
+    <string name="data_zip_file_too_big">Ese archivo zip tiene un archivo demasiado grande para formar parte de un mapa.</string>
+    <string name="data_no_room_for_zip_maps">No hay espacio en este dispositivo para los mapas de ese archivo zip.</string>
+
+    <!-- Imágenes y videos que un mapa no admite -->
+    <string name="data_video_too_big">Ese video pesa %1$s, y un mapa admite videos de hasta %2$s para poder enviarse a tus otros dispositivos. Recórtalo en tu galería o agrégalo como enlace de YouTube o Vimeo.</string>
+    <string name="data_video_past_limit">Ese video pesa más de %1$s, y un mapa admite videos de hasta ese tamaño para poder enviarse a tus otros dispositivos. Recórtalo en tu galería o agrégalo como enlace de YouTube o Vimeo.</string>
+    <string name="data_video_past_map_room">Las imágenes y los videos de este mapa ya suman %1$s. Con este video pasarían de los %2$s que un mapa puede llevar cuando se comparte o se respalda. Elige uno más corto o agrégalo como enlace de YouTube o Vimeo.</string>
+    <string name="data_picture_past_map_room">Las imágenes y los videos de este mapa suman %1$s, todo lo que un mapa puede llevar cuando se comparte o se respalda. Quita uno para hacer espacio o agrega esta imagen como dirección web.</string>
+    <string name="data_video_kind_refused">Orbit guarda los videos como archivos MP4, WebM o QuickTime, y este es de tipo %1$s.</string>
+    <string name="data_video_kind_unknown">Orbit guarda los videos como archivos MP4, WebM o QuickTime, y este es de un tipo que no conoce.</string>
+    <string name="data_no_room_for_video">No hay espacio en este teléfono para ese video.</string>
+    <string name="data_more_than_a_map_keeps">Eso es más de lo que admite un mapa.</string>
+    <string name="data_megabytes">%1$s MB</string>
+
+    <!-- Guardar los mapas en una carpeta -->
+    <string name="data_folder">Carpeta</string>
+    <string name="data_folder_unreachable">Orbit ya no puede acceder a la carpeta. Vuelve a elegirla para guardar tus mapas allí.</string>
+    <string name="data_folder_unreadable">Orbit no pudo leer la carpeta. Lo intentará de nuevo en un momento.</string>
+    <plurals name="data_folder_maps_not_in_step">
+        <item quantity="one">Un mapa no se pudo sincronizar con la carpeta.</item>
+        <item quantity="many">%1$d mapas no se pudieron sincronizar con la carpeta.</item>
+        <item quantity="other">%1$d mapas no se pudieron sincronizar con la carpeta.</item>
+    </plurals>
+    <plurals name="data_folder_files_unreadable">
+        <item quantity="one">No se pudo leer un archivo de la carpeta.</item>
+        <item quantity="many">No se pudieron leer %1$d archivos de la carpeta.</item>
+        <item quantity="other">No se pudieron leer %1$d archivos de la carpeta.</item>
+    </plurals>
+    <string name="data_folder_tries_again">Orbit lo intentará de nuevo en un momento.</string>
+    <string name="data_folder_too_big_file">%1$s, en “%2$s”</string>
+</resources>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lo que dice la app al llegar mapas: de un archivo, de un archivo zip de mapas o de un dispositivo cercano. Consulta TRANSLATING.md. -->
+<resources>
+    <string name="main_could_not_keep_sent_map">Orbit no pudo guardar el mapa que envió %1$s. Pídele que te lo envíe como archivo.</string>
+    <string name="main_could_not_open_that">No se pudo abrir</string>
+    <string name="main_ok">Aceptar</string>
+
+    <string name="main_nothing_new">Nada nuevo</string>
+    <string name="main_maps_added">Mapas agregados</string>
+    <string name="main_no_maps_in_zip">No hay mapas en ese archivo zip.</string>
+    <string name="main_every_map_in_zip_already_here">Todos los mapas de ese archivo zip ya están aquí.</string>
+</resources>
