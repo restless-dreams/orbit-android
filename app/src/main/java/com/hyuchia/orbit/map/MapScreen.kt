@@ -56,6 +56,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
+import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.automirrored.outlined.Redo
 import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.filled.Add
@@ -149,7 +150,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.container
 import com.hyuchia.orbit.home.TitleDialog
+import com.hyuchia.orbit.home.tagCounts
 import com.hyuchia.orbit.media.MediaKind
 import com.hyuchia.orbit.media.MediaViewer
 import com.hyuchia.orbit.media.VideoScreen
@@ -160,12 +163,15 @@ import com.hyuchia.orbit.page.MapSettings
 import com.hyuchia.orbit.page.SystemWebView
 import com.hyuchia.orbit.present.CastButton
 import com.hyuchia.orbit.theme.LocalAppSettings
+import com.hyuchia.orbit.theme.OrbitPalette
 import com.hyuchia.orbit.theme.OrbitTheme
 import com.hyuchia.orbit.theme.appIsDark
 import com.hyuchia.orbit.theme.mapStyle
 import com.hyuchia.orbit.theme.mapTheme
 import com.hyuchia.orbit.theme.parseCssColor
+import com.hyuchia.orbit.ui.ColorPickerDialog
 import com.hyuchia.orbit.ui.EmojiPickerSheet
+import com.hyuchia.orbit.ui.offeredCustomColors
 import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.KeyboardShortcuts
@@ -178,8 +184,10 @@ import com.hyuchia.orbit.ui.offerShortcut
 import com.hyuchia.orbit.ui.openLink
 import com.hyuchia.orbit.ui.orbitViewModel
 import com.hyuchia.orbit.ui.withdrawShortcut
+import com.hyuchia.orbit.ui.TagsSheet
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import java.math.BigDecimal
 
@@ -295,6 +303,7 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
     val colors = MaterialTheme.colorScheme
     val snackbars = remember { SnackbarHostState() }
     var pickingIcon by remember { mutableStateOf<String?>(null) }
+    var pickingColor by remember { mutableStateOf<String?>(null) }
     // The goal an amount is being added to, taken off or paid, from its long-press menu.
     var changingGoal by rememberSaveable { mutableStateOf<String?>(null) }
     var goalChange by rememberSaveable { mutableStateOf<GoalChange?>(null) }
@@ -313,6 +322,7 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
     var mapBottom by remember { mutableFloatStateOf(0f) }
     var mapHeight by remember { mutableFloatStateOf(0f) }
     var renamingMap by rememberSaveable { mutableStateOf(false) }
+    var taggingMap by rememberSaveable { mutableStateOf(false) }
     // The note over a map that can only be looked at, in pixels: the map makes room for it.
     var readOnlyBannerHeight by remember { mutableIntStateOf(0) }
     var deletingMap by rememberSaveable { mutableStateOf(false) }
@@ -377,9 +387,12 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
             NodeAction.Rename -> model.rename(node.id)
             NodeAction.Edit -> model.show(Panel.Editor(node.id))
             NodeAction.PickIcon -> pickingIcon = node.id
+            NodeAction.PickColor -> pickingColor = node.id
             is NodeAction.SetStatus -> model.update(node.id, "status", action.status?.let(::JsonPrimitive))
             is NodeAction.SetColor -> model.update(node.id, "color", action.color?.let(::JsonPrimitive))
             is NodeAction.SetCollapsed -> model.update(node.id, "collapsed", if (action.collapsed) JsonPrimitive(true) else null)
+            NodeAction.Copy -> model.copy(node.id)
+            NodeAction.Paste -> model.paste(node.id)
             NodeAction.Duplicate -> model.duplicate(node.id)
             NodeAction.MoveEarlier -> model.move(node.id, node.parentId ?: return, node.index - 1)
             NodeAction.MoveLater -> model.move(node.id, node.parentId ?: return, node.index + 1)
@@ -560,6 +573,7 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                         onUndo = model::undo,
                         onRedo = model::redo,
                         onRename = if (ui.readOnly == null) ({ renamingMap = true }) else null,
+                        onTags = if (ui.readOnly == null) ({ taggingMap = true }) else null,
                         onSource = model::openSource,
                         onPresent = { model.startPresentation(app.presentationSeconds) },
                         onPath = model::startPath,
@@ -734,7 +748,7 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                     VerticalDivider()
 
                     Surface(color = colors.surfaceContainerLow, modifier = Modifier.width(SidePanelWidth).fillMaxHeight()) {
-                        MapPanels(model, ui, sheet = false, onPickIcon = { pickingIcon = it })
+                        MapPanels(model, ui, sheet = false, onPickIcon = { pickingIcon = it }, onPickColor = { pickingColor = it })
                     }
                 }
             }
@@ -742,7 +756,7 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
 
         if (!wide || !ui.panel.showsBeside()) {
             CompositionLocalProvider(LocalSheetRest provides onSheetRest) {
-                MapPanels(model, ui, sheet = true, onPickIcon = { pickingIcon = it })
+                MapPanels(model, ui, sheet = true, onPickIcon = { pickingIcon = it }, onPickColor = { pickingColor = it })
             }
         }
     }
@@ -758,6 +772,25 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
             },
             onDismiss = { pickingIcon = null },
         )
+    }
+
+    pickingColor?.let { nodeId ->
+        val node = ui.nodes[nodeId]
+
+        if (node == null) {
+            pickingColor = null
+        } else {
+            ColorPickerDialog(
+                title = stringResource(R.string.map_color_for, node.text),
+                label = node.label(stringResource(R.string.common_untitled)),
+                initial = parseCssColor(node.color) ?: parseCssColor(node.drawnColor) ?: OrbitPalette.first(),
+                onPick = { hex ->
+                    pickingColor = null
+                    model.update(nodeId, "color", JsonPrimitive(hex))
+                },
+                onDismiss = { pickingColor = null },
+            )
+        }
     }
 
     val goalNode = changingGoal?.let { ui.nodes[it] }
@@ -786,6 +819,20 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                 ui.map?.root?.let { root -> model.update(root.id, "text", JsonPrimitive(text)) }
             },
             onDismiss = { renamingMap = false },
+        )
+    }
+
+    if (taggingMap) {
+        // Every tag the maps have, to pick from: the map's own come from the page, which writes them.
+        val summaries by LocalContext.current.container.maps.maps.collectAsStateWithLifecycle()
+        val known = remember(summaries) { tagCounts(summaries.orEmpty()).map { it.name } }
+
+        TagsSheet(
+            title = title,
+            tags = ui.map?.options?.tags.orEmpty(),
+            known = known,
+            onChange = { tags -> model.setOptions(mapOf("tags" to JsonArray(tags.map(::JsonPrimitive)))) },
+            onDismiss = { taggingMap = false },
         )
     }
 
@@ -869,6 +916,8 @@ private fun MapOverlays(model: MapViewModel, ui: MapUi, act: (MapNode, NodeActio
                     y = menu.y,
                     parent = node.parentId?.let { ui.nodes[it] },
                     under = ui.progress.under(node),
+                    mapColors = remember(ui.map?.nodes, node.color) { offeredCustomColors(ui.map?.nodes.orEmpty().map { it.color }, node.color) },
+                    pasteable = remember(menu) { model.pasteable() },
                     onDismiss = { model.show(null) },
                     onAction = { action -> act(node, action) },
                 )
@@ -1015,6 +1064,7 @@ private fun MapTopBar(
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onRename: (() -> Unit)?,
+    onTags: (() -> Unit)?,
     onSource: () -> Unit,
     onPresent: () -> Unit,
     onPath: () -> Unit,
@@ -1111,7 +1161,7 @@ private fun MapTopBar(
                 }
             }
 
-            MapMenu(ui.presentPath.count { it in ui.nodes }, onPath, onRehearse, onHistory, onRename, onSource, onExport, onSend, onDelete, onStyle)
+            MapMenu(ui.presentPath.count { it in ui.nodes }, onPath, onRehearse, onHistory, onRename, onTags, onSource, onExport, onSend, onDelete, onStyle)
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = background, scrolledContainerColor = background),
     )
@@ -1125,6 +1175,7 @@ private fun MapMenu(
     onRehearse: () -> Unit,
     onHistory: () -> Unit,
     onRename: (() -> Unit)?,
+    onTags: (() -> Unit)?,
     onSource: () -> Unit,
     onExport: () -> Unit,
     onSend: () -> Unit,
@@ -1183,6 +1234,14 @@ private fun MapMenu(
                     text = { Text(stringResource(R.string.map_rename_map)) },
                     leadingIcon = { Icon(Icons.Outlined.DriveFileRenameOutline, contentDescription = null) },
                     onClick = { open = false; rename() },
+                )
+            }
+
+            onTags?.let { tags ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.common_tags)) },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Label, contentDescription = null) },
+                    onClick = { open = false; tags() },
                 )
             }
 

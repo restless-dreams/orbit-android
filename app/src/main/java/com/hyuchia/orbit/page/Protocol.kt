@@ -95,6 +95,9 @@ data class MapOptions(
 
     /** The app's own: `false` when ideas with to-dos or goals don't show progress rings by themselves. */
     val progressRings: Boolean? = null,
+
+    /** The app's own: the map's tags, which Home groups maps by (see `data/MapTags.kt`). */
+    val tags: List<String>? = null,
 )
 
 /** The whole map, as the page reports it after every change. */
@@ -205,6 +208,10 @@ sealed interface MapMessage {
     /** A node's note, picture, video or page, asked for on the map. */
     @Serializable @SerialName("details")
     data class Details(val id: String) : MapMessage
+
+    /** Ctrl+C, Ctrl+X or Ctrl+V on the map, for idea `id`: `copy`, `cut` or `paste`. The app has the clipboard. */
+    @Serializable @SerialName("clipboard")
+    data class Clipboard(val action: String, val id: String) : MapMessage
 
     /** The field for typing on the map opened: on node `id`, or for a new idea under `parentId`. */
     @Serializable @SerialName("editorOpen")
@@ -401,7 +408,26 @@ sealed interface MapCommand {
      */
     @Serializable @SerialName("addIdeas")
     data class AddIdeas(val job: Int, val markdown: String, val ideas: List<CapturedIdea>, val parentId: String? = null) : MapCommand
+
+    /** An idea and everything under it, answered as a [CopiedIdea]. */
+    @Serializable @SerialName("copy")
+    data class Copy(val job: Int, val id: String) : MapCommand
+
+    /**
+     * Text pasted as ideas under `parentId`, after its last (web/paste.ts):
+     * one change, one step to undo. Answered with [PastedIdeas].
+     */
+    @Serializable @SerialName("paste")
+    data class Paste(val job: Int, val parentId: String, val text: String) : MapCommand
 }
+
+/** An idea copied with everything under it: as orbit-md, for Orbit to paste, and as an outline for other apps. */
+@Serializable
+data class CopiedIdea(val markdown: String, val text: String)
+
+/** How many ideas a paste added, the ones under others included. */
+@Serializable
+data class PastedIdeas(val count: Int)
 
 /**
  * What the presenter's phone tells the audience's screen, a second screen or
@@ -451,6 +477,12 @@ sealed interface AudienceCommand {
     data object End : AudienceCommand
 }
 
+/**
+ * How the app and the pages read each other. `ignoreUnknownKeys` carries
+ * weight: every message from the map's page names its map (`map`, which
+ * [OrbitPage] reads before decoding) outside the message classes, and a
+ * newer page may say more than this app knows. ProtocolTest checks both.
+ */
 internal val protocolJson = Json {
     ignoreUnknownKeys = true
     explicitNulls = true

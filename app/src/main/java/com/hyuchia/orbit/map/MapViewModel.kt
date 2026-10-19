@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.res.Resources
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.os.SystemClock
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
@@ -25,6 +26,7 @@ import com.hyuchia.orbit.media.galleryOf
 import com.hyuchia.orbit.media.indexOf
 import com.hyuchia.orbit.page.AppTheme
 import com.hyuchia.orbit.page.AudienceCommand
+import com.hyuchia.orbit.page.CopiedIdea
 import com.hyuchia.orbit.page.Diagnostic
 import com.hyuchia.orbit.page.MapCommand
 import com.hyuchia.orbit.page.MapInsets
@@ -35,6 +37,7 @@ import com.hyuchia.orbit.page.MapState
 import com.hyuchia.orbit.page.Media
 import com.hyuchia.orbit.page.OrbitPage
 import com.hyuchia.orbit.page.PageException
+import com.hyuchia.orbit.page.PastedIdeas
 import com.hyuchia.orbit.page.PictureRequest
 import com.hyuchia.orbit.page.WebPage
 import com.hyuchia.orbit.page.mapBaseUrl
@@ -64,6 +67,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import java.io.IOException
 import java.math.BigDecimal
 
 /** How far back undo goes. */
@@ -597,6 +601,11 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
             }
             is MapMessage.Drag -> dragged(message)
             is MapMessage.Details -> state.update { it.copy(panel = Panel.Details(message.id)) }
+            is MapMessage.Clipboard -> when (message.action) {
+                "copy" -> copy(message.id)
+                "cut" -> copy(message.id, cut = true)
+                "paste" -> paste(message.id)
+            }
             is MapMessage.EditorOpen -> state.update { it.copy(editing = true, panel = null) }
             MapMessage.EditorClose -> state.update { it.copy(editing = false) }
             is MapMessage.Source -> state.update { ui -> ui.copy(source = ui.source?.copy(diagnostics = message.diagnostics)) }
@@ -815,11 +824,78 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
         page.send(MapCommand.AddToGoal(nodeId, number(amount)))
     }
 
-    fun remove(nodeId: String) {
+    /** Deletes an idea, with Undo; `cut` says it was copied first. */
+    fun remove(nodeId: String, cut: Boolean = false) {
         val node = state.value.nodes[nodeId] ?: return
         state.update { it.copy(panel = null) }
         page.send(MapCommand.Remove(nodeId))
-        events.trySend(MapEvent.Snackbar(ShownText.Resource(R.string.map_deleted_idea, listOf(node.label(untitled()))), undo = true))
+        val message = if (cut) R.string.map_cut_idea else R.string.map_deleted_idea
+        events.trySend(MapEvent.Snackbar(ShownText.Resource(message, listOf(node.label(untitled()))), undo = true))
+    }
+
+    /**
+     * Copies an idea and everything under it, to paste here, in another map
+     * or in another app; with `cut`, the idea goes too, with Undo. The root
+     * stays: cutting it copies it.
+     */
+    fun copy(nodeId: String, cut: Boolean = false) {
+        val node = state.value.nodes[nodeId] ?: return
+
+        viewModelScope.launch {
+            val copied = try {
+                page.request(CopiedIdea.serializer()) { job -> MapCommand.Copy(job, nodeId) }
+            } catch (failed: PageException) {
+                events.trySend(MapEvent.Snackbar(ShownText.Plain(failed.message.orEmpty())))
+                return@launch
+            }
+
+            if (!container.clipboard.copy(node.text, copied.text, copied.markdown, id)) {
+                events.trySend(MapEvent.Snackbar(ShownText.Resource(R.string.map_too_much_to_copy)))
+                return@launch
+            }
+
+            if (cut && !node.isRoot && state.value.readOnly == null) {
+                remove(nodeId, cut = true)
+            } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                // From Android 13 on, Android shows what was copied itself.
+                events.trySend(MapEvent.Snackbar(ShownText.Resource(R.string.map_copied_idea, listOf(node.label(untitled())))))
+            }
+        }
+    }
+
+    /** What pasting would add to an idea now, if anything; this doesn't read what was copied. */
+    fun pasteable(): Pasteable? = container.clipboard.pasteable()
+
+    /**
+     * Pastes what was copied into an idea: text becomes ideas under it (see
+     * web/paste.ts), with one Undo, and a picture becomes its picture. An idea
+     * copied from another map brings the pictures and videos it points to.
+     */
+    fun paste(parentId: String) {
+        if (state.value.readOnly != null || state.value.nodes[parentId] == null) {
+            return
+        }
+
+        when (val clip = container.clipboard.read()) {
+            null -> events.trySend(MapEvent.Snackbar(ShownText.Resource(R.string.map_nothing_to_paste)))
+            is Clip.Picture -> addPicture(parentId, clip.uri, container.clipboard.resolver, pasted = true)
+            is Clip.Ideas -> viewModelScope.launch {
+                try {
+                    clip.sourceMap?.let { source -> maps.copyMedia(source, id, clip.text) }
+                    val pasted = page.request(PastedIdeas.serializer()) { job -> MapCommand.Paste(job, parentId, clip.text) }
+
+                    if (pasted.count == 0) {
+                        events.trySend(MapEvent.Snackbar(ShownText.Resource(R.string.map_nothing_to_paste)))
+                    } else {
+                        events.trySend(MapEvent.Snackbar(ShownText.Plural(R.plurals.map_pasted_ideas, pasted.count), undo = true))
+                    }
+                } catch (refused: MediaRefusedException) {
+                    events.trySend(MapEvent.Snackbar(ShownText.Plain(refused.message.orEmpty())))
+                } catch (failed: PageException) {
+                    events.trySend(MapEvent.Snackbar(ShownText.Plain(failed.message.orEmpty())))
+                }
+            }
+        }
     }
 
     fun duplicate(nodeId: String) {
@@ -931,7 +1007,8 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
     fun stopEditing(save: Boolean = true) = page.send(MapCommand.StopEditing(save))
 
     /** Copies a picture into the map's folder and puts it on the node. */
-    fun addPicture(nodeId: String, uri: Uri, resolver: ContentResolver) {
+    /** Gives an idea a picture from the phone; `pasted` says so once it's there, with Undo. */
+    fun addPicture(nodeId: String, uri: Uri, resolver: ContentResolver, pasted: Boolean = false) {
         state.update { it.copy(mediaProblem = null) }
 
         viewModelScope.launch {
@@ -947,6 +1024,10 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
             }
 
             update(nodeId, "image", buildJsonObject { put("src", kotlinx.serialization.json.JsonPrimitive(path)) })
+
+            if (pasted) {
+                events.trySend(MapEvent.Snackbar(ShownText.Resource(R.string.map_pasted_the_picture), undo = true))
+            }
         }
     }
 
@@ -1433,11 +1514,16 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
         // The last edit is saved even as the screen goes, and pictures taken off the map go with it.
         if (!deleted && !unchangeable && unsaved.isNotEmpty()) {
             container.applicationScope.launch {
-                if (unsaved != base) {
-                    maps.write(id, unsaved, base = base)
-                }
+                try {
+                    if (unsaved != base) {
+                        maps.write(id, unsaved, base = base)
+                    }
 
-                maps.removeUnusedPictures(id)
+                    maps.removeUnusedPictures(id)
+                } catch (failed: IOException) {
+                    // Storage that's full or gone: the edit can't be kept, and the screen that would say so is gone.
+                    Logs.warn("OrbitMap", "Couldn't save the last edit as the map closed", failed)
+                }
             }
         }
 

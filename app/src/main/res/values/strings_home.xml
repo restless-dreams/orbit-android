@@ -122,4 +122,18 @@
     <string name="home_update_body">This copy of Orbit didn\'t come from an app store, so it doesn\'t update by itself. Download the new version and install it over this one: your maps stay where they are.</string>
     <string name="home_update_download">Download</string>
     <string name="home_update_not_now">Not now</string>
+
+    <!-- Tags on the home screen: chips that show only a tag's maps, and renaming or removing a tag in every map. -->
+    <string name="home_edit_tags">Edit tags</string>
+    <string name="home_rename_tag">Rename tag</string>
+    <string name="home_tag">Tag</string>
+    <string name="home_remove_tag">Remove from every map</string>
+    <!-- %1$s is the tag, %2$d how many maps have it. -->
+    <plurals name="home_remove_tag_question">
+        <item quantity="one">Remove “%1$s” from %2$d map?</item>
+        <item quantity="other">Remove “%1$s” from %2$d maps?</item>
+    </plurals>
+    <string name="home_remove_tag_body">The maps stay as they are, without this tag.</string>
+    <!-- What tapping a tag chip does, as TalkBack says it. -->
+    <string name="home_show_only_its_maps">Show only its maps</string>
 </resources>

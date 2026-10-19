@@ -2,10 +2,10 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import tseslint from 'typescript-eslint';
 
-// The pages and the logo script follow the library's code style. Its rules
+// The pages and the scripts follow the library's code style. Its rules
 // come from the Orbit checkout the pages are built with (ORBIT_PATH, from
 // web/; default ../../orbit), in scripts/eslint-style.js there.
-// `bun run lint` checks web/ and art/ from the repository's root.
+// `bun run lint` checks web/, art/ and scripts/ from the repository's root.
 const orbitPath = resolve(import.meta.dirname, process.env.ORBIT_PATH ?? '../../orbit');
 const { default: orbit } = await import(pathToFileURL(resolve(orbitPath, 'scripts/eslint-style.js')).href);
 

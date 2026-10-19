@@ -41,7 +41,7 @@ Build the map on the map itself.
   - Books this year <!-- orbit type: goal, target: 12, current: 5 -->
 
 ## 📝 Notes and details
-Every idea can carry a note in markdown, with **bold**, *italics*, lists and [links](https://orbit.hyuchia.com). Tap the note button under an idea to read it.
+Every idea can carry a note in markdown, with **bold**, *italics*, lists and [links](https://orbit.hyuchia.com/android). Tap the note button under an idea to read it.
 - Pictures and videos
   Add a photo from your phone, or a YouTube link, from an idea's editor.
 - Links between ideas

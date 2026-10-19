@@ -21,6 +21,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import androidx.core.net.toUri
+import androidx.webkit.WebResourceErrorCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
 import androidx.webkit.WebViewCompat
@@ -32,11 +33,14 @@ import com.hyuchia.orbit.R
 import com.hyuchia.orbit.media.isPlayerHost
 import java.io.File
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlin.time.Duration.Companion.seconds
 
 /** Pages are served from the app under a secure origin, so they can use the web's modern APIs. */
 const val PAGE_HOST = "appassets.androidplatform.net"
@@ -78,6 +82,19 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
     /** False once the page's process stopped; the page can't be used again. */
     var isAlive = true
         private set
+
+    /** Whether the page itself didn't load: every job fails at once, rather than waiting for it. */
+    private var loadFailed = false
+
+    /** Whether the view is destroyed already: by the page's process stopping, or by [destroy]. */
+    private var destroyed = false
+
+    /** The listener waiting for the window's focus to bring the keyboard up, while one waits. */
+    private var focusWaiter: Pair<ViewTreeObserver, ViewTreeObserver.OnWindowFocusChangeListener>? = null
+
+    /** Whether the page is still working on something it was asked for. */
+    val busy: Boolean
+        get() = jobs.isNotEmpty()
 
     /** Whether the phone's WebView can draw maps. When it can't, the page isn't loaded and every job fails at once. */
     private val drawsMaps = SystemWebView.of(application).drawsMaps
@@ -154,14 +171,27 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
             throw PageException(tooOld)
         }
 
+        if (loadFailed) {
+            throw PageException(application.getString(R.string.page_did_not_load))
+        }
+
         val job = nextJob++
         val result = CompletableDeferred<JsonElement?>()
         jobs[job] = result
         // Pictures, conversions and ideas caught on the go name what they make up, and say what went wrong, in the app's language.
         speak()
         send(command(job))
-        val value = result.await() ?: throw PageException(application.getString(R.string.page_sent_nothing_back))
-        return protocolJson.decodeFromJsonElement(answer, value)
+
+        // An answer that never comes (a message lost, a page stuck) is given up on, rather than waited for forever.
+        val value = try {
+            withTimeout(REQUEST_TIMEOUT) { result.await() }
+        } catch (late: TimeoutCancellationException) {
+            jobs.remove(job)
+            Logs.warn(TAG, "The page didn't answer job $job in $REQUEST_TIMEOUT")
+            throw PageException(application.getString(R.string.page_did_not_answer))
+        }
+
+        return protocolJson.decodeFromJsonElement(answer, value ?: throw PageException(application.getString(R.string.page_sent_nothing_back)))
     }
 
     private var attachment = 0
@@ -186,6 +216,8 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
             return
         }
 
+        // A keyboard still waiting for the screen's focus doesn't come up on the next screen.
+        stopWaitingForFocus()
         (webView.parent as? ViewGroup)?.removeView(webView)
         context.baseContext = application
     }
@@ -193,9 +225,17 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
     fun destroy() {
         detach()
         failJobs(application.getString(R.string.page_closed))
-        webView.destroy()
+        destroyView()
         isAlive = false
         listener = null
+    }
+
+    /** Destroys the view once: a page whose process stopped destroyed it already, and older WebViews don't take a second. */
+    private fun destroyView() {
+        if (!destroyed) {
+            destroyed = true
+            webView.destroy()
+        }
     }
 
     /**
@@ -214,23 +254,42 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
             view.context.getSystemService(InputMethodManager::class.java)?.showSoftInput(view, 0)
         }
 
+        stopWaitingForFocus()
+
         if (view.hasWindowFocus()) {
             view.post(show)
             return
         }
 
-        view.viewTreeObserver.addOnWindowFocusChangeListener(object : ViewTreeObserver.OnWindowFocusChangeListener {
+        val observer = view.viewTreeObserver
+
+        val waiter = object : ViewTreeObserver.OnWindowFocusChangeListener {
             override fun onWindowFocusChanged(hasFocus: Boolean) {
                 if (hasFocus) {
-                    view.viewTreeObserver.removeOnWindowFocusChangeListener(this)
+                    stopWaitingForFocus()
                     view.post(show)
                 }
             }
-        })
+        }
+
+        observer.addOnWindowFocusChangeListener(waiter)
+        focusWaiter = observer to waiter
     }
 
     fun hideKeyboard() {
+        // A keyboard still waiting for the window's focus doesn't come up after the field closed.
+        stopWaitingForFocus()
         webView.context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(webView.windowToken, 0)
+    }
+
+    private fun stopWaitingForFocus() {
+        focusWaiter?.let { (observer, waiter) ->
+            if (observer.isAlive) {
+                observer.removeOnWindowFocusChangeListener(waiter)
+            }
+        }
+
+        focusWaiter = null
     }
 
     private fun receive(data: String) {
@@ -298,6 +357,9 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
         return WebView(context).apply {
             // The page is transparent: Compose paints the background, so there is never a white flash.
             setBackgroundColor(Color.TRANSPARENT)
+            // A map has no forms to fill in, so the phone's autofill service, which can be another
+            // company's, never sees what's typed into one.
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
             // The app plays its own haptics; the view's long-press buzz would double them.
             isHapticFeedbackEnabled = false
             setOnLongClickListener { true }
@@ -327,8 +389,11 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
             webChromeClient = QuietChrome(players = pageUrl == AUDIENCE_URL)
 
             if (drawsMaps && WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
-                WebViewCompat.addWebMessageListener(this, "orbitNative", setOf("https://$PAGE_HOST")) { _, message, _, _, _ ->
-                    message.data?.let(::receive)
+                // Only the page itself talks to the app: a frame inside it, even one of the app's own files, doesn't.
+                WebViewCompat.addWebMessageListener(this, "orbitNative", setOf("https://$PAGE_HOST")) { _, message, _, isMainFrame, _ ->
+                    if (isMainFrame) {
+                        message.data?.let(::receive)
+                    }
                 }
 
                 loadUrl(pageUrl)
@@ -415,15 +480,29 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
             isAlive = false
             ready = false
             failJobs(application.getString(R.string.page_stopped))
+            stopWaitingForFocus()
             (view.parent as? ViewGroup)?.removeView(view)
-            view.destroy()
+            destroyView()
             listener?.invoke(MapMessage.Stopped)
             return true
+        }
+
+        // The page itself didn't load: what waits for it fails now, and what's asked of it later fails at once.
+        override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceErrorCompat) {
+            if (request.isForMainFrame) {
+                val code = if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_RESOURCE_ERROR_GET_CODE)) error.errorCode else null
+                Logs.warn(TAG, "The page didn't load (error $code)")
+                loadFailed = true
+                failJobs(application.getString(R.string.page_did_not_load))
+            }
         }
     }
 
     private companion object {
         const val TAG = "OrbitPage"
+
+        /** How long a job may take before the page is taken for stuck: the biggest maps draw in seconds on slow phones, never a minute. */
+        val REQUEST_TIMEOUT = 60.seconds
     }
 }
 

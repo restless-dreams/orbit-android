@@ -322,7 +322,8 @@ body {
     cursor: auto;
   }
 
-  /* Taller than the screen, as on a phone on its side or with the keyboard up, it starts at the top and scrolls. */
+  /* Taller than the screen, as on a phone on its side or with the keyboard up, it starts at the top and scrolls.
+     Browsers before Chrome 115 drop `safe center` and start it at the top always, which scrolls the same. */
   .join .audience__idle {
     box-sizing: border-box;
     grid-template-columns: minmax(0, 1fr);

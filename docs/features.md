@@ -7,10 +7,11 @@ Everything the app does, area by area. The website shows the highlights, with pi
 
 - **Each map as Orbit draws it.** Home shows every map as a picture of how it opens, in its own style or the app's colors. Orbit draws the pictures off screen. A map with to-dos or goals says how far along they are ("2 of 7 done", with a bar), counted as its outline counts them.
 - **Finding maps:**
-  - search titles, ideas and notes;
+  - search titles, ideas, notes and tags;
   - pin maps to the top;
   - sort by last edited, last opened, newest or title.
-- **Card menus:** pin, rename, duplicate, share or delete a map. A deleted map comes back with Undo, and from the trash for 30 days.
+- **Tags** group maps however you think of them, and a map can have several. They're kept in each map's file, as `tags:` in its frontmatter, where notes apps like Obsidian read them too, so they go wherever the map goes. Home shows the tags in use as chips under the search: tapping one shows only its maps, and a map made meanwhile takes that tag. Each card shows its map's tags. Edit tags renames a tag, or takes it out of every map. A map's tags are picked or added from its card's menu, or from its own menu while it's open, with Undo there.
+- **Card menus:** pin, rename, tag, duplicate, share or delete a map. A deleted map comes back with Undo, and from the trash for 30 days.
 - **Starting a map:**
   - a blank map;
   - one of eleven templates (project plan, study notes, talk outline, decision, SWOT, goals and more), each previewed live in its own style;
@@ -37,16 +38,17 @@ Everything the app does, area by area. The website shows the highlights, with pi
 - **The long-press menu,** where you pressed, once you let go:
   - for a goal, its numbers first: −1 and +1 for a count, with the menu staying open for the next step, or an amount to add, take off or pay in a small dialog;
   - add ideas under or next to an idea, or rename it on the map;
-  - set its status, color or icon (Android's emoji picker);
+  - set its status, color or icon. Icons come from Android's emoji picker, with a search above it that finds emoji by name or keyword, in the app's language and in English, the emoji people use most first. A long press on a match offers its skin tones;
   - fold its ideas away, or move it earlier, later, in or out;
-  - duplicate it, or delete it with Undo.
+  - duplicate it, or delete it with Undo;
+  - copy it with everything under it, as text other apps paste as an outline, or paste into it, with one Undo: text becomes ideas under it (a line each, nested as the lines are indented; a markdown list, or an idea copied in Orbit, keeps its shape, to-dos, colors and icons), an address on a line of its own an idea that opens it, and a picture its picture. An idea pasted into another map brings its pictures and videos. Orbit only reads the clipboard when you paste, so Android's notice that it did comes with what you asked for.
 - **Dragging an idea somewhere else:** a long press lifts it, and moving on drags it, its moons with it.
   - Onto another idea: it lights up, and the idea goes inside it, shrinking as it's about to. Moved under another idea, a message says where, with Undo.
   - Along the orbit: its place is held where it was, and the other planets make room as it passes them. Over a planet's rim it's still the orbit; near the middle, the planet takes it.
   - A light tick on each idea it could land in, and a tap when it lands. Undo takes it back like any change.
 - **The toolbar** floats over the map: the outline, search, the overview and styles, then the idea in focus's own buttons (its picture or video, what it holds, and its editor), and **+**. On a narrow phone, a map with pictures or videos keeps Style and layout in its menu, so the toolbar stays the same as you fly around.
 - **The editor** (the pencil in the toolbar) covers everything an idea can be:
-  - its text, icon, color, status and priority;
+  - its text, icon, color, status and priority. A color is one of Orbit's, one the map's ideas already have (most used first), or any other from the color picker: hue, saturation and brightness, or its hex code, with the idea shown in it. The long-press menu offers the same colors;
   - its kind: milestone, question, decision, risk, source, person, progress, which draws a ring that fills as the ideas under it get done, or goal;
   - a goal's numbers, at the top for a goal: saving up to a target in a currency (the phone's, or any other), paying something off, or counting things, like 5 apples. The numbers are typed in the phone's language, on the decimal keyboard, and what isn't a number is said under its field;
   - tags, a markdown note with a preview, and a link to a web page or to another idea;
@@ -144,7 +146,7 @@ Everything the app does, area by area. The website shows the highlights, with pi
   - **A phone on its side:** the map's tools stand in a rail at the side, the breadcrumbs and the idea's buttons move into the top bar, and panels open beside the map. Home fits its title and search into one bar, so the maps get the room.
   - **The map always fits what's left:** Orbit fits each view into the room the toolbar, the rail, a sheet or the captions leave, and glides when that changes.
 - **Keyboards and mice,** on tablets and Chromebooks:
-  - **Building a map from the keyboard:** Tab adds an idea under the one with keyboard focus, Shift+Enter one beside it, F2 renames it, and Delete deletes it, with Undo. While typing, Enter brings the next idea, Tab goes under the one just typed, and Shift+Tab comes back up. Arrows move between ideas, Enter flies in, and Escape goes back.
+  - **Building a map from the keyboard:** Tab adds an idea under the one with keyboard focus, Shift+Enter one beside it, F2 renames it, Delete deletes it, with Undo, and Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste into it. While typing, Enter brings the next idea, Tab goes under the one just typed, and Shift+Tab comes back up. Arrows move between ideas, Enter flies in, and Escape goes back.
   - **Shortcuts:**
     - Ctrl+Z and Ctrl+Shift+Z undo and redo, and Ctrl+F searches.
     - Ctrl+1, 2 and 3 switch between the orbit, the whole map and the outline.

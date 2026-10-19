@@ -1,0 +1,16 @@
+{
+  "uniqueId": "unicode:cldr-emoji",
+  "artifactVersion": "CLDR 48.2, Emoji 17.0",
+  "name": "Unicode CLDR and emoji data",
+  "description": "The emoji names and keywords, in English and Spanish, that the icon search finds emoji by, with Unicode's list of emoji and its ranking of how often they're used.",
+  "website": "https://cldr.unicode.org",
+  "developers": [
+    {
+      "name": "Unicode, Inc.",
+      "organisationUrl": "https://www.unicode.org"
+    }
+  ],
+  "licenses": [
+    "Unicode-3.0"
+  ]
+}

@@ -28,6 +28,20 @@ class PagePool(context: Context, private val mapsDirectory: File) {
         }
     }
 
+    /**
+     * Lets the spare page go while the app is out of sight, unless it's busy: a page and its
+     * WebView hold tens of megabytes that Android needs more then. The next [warm] makes another.
+     */
+    fun release() {
+        handler.removeCallbacks(rewarm)
+        val page = spare ?: return
+
+        if (!page.busy) {
+            spare = null
+            page.destroy()
+        }
+    }
+
     /** A page for a screen to show. Give it back with [give] when the screen goes. */
     fun take(): OrbitPage {
         val page = spare?.takeIf { it.isAlive } ?: OrbitPage(application, mapsDirectory)

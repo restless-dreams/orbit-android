@@ -14,6 +14,8 @@
     <string name="common_edit">Edit</string>
     <string name="common_restore">Restore</string>
     <string name="common_remove">Remove</string>
+    <!-- Words maps are grouped by, kept in each map's file. -->
+    <string name="common_tags">Tags</string>
     <string name="common_duplicate">Duplicate</string>
     <string name="common_present">Present</string>
     <string name="common_stop_presenting">Stop presenting</string>

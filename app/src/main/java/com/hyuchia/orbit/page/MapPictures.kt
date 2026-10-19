@@ -1,6 +1,7 @@
 package com.hyuchia.orbit.page
 
 import android.util.Base64
+import com.hyuchia.orbit.data.writeAtomically
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -86,7 +87,8 @@ class MapPictures(private val pool: PagePool, cache: File, private val orbit: St
             withContext(Dispatchers.IO) {
                 thumbnails.mkdirs()
                 thumbnails.listFiles { old -> old.name.startsWith("$id~") }?.forEach { it.delete() }
-                file.writeBytes(bytes)
+                // Whole or not at all: a picture cut short by the app stopping would be shown as it is.
+                writeAtomically(file, bytes)
             }
 
             file

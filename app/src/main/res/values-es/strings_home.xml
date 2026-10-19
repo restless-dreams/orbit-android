@@ -109,4 +109,16 @@
     <string name="home_update_body">Esta copia de Orbit no viene de una tienda de apps, así que no se actualiza sola. Descarga la nueva versión e instálala sobre esta: tus mapas se quedan donde están.</string>
     <string name="home_update_download">Descargar</string>
     <string name="home_update_not_now">Ahora no</string>
+
+    <string name="home_edit_tags">Editar etiquetas</string>
+    <string name="home_rename_tag">Cambiar nombre de la etiqueta</string>
+    <string name="home_tag">Etiqueta</string>
+    <string name="home_remove_tag">Quitar de todos los mapas</string>
+    <plurals name="home_remove_tag_question">
+        <item quantity="one">¿Quitar “%1$s” de %2$d mapa?</item>
+        <item quantity="many">¿Quitar “%1$s” de %2$d mapas?</item>
+        <item quantity="other">¿Quitar “%1$s” de %2$d mapas?</item>
+    </plurals>
+    <string name="home_remove_tag_body">Los mapas quedan como están, sin esta etiqueta.</string>
+    <string name="home_show_only_its_maps">Mostrar solo sus mapas</string>
 </resources>

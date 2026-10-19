@@ -54,6 +54,7 @@ import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
 import com.hyuchia.orbit.data.ImportResult
 import com.hyuchia.orbit.data.MapTemplate
+import com.hyuchia.orbit.data.MapTags
 import com.hyuchia.orbit.data.MapTemplates
 import com.hyuchia.orbit.data.MapText
 import com.hyuchia.orbit.data.readTemplate
@@ -82,7 +83,8 @@ fun NewMapScreen(onCreated: (String) -> Unit, onImported: (ImportResult) -> Unit
     fun start(template: MapTemplate) {
         scope.launch {
             val markdown = context.readTemplate(template)
-            onCreated(container.maps.add(markdown))
+            // A map made while Home shows one tag's maps takes the tag.
+            onCreated(container.maps.add(MapTags.write(markdown, listOfNotNull(container.shownTag.value))))
         }
     }
 

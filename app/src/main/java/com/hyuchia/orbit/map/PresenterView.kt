@@ -50,7 +50,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -88,6 +87,7 @@ import com.hyuchia.orbit.rememberWords
 import com.hyuchia.orbit.theme.OrbitTheme
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.MarkdownNote
+import com.hyuchia.orbit.ui.WavyProgress
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -373,7 +373,7 @@ private fun VideoState(media: ShownMedia) {
                 val progress = { (position / length).toFloat().coerceIn(0f, 1f) }
 
                 if (playing) {
-                    LinearWavyProgressIndicator(progress = progress, modifier = Modifier.width(StageProgressWidth))
+                    WavyProgress(progress = progress, modifier = Modifier.width(StageProgressWidth))
                 } else {
                     LinearProgressIndicator(progress = progress, modifier = Modifier.width(StageProgressWidth))
                 }

@@ -9,7 +9,7 @@ You need:
 - the Android SDK with platform 37 and build tools 37: `sdk.dir` in `local.properties`, or `ANDROID_HOME`.
 
 There are two builds of the same app:
-- **libre**, the default, has no Google code at all, for F-Droid, AppGallery and APKs: presentations reach TVs with Android's own screen casting, or a browser on the TV.
+- **libre**, the default, has no Google Play services or other closed code, for F-Droid, AppGallery and APKs: presentations reach TVs with Android's own screen casting, or a browser on the TV.
 - **play**, for Google Play, casts presentations to TVs with Google Cast where the phone has Google Play services, and screen casts where it doesn't.
 
 About has "Support Orbit", a link to the donation page, in the libre build only: Google Play doesn't allow leading people to pay outside its billing, donations included. For another store that refuses donation links, `-Porbit.supportUrl=` leaves it out, and `-Porbit.supportUrl=https://…` points it somewhere else.
@@ -25,7 +25,7 @@ The APK for the website and GitHub looks for new versions too, since no store up
 
 ## Before a pull request
 
-Run the unit tests and lint for both builds, the code style check, and the pages' tests and lint if `web/` changed. CI runs the same checks on every pull request (`.github/workflows/ci.yml`).
+Run the unit tests and lint for both builds, the code style check, and the pages' tests and lint if `web/` changed. CI runs the same checks on every pull request (`.github/workflows/ci.yml`). It also builds both minified release builds, which catches R8 errors and release-only lint errors, but it never runs them: a crash R8 causes in the running app only shows when you try the release build, as below.
 
 ```bash
 ./gradlew testLibreDebugUnitTest testPlayDebugUnitTest lintLibreDebug lintPlayDebug ktlintCheck
@@ -46,7 +46,7 @@ The maps are drawn by pages inside the app's WebViews, written in TypeScript in 
    cd web
    ORBIT_PATH=../../orbit bun run build   # default ORBIT_PATH: ../../orbit
    ORBIT_PATH=../../orbit bun test        # the goals' math, rings by themselves, maps saved and read back, and the pages' words
-   ORBIT_PATH=../../orbit bun run lint    # the library's code style in web/ and art/; add -- --fix to apply it
+   ORBIT_PATH=../../orbit bun run lint    # the library's code style in web/, art/ and scripts/; add -- --fix to apply it
    ```
 
 Build them with the Bun version in `web/package.json` (`packageManager`). CI rebuilds the pages from `web/` and the Orbit commit in `orbit.json`, and fails if they differ from the committed ones, so anyone can check that the app's pages come from this source.
@@ -54,6 +54,10 @@ Build them with the Bun version in `web/package.json` (`packageManager`). CI reb
 ## The logo
 
 The logo is drawn by `art/logo.ts`. After changing it, `bun art/logo.ts` writes the launcher icon, the themed icon and the splash screen into `app/src/main/res/drawable/`, and the SVGs in `art/`. The store's icon and feature graphic in `fastlane/metadata/android/en-US/images/` are drawn from `art/logo.svg`.
+
+## The emoji names
+
+The icon sheet's search finds emoji by the names and keywords Unicode's CLDR gives them, in English and Spanish, with the emoji people use most first, as Unicode ranks them. `bun scripts/emoji-names.ts` writes them into `app/src/main/assets/emoji/` from Unicode's emoji list, its emoji frequency page and CLDR; the versions it reads are at its top. Unicode's data comes under the Unicode License v3, which the licenses screen shows (`app/config/`).
 
 ## The baseline profile
 

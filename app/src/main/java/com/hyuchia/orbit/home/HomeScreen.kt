@@ -118,6 +118,7 @@ import com.hyuchia.orbit.ui.OldWebViewNotice
 import com.hyuchia.orbit.ui.OrbitGlyph
 import com.hyuchia.orbit.ui.Shortcut
 import com.hyuchia.orbit.ui.ShortcutGroup
+import com.hyuchia.orbit.ui.TagsSheet
 import com.hyuchia.orbit.ui.exportFile
 import com.hyuchia.orbit.ui.exportName
 import com.hyuchia.orbit.ui.orbitViewModel
@@ -172,6 +173,8 @@ fun HomeScreen(
 
     var naming by rememberSaveable { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<MapSummary?>(null) }
+    var tagging by remember { mutableStateOf<MapSummary?>(null) }
+    var managingTags by rememberSaveable { mutableStateOf(false) }
     var sending by remember { mutableStateOf<MapSummary?>(null) }
     var fabOpen by rememberSaveable { mutableStateOf(false) }
 
@@ -188,6 +191,7 @@ fun HomeScreen(
         onPresent = { onPresent(map.id) },
         onPin = { model.setPinned(map.id, !map.metadata.pinned) },
         onRename = { renaming = map },
+        onTags = { tagging = map },
         onDuplicate = { model.duplicate(map.id) },
         onShare = { scope.launch { shareMap(context, container, map) } },
         onSend = { sending = map },
@@ -328,6 +332,12 @@ fun HomeScreen(
                 }
             }
 
+            if (state.tags.isNotEmpty()) {
+                item(key = "tags", span = { GridItemSpan(maxLineSpan) }) {
+                    TagFilter(state.tags, state.tag, onShow = model::showTag, onEdit = { managingTags = true })
+                }
+            }
+
             webView?.takeIf { !it.drawsMaps }?.let { old ->
                 item(key = "old-webview", span = { GridItemSpan(maxLineSpan) }) { OldWebViewNotice(old) }
             }
@@ -412,6 +422,27 @@ fun HomeScreen(
 
     sending?.let { map ->
         SendSheet(map.id, map.title, onDismiss = { sending = null })
+    }
+
+    tagging?.let { map ->
+        TagsSheet(
+            title = map.title,
+            tags = map.outline.tags,
+            known = state.tags.map { it.name },
+            onChange = { tags -> model.setTags(map.id, tags) },
+            onDismiss = { tagging = null },
+        )
+    }
+
+    // Removing the last tag leaves nothing to edit.
+    LaunchedEffect(state.tags.isEmpty()) {
+        if (state.tags.isEmpty() && !state.loading) {
+            managingTags = false
+        }
+    }
+
+    if (managingTags) {
+        ManageTagsSheet(state.tags, onRename = model::renameTag, onRemove = model::removeTag, onDismiss = { managingTags = false })
     }
 
     renaming?.let { map ->
@@ -604,8 +635,9 @@ private fun Message(title: String, body: String) {
 private val SettingsKeys = Keys(KeyEvent.KEYCODE_COMMA, ctrl = true, character = ',')
 
 /** Asks for a map's title. */
+/** A dialog that asks for a name: a map's title, or a tag's with `label`. */
 @Composable
-fun TitleDialog(heading: String, confirm: String, initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+fun TitleDialog(heading: String, confirm: String, initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit, label: String? = null) {
     var title by rememberSaveable { mutableStateOf(initial) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
@@ -619,7 +651,7 @@ fun TitleDialog(heading: String, confirm: String, initial: String, onConfirm: (S
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
-                label = { Text(stringResource(R.string.home_what_is_it_about)) },
+                label = { Text(label ?: stringResource(R.string.home_what_is_it_about)) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = {

@@ -263,6 +263,8 @@ private fun WebPlayerTopBar(title: String, source: VideoSource, onClose: () -> U
 private fun playerView(context: Context, origin: String, page: String, onFullscreen: (Fullscreen?) -> Unit, onGone: () -> Unit): WebView =
     WebView(context).apply {
         setBackgroundColor(AndroidColor.BLACK)
+        // A player has nothing to fill in, so the phone's autofill service stays out of it.
+        importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         isVerticalScrollBarEnabled = false
         isHorizontalScrollBarEnabled = false
         overScrollMode = View.OVER_SCROLL_NEVER

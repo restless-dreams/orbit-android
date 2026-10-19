@@ -26,6 +26,7 @@
     <string name="map_stopped">El mapa se detuvo mientras Android liberaba memoria. Tus cambios están guardados.</string>
     <string name="map_load_it_again">Volver a cargarlo</string>
     <string name="map_icon_for">Ícono de %1$s</string>
+    <string name="map_color_for">Color de %1$s</string>
     <string name="map_delete_dialog_title">¿Eliminar “%1$s”?</string>
     <plurals name="map_delete_dialog_body">
         <item quantity="one">Se va a la papelera con su historial y se queda ahí %d día por si quieres recuperarlo.</item>
@@ -52,6 +53,19 @@
     <string name="map_changed_elsewhere">Este mapa cambió en otro lugar mientras lo editabas. Tu versión está en su historial y Deshacer la recupera.</string>
     <string name="map_change_not_saved">Orbit no guardó ese cambio porque habría vaciado el mapa. Deshacer lo revierte.</string>
     <string name="map_deleted_idea">Se eliminó “%1$s”</string>
+    <string name="map_copy">Copiar</string>
+    <string name="map_paste_as_ideas">Pegar como ideas</string>
+    <string name="map_paste_the_picture">Pegar la imagen</string>
+    <string name="map_copied_idea">Se copió “%1$s”</string>
+    <string name="map_cut_idea">Se cortó “%1$s”</string>
+    <string name="map_too_much_to_copy">Es demasiado para copiar de una vez</string>
+    <string name="map_nothing_to_paste">No hay nada que pegar: primero copia texto o una imagen</string>
+    <string name="map_pasted_the_picture">Se pegó la imagen</string>
+    <plurals name="map_pasted_ideas">
+        <item quantity="one">Se pegó %d idea</item>
+        <item quantity="many">Se pegaron %d ideas</item>
+        <item quantity="other">Se pegaron %d ideas</item>
+    </plurals>
     <string name="map_moved_idea_into_idea">Se movió %1$s dentro de %2$s</string>
     <string name="map_moved_the_idea_into_idea">Se movió la idea dentro de %1$s</string>
     <string name="map_moved_idea_into_another_idea">Se movió %1$s dentro de otra idea</string>
@@ -84,6 +98,9 @@
     <string name="map_shortcut_add_an_idea_beside_it">Agregar una idea al lado</string>
     <string name="map_shortcut_rename_it">Cambiarle el nombre</string>
     <string name="map_shortcut_delete_it">Eliminarla</string>
+    <string name="map_shortcut_copy_it">Copiarla, con sus ideas</string>
+    <string name="map_shortcut_cut_it">Cortarla</string>
+    <string name="map_shortcut_paste_into_it">Pegar en ella</string>
     <string name="map_shortcut_its_menu">Su menú</string>
     <string name="map_shortcut_zoom_in">Acercar</string>
     <string name="map_shortcut_zoom_out">Alejar</string>

@@ -185,7 +185,7 @@
     <string name="settings_updates_never">Tap to check for a new version</string>
     <string name="settings_how_maps_are_written">How maps are written</string>
     <string name="settings_how_maps_are_written_description">The orbit-md format, with every attribute</string>
-    <string name="settings_privacy">Privacy</string>
+    <string name="settings_privacy">Privacy policy</string>
     <string name="settings_privacy_description">Your maps stay on your phone</string>
     <string name="settings_source_code">Source code</string>
     <string name="settings_source_code_description">Free software under the GNU GPL, version 3 or later</string>

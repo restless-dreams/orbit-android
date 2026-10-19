@@ -129,14 +129,37 @@ export const progressOf = (node: OrbitNode): { done: number; total: number } => 
 /** The frontmatter key a map turns its automatic progress rings off with: `progressRings: false`. */
 export const PROGRESS_RINGS = 'progressRings';
 
+/** The frontmatter key a map's tags are kept under, where notes apps look for them too: `tags: [work, trip]`. */
+export const TAGS = 'tags';
+
 /**
  * Whether what Orbit says about a map is about a key the app keeps in its
- * frontmatter itself, such as `progressRings`: Orbit doesn't read it and
- * says so, but it's the app's, so there's nothing to tell people.
+ * frontmatter itself, such as `progressRings` or `tags`: Orbit doesn't read
+ * it and says so, but it's the app's, so there's nothing to tell people.
  */
 export const aboutAppSettings = (note: { code?: string; message: string }): boolean => {
   const unknownKey = note.code === undefined || note.code === 'unknown-frontmatter-key' || note.code === 'unknown-yaml-key';
-  return unknownKey && note.message.includes(`key "${PROGRESS_RINGS}"`);
+  return unknownKey && [PROGRESS_RINGS, TAGS].some((key) => note.message.includes(`key "${key}"`));
+};
+
+/** A map's tags, as its frontmatter has them: a list, or words apart with commas. */
+export const tagsOf = (document: Pick<OrbitDocument, 'extra'> | null | undefined): string[] => {
+  const tags = document?.extra?.[TAGS];
+  const list = Array.isArray(tags) ? tags : typeof tags === 'string' ? tags.split(',') : [];
+  return list.map((tag) => String(tag).trim()).filter((tag) => tag !== '');
+};
+
+/** The map with these tags in its frontmatter; none takes the key out. */
+export const withTags = (document: OrbitDocument, tags: string[]): OrbitDocument => {
+  const extra: Record<string, unknown> = { ...document.extra };
+
+  if (tags.length > 0) {
+    extra[TAGS] = tags;
+  } else {
+    delete extra[TAGS];
+  }
+
+  return { ...document, extra };
 };
 
 /** Whether a map shows progress rings by itself on ideas with to-dos or goals: unless it says `progressRings: false`. */

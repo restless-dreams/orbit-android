@@ -24,6 +24,9 @@ data class MapOutline(
 
     /** The style the map picks in its frontmatter, if any. */
     val style: String? = null,
+
+    /** Its tags, from its frontmatter (see [MapTags]). */
+    val tags: List<String> = emptyList(),
 )
 
 private val HEADING = Regex("""^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$""")
@@ -215,6 +218,7 @@ object MapText {
             ideas = ideas,
             progress = mapNodes.firstOrNull()?.let { root -> MapProgress(mapNodes).under(root) } ?: Rollup(),
             style = frontmatter.values["theme"]?.takeIf { it != "auto" },
+            tags = MapTags.read(markdown),
         )
     }
 

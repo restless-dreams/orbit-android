@@ -3,6 +3,7 @@ package com.hyuchia.orbit.data
 import android.content.ContentResolver
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.hyuchia.orbit.BuildConfig
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.page.CheckedMap
@@ -44,6 +45,10 @@ private val YAML_NODES = Regex("""(?m)^nodes:\s*$""")
 /** The longest a map's title gets from shared text; a longer line is kept whole as the map's note. */
 private const val TITLE_LENGTH = 80
 
+/** Whether a file at an address with this scheme and authority comes from another app: a content address that isn't Orbit's own. */
+internal fun importable(scheme: String?, authority: String?, ownAuthority: String): Boolean =
+    scheme == ContentResolver.SCHEME_CONTENT && authority != null && authority != ownAuthority
+
 /**
  * Turns what other apps hand Orbit into maps: markdown and YAML files, zips
  * of a map and its pictures, and text shared from anywhere. Each map keeps
@@ -53,6 +58,12 @@ private const val TITLE_LENGTH = 80
 class Importer(private val maps: MapRepository, private val pages: PagePool, private val words: Words) {
 
     suspend fun importFile(uri: Uri, resolver: ContentResolver): ImportResult {
+        // Orbit reads what it's handed with its own access, so a path on the phone or one of
+        // Orbit's own shared files would give another app a way to read Orbit's private files.
+        if (!importable(uri.scheme, uri.authority, "${BuildConfig.APPLICATION_ID}.files")) {
+            return ImportResult.Failed(words.string(R.string.common_not_allowed_to_read_that_file))
+        }
+
         return try {
             // Even asking a file's name can be refused, when the app that gave it can't give it.
             val name = withContext(Dispatchers.IO) { displayName(uri, resolver) }.orEmpty()

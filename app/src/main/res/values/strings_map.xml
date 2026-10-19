@@ -26,6 +26,7 @@
     <string name="map_stopped">The map stopped while Android freed memory. Your changes are saved.</string>
     <string name="map_load_it_again">Load it again</string>
     <string name="map_icon_for">Icon for %1$s</string>
+    <string name="map_color_for">Color for %1$s</string>
     <string name="map_delete_dialog_title">Delete “%1$s”?</string>
     <plurals name="map_delete_dialog_body">
         <item quantity="one">It goes to the trash with its history, and stays there for %d day in case you want it back.</item>
@@ -51,6 +52,19 @@
     <string name="map_changed_elsewhere">This map changed elsewhere as you edited it. Your version is in its history, and Undo brings it back.</string>
     <string name="map_change_not_saved">Orbit didn\'t save that change, because it would have emptied the map. Undo takes it back.</string>
     <string name="map_deleted_idea">Deleted “%1$s”</string>
+    <!-- Copying an idea with everything under it, and pasting onto the map: text as ideas under one, a picture as its picture. -->
+    <string name="map_copy">Copy</string>
+    <string name="map_paste_as_ideas">Paste as ideas</string>
+    <string name="map_paste_the_picture">Paste the picture</string>
+    <string name="map_copied_idea">Copied “%1$s”</string>
+    <string name="map_cut_idea">Cut “%1$s”</string>
+    <string name="map_too_much_to_copy">That’s too much to copy at once</string>
+    <string name="map_nothing_to_paste">There’s nothing to paste: copy some text or a picture first</string>
+    <string name="map_pasted_the_picture">Pasted the picture</string>
+    <plurals name="map_pasted_ideas">
+        <item quantity="one">Pasted %d idea</item>
+        <item quantity="other">Pasted %d ideas</item>
+    </plurals>
     <string name="map_moved_idea_into_idea">Moved %1$s into %2$s</string>
     <string name="map_moved_the_idea_into_idea">Moved the idea into %1$s</string>
     <string name="map_moved_idea_into_another_idea">Moved %1$s into another idea</string>
@@ -82,6 +96,9 @@
     <string name="map_shortcut_add_an_idea_beside_it">Add an idea beside it</string>
     <string name="map_shortcut_rename_it">Rename it</string>
     <string name="map_shortcut_delete_it">Delete it</string>
+    <string name="map_shortcut_copy_it">Copy it, with its ideas</string>
+    <string name="map_shortcut_cut_it">Cut it</string>
+    <string name="map_shortcut_paste_into_it">Paste into it</string>
     <string name="map_shortcut_its_menu">Its menu</string>
     <string name="map_shortcut_zoom_in">Zoom in</string>
     <string name="map_shortcut_zoom_out">Zoom out</string>

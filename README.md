@@ -11,7 +11,7 @@
   <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/5.jpg" width="24%" alt="A map presented full screen, with the idea's note as its caption">
 </p>
 
-**[orbit.hyuchia.com/android](https://orbit.hyuchia.com/android)** · [Every feature](docs/features.md) · [How it's built](docs/architecture.md) · [Privacy](app/src/main/assets/privacy.md) · [Contributing](CONTRIBUTING.md) · [Translating](TRANSLATING.md)
+**[orbit.hyuchia.com/android](https://orbit.hyuchia.com/android)** · [Every feature](docs/features.md) · [How it's built](docs/architecture.md) · [Privacy policy](app/src/main/assets/privacy.md) · [Contributing](CONTRIBUTING.md) · [Translating](TRANSLATING.md)
 
 ## Get it
 
@@ -35,7 +35,7 @@ Every feature, area by area, is in [docs/features.md](docs/features.md).
 You need JDK 21 (`mise install` reads `mise.toml`) and the Android SDK with platform and build tools 37. Then:
 
 ```bash
-./gradlew assembleLibreDebug     # the build without Google code, for F-Droid, AppGallery and APKs
+./gradlew assembleLibreDebug     # the build without Google Play services, for F-Droid, AppGallery and APKs
 ./gradlew assemblePlayDebug      # the Google Play build, which casts to TVs with Google Cast
 ```
 

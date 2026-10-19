@@ -41,7 +41,7 @@ Construye el mapa sobre el mapa mismo.
   - Libros este año <!-- orbit type: goal, target: 12, current: 5 -->
 
 ## 📝 Notas y detalles
-Cada idea puede llevar una nota en markdown, con **negritas**, *cursivas*, listas y [enlaces](https://orbit.hyuchia.com). Toca el botón de nota debajo de una idea para leerla.
+Cada idea puede llevar una nota en markdown, con **negritas**, *cursivas*, listas y [enlaces](https://orbit.hyuchia.com/android). Toca el botón de nota debajo de una idea para leerla.
 - Imágenes y videos
   Agrega una foto de tu teléfono, o un enlace de YouTube, desde el editor de una idea.
 - Enlaces entre ideas

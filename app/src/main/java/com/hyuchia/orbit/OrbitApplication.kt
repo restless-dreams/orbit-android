@@ -1,6 +1,7 @@
 package com.hyuchia.orbit
 
 import android.app.Application
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Build
@@ -18,17 +19,20 @@ import com.hyuchia.orbit.data.MapRepository
 import com.hyuchia.orbit.data.SettingsRepository
 import com.hyuchia.orbit.data.TrashedMap
 import com.hyuchia.orbit.data.Updates
+import com.hyuchia.orbit.map.MapClipboard
 import com.hyuchia.orbit.nearby.NearbyHost
 import com.hyuchia.orbit.page.MapPictures
 import com.hyuchia.orbit.page.OrbitBuild
 import com.hyuchia.orbit.page.PagePool
 import com.hyuchia.orbit.widget.offerWidgetPreview
 import com.hyuchia.orbit.widget.updateMapWidgets
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -55,8 +59,20 @@ class AppContainer(context: Context, /** Reports of crashes, kept on the phone. 
     /** Ideas added to maps without opening them: from the tile, a widget, or another app. */
     val capture = QuickCapture(pages, maps, settings)
 
-    /** For work that outlives a screen, such as saving the last edit as a map closes. */
-    val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** Copying ideas, and pasting text and pictures onto maps. */
+    val clipboard = MapClipboard(context.applicationContext)
+
+    /** The tag Home shows only the maps of, if one is picked, while the app runs; maps made meanwhile take it. */
+    val shownTag = MutableStateFlow<String?>(null)
+
+    /**
+     * For work that outlives a screen, such as saving the last edit as a map
+     * closes. A failure there is logged, never the app's end: a full storage
+     * refusing that save mustn't close Orbit too.
+     */
+    val applicationScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, failure -> Logs.warn("Orbit", "Background work failed", failure) },
+    )
 
     /** This device for others on the local network, while Orbit is open: maps sent here, maps shown to computers. */
     val nearby = NearbyHost(context.applicationContext, maps, applicationScope)
@@ -90,6 +106,15 @@ class OrbitApplication : Application() {
         locales = resources.configuration.locales
         keepWidgetsCurrent()
         container.folderSync.start(ProcessLifecycleOwner.get().lifecycle)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+
+        // Out of sight, the spare page that makes the next map open at once isn't worth its memory.
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            container.pages.release()
+        }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {

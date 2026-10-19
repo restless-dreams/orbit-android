@@ -89,6 +89,7 @@ import com.hyuchia.orbit.theme.parseCssColor
 import com.hyuchia.orbit.ui.ColorChoices
 import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.MarkdownNote
+import com.hyuchia.orbit.ui.offeredCustomColors
 import com.hyuchia.orbit.ui.ToggleRow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -118,7 +119,7 @@ val NodeKinds = listOf(
 /** Everything an idea can be, edited live: each change shows on the map behind as it's made. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean, onPickIcon: (String) -> Unit) {
+fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean, onPickIcon: (String) -> Unit, onPickColor: (String) -> Unit) {
     val context = LocalContext.current
     var linking by remember { mutableStateOf(false) }
 
@@ -188,10 +189,14 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean, on
             }
 
             Section(stringResource(R.string.common_color)) {
+                val mapColors = remember(ui.map?.nodes, node.color) { offeredCustomColors(ui.map?.nodes.orEmpty().map { it.color }, node.color) }
+
                 ColorChoices(
                     current = node.color,
                     automatic = parseCssColor(node.drawnColor).takeIf { node.color == null },
                     onPick = { color -> set("color", color?.let(::JsonPrimitive)) },
+                    mapColors = mapColors,
+                    onCustom = { onPickColor(node.id) },
                 )
             }
 

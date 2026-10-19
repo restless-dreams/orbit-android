@@ -7,6 +7,7 @@ import android.graphics.ImageDecoder
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +31,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
@@ -113,6 +115,9 @@ private val VERSION_NAME = Regex("""(\d+)(\.original)?\.md""")
 /** Pictures are kept at most this many pixels on their longer side. */
 private const val PICTURE_SIZE = 2048
 
+/** How many times a tag change reads the map again when it changed under it. */
+private const val TAG_TRIES = 3
+
 /** A video's poster is at most this many pixels on its longer side: enough for a planet, and for the viewer until the video plays. */
 private const val POSTER_SIZE = 1280
 
@@ -169,7 +174,13 @@ class MapBundle(
     /** The map's title, as its outline reads it. */
     val title: String,
 
-    val pictures: Map<String, ByteArray>,
+    /**
+     * Its pictures and videos, by name: files they were unpacked to as the zip was read, never
+     * memory, since a map's can come to nearly a hundred megabytes. [MapRepository.receive] moves
+     * them into the map, and files a bundle that's never taken in leaves are cleared later.
+     */
+    val pictures: Map<String, File>,
+
     val uuid: String?,
     val focus: String?,
     val view: String?,
@@ -367,7 +378,12 @@ class MapRepository(
         return folder
     }
 
-    fun exists(id: String): Boolean = File(folder(id), MAP_FILE).isFile
+    /** Whether `id` is a map here. Shortcuts and widgets other apps can start may carry any text as an id: one no map could have is no map. */
+    fun exists(id: String): Boolean = try {
+        File(folder(id), MAP_FILE).isFile
+    } catch (notAMap: IllegalArgumentException) {
+        false
+    }
 
     /** The map's text. Throws when it's gone or can't be read. */
     suspend fun read(id: String): String = withContext(Dispatchers.IO) {
@@ -492,8 +508,55 @@ class MapRepository(
         return result
     }
 
+    /**
+     * Gives a map these tags, in its file's frontmatter (see [MapTags]). A
+     * screen showing the map catches up, and undo there brings the old ones
+     * back. Tries again while the map changes under it.
+     */
+    suspend fun setTags(id: String, tags: List<String>): WriteResult = editTags(id) { tags }
+
+    /**
+     * Renames a tag in every map that has it, whatever its capitals, as one
+     * tag with any it's renamed to; `to` null takes it out of them. Says how
+     * many maps changed.
+     */
+    suspend fun renameTag(from: String, to: String?): Int {
+        val key = MapTags.key(from)
+        val tagged = summaries.value.orEmpty().filter { map -> !map.unreadable && map.outline.tags.any { MapTags.key(it) == key } }
+        var changed = 0
+
+        for (map in tagged) {
+            val result = editTags(map.id) { tags -> tags.flatMap { tag -> if (MapTags.key(tag) == key) listOfNotNull(to) else listOf(tag) } }
+
+            if (result == WriteResult.Written) {
+                changed += 1
+            }
+        }
+
+        return changed
+    }
+
+    private suspend fun editTags(id: String, edit: (List<String>) -> List<String>): WriteResult {
+        repeat(TAG_TRIES) {
+            val current = try {
+                read(id)
+            } catch (gone: IOException) {
+                return WriteResult.Missing
+            }
+
+            val result = change(id, MapTags.write(current, edit(MapTags.read(current))), base = current)
+
+            if (result != WriteResult.Changed) {
+                return result
+            }
+        }
+
+        return WriteResult.Changed
+    }
+
     /** Creates a map with just its root, and returns its id. */
-    suspend fun create(title: String, style: String? = null): String = add(MapText.newMap(title, words, style))
+    suspend fun create(title: String, style: String? = null, tags: List<String> = emptyList()): String =
+        add(MapTags.write(MapText.newMap(title, words, style), tags))
 
     /**
      * Creates a map from orbit-md text: a template, an import, something
@@ -572,7 +635,12 @@ class MapRepository(
                 return@withLock null
             }
 
-            File(historyDirectory, id).takeIf { it.isDirectory }?.let { history -> move(history, File(trashedFolder, TRASHED_HISTORY)) }
+            val history = File(historyDirectory, id)
+
+            if (history.isDirectory && !move(history, File(trashedFolder, TRASHED_HISTORY))) {
+                Logs.warn("MapRepository", "Couldn't take a map's history to the trash: it stays where it was")
+            }
+
             record?.let { writeTombstones(readTombstones() + it) }
             summaries.update { maps -> maps?.filterNot { it.id == id } }
             val item = trashedMap(trashedFolder)
@@ -598,7 +666,12 @@ class MapRepository(
                 return@withLock null
             }
 
-            File(folder, TRASHED_HISTORY).takeIf { it.isDirectory }?.let { history -> move(history, File(historyDirectory, id)) }
+            val trashedHistory = File(folder, TRASHED_HISTORY)
+
+            if (trashedHistory.isDirectory && !move(trashedHistory, File(historyDirectory, id))) {
+                Logs.warn("MapRepository", "Couldn't bring a map's history back from the trash: it stays in the map's folder")
+            }
+
             // Its file stays in the folder; if it's gone from there already, it's written again as a new one.
             val metadata = readMetadata(folder)
             val record = metadata.sync
@@ -790,6 +863,41 @@ class MapRepository(
     }
 
     /**
+     * Copies the pictures and videos `markdown` points to (`media/…`) from map
+     * `from` into map `to`, for ideas copied in one map and pasted into the
+     * other. A name `to` has already is left as it is: Orbit names media by
+     * the moment they were added, so it's the same file. As adding them one
+     * by one would be, it's refused with a [MediaRefusedException] past
+     * `to`'s room.
+     */
+    suspend fun copyMedia(from: String, to: String, markdown: String): Unit = withContext(Dispatchers.IO) {
+        if (from == to || !exists(from) || !exists(to)) {
+            return@withContext
+        }
+
+        checkWritable()
+
+        val source = File(folder(from), MEDIA_DIRECTORY)
+        val target = File(folder(to), MEDIA_DIRECTORY)
+
+        val copies = mediaNamesIn(markdown).mapNotNull { name ->
+            val file = try {
+                fileInside(source, name, words)
+            } catch (outside: RefusedZipException) {
+                null
+            }
+
+            file?.takeIf { it.isFile && !File(target, name).exists() }
+        }
+
+        pictureRefusal(copies.sumOf { it.length() }, mediaSize(to), words)?.let { throw MediaRefusedException(it) }
+
+        for (file in copies) {
+            writeAtomically(fileInside(target, file.name, words)) { output -> file.inputStream().use { it.copyTo(output) } }
+        }
+    }
+
+    /**
      * Copies a video from the phone into the map's folder as it is, under a
      * name of Orbit's own with the extension its type has, and puts a frame
      * from it beside it as a JPEG, for the map to show as its poster. A video
@@ -968,11 +1076,12 @@ class MapRepository(
      * outside it, is refused with an [IOException].
      */
     suspend fun readBundle(input: InputStream, withPictures: Boolean = true): MapBundle? = withContext(Dispatchers.IO) {
-        val pictures = mutableMapOf<String, ByteArray>()
+        val pictures = mutableMapOf<String, File>()
         val pictureNames = mutableSetOf<String>()
         val texts = mutableMapOf<String, String>()
         var info = BundleInfo()
         val budget = ZipBudget(BUNDLE_ENTRIES, BUNDLE_SIZE, words)
+        val unpacked = File(unpacking, UUID.randomUUID().toString())
 
         ZipInputStream(input).use { zip ->
             while (true) {
@@ -991,7 +1100,11 @@ class MapRepository(
                         pictureNames += name
 
                         if (withPictures) {
-                            pictures[name] = zip.readLimited(budget)
+                            val file = fileInside(unpacked, name, words)
+                            unpacked.mkdirs()
+
+                            FileOutputStream(file).use { output -> zip.copyLimited(output, budget) }
+                            pictures[name] = file
                         } else {
                             zip.skipEntry(budget)
                         }
@@ -1095,31 +1208,72 @@ class MapRepository(
      * Returns how many maps it holds.
      */
     suspend fun exportAll(output: OutputStream): Int = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            val folders = directory.listFiles { file -> file.isDirectory && !file.name.startsWith(".") && File(file, MAP_FILE).isFile }.orEmpty()
+        val folders = mutex.withLock {
+            directory.listFiles { file -> file.isDirectory && !file.name.startsWith(".") && File(file, MAP_FILE).isFile }.orEmpty().toList()
+        }
 
-            ZipOutputStream(output).use { zip ->
-                for (folder in folders) {
-                    // Each map leaves with an identity, so bringing it back finds it here instead of copying it.
-                    val metadata = readMetadata(folder)
+        var exported = 0
 
-                    if (metadata.uuid == null && canWrite.value) {
-                        writeMetadata(folder, metadata.copy(uuid = UUID.randomUUID().toString()))
+        ZipOutputStream(output).use { zip ->
+            for (folder in folders) {
+                // Each map's text and details as they are now, under the lock, so a save meanwhile never leaves half of one.
+                val map = mutex.withLock { exportedMap(folder) } ?: continue
+                exported += 1
+
+                for ((name, bytes) in map.texts) {
+                    zip.putNextEntry(ZipEntry(name))
+                    zip.write(bytes)
+                    zip.closeEntry()
+                }
+
+                // Pictures, videos and versions are only ever replaced whole, never written into, so they're copied
+                // outside the lock: a big video doesn't hold up saves and syncs. One deleted meanwhile is left out.
+                for ((file, name) in map.files) {
+                    val input = try {
+                        file.inputStream()
+                    } catch (gone: FileNotFoundException) {
+                        continue
                     }
 
-                    val files = folder.walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.map { it to "${folder.name}/${it.relativeTo(folder).invariantSeparatorsPath}" } +
-                        versionFiles(folder.name).asSequence().map { (_, file) -> file to "${folder.name}/$HISTORY_DIRECTORY/${file.name}" }
-
-                    for ((file, name) in files) {
+                    input.use {
                         zip.putNextEntry(ZipEntry(name))
-                        file.inputStream().use { it.copyTo(zip) }
+                        it.copyTo(zip)
                         zip.closeEntry()
                     }
                 }
             }
-
-            folders.size
         }
+
+        exported
+    }
+
+    /** A map as [exportAll] writes it: its text and details read now, and its other files to copy. Null once it's gone. */
+    private class ExportedMap(val texts: List<Pair<String, ByteArray>>, val files: List<Pair<File, String>>)
+
+    private fun exportedMap(folder: File): ExportedMap? {
+        val text = File(folder, MAP_FILE)
+
+        if (!text.isFile) {
+            return null
+        }
+
+        // Each map leaves with an identity, so bringing it back finds it here instead of copying it.
+        val metadata = readMetadata(folder)
+
+        if (metadata.uuid == null && canWrite.value) {
+            writeMetadata(folder, metadata.copy(uuid = UUID.randomUUID().toString()))
+        }
+
+        val read = setOf(MAP_FILE, METADATA_FILE)
+
+        val texts = folder.listFiles { file -> file.name in read && file.isFile }.orEmpty()
+            .map { "${folder.name}/${it.name}" to it.readBytes() }
+
+        val files = folder.walkTopDown().filter { it.isFile && !it.name.startsWith(".") && it.relativeTo(folder).path !in read }
+            .map { it to "${folder.name}/${it.relativeTo(folder).invariantSeparatorsPath}" }
+            .toList() + versionFiles(folder.name).map { (_, file) -> file to "${folder.name}/$HISTORY_DIRECTORY/${file.name}" }
+
+        return ExportedMap(texts, files)
     }
 
     /**
@@ -1209,7 +1363,7 @@ class MapRepository(
                 }
 
                 val folder = folders.getOrPut(parts[0]) { File(into, folders.size.toString()) }
-                val file = File(folder, parts.drop(1).joinToString("/"))
+                val file = fileInside(folder, parts.drop(1).joinToString("/"), words)
                 file.parentFile?.mkdirs()
 
                 FileOutputStream(file).use { output ->
@@ -1242,8 +1396,21 @@ class MapRepository(
         }
     }
 
-    private fun writePictures(folder: File, pictures: Map<String, ByteArray>) {
-        pictures.forEach { (name, bytes) -> writeAtomically(File(File(folder, MEDIA_DIRECTORY), name), bytes) }
+    /** Moves a bundle's pictures and videos into a map's folder, copying one only when it can't move. */
+    private fun writePictures(folder: File, pictures: Map<String, File>) {
+        val media = File(folder, MEDIA_DIRECTORY)
+        media.mkdirs()
+
+        pictures.forEach { (name, source) ->
+            val target = fileInside(media, name, words)
+
+            if (!source.renameTo(target)) {
+                writeAtomically(target) { output -> source.inputStream().use { it.copyTo(output) } }
+                source.delete()
+            }
+
+            source.parentFile?.delete()
+        }
     }
 
     // History
@@ -1399,7 +1566,12 @@ class MapRepository(
             MetadataFile.decode(file.readText())
         } catch (unreadable: SerializationException) {
             if (canWrite.value) {
-                file.renameTo(File(folder, "$METADATA_FILE.unreadable-${clock()}"))
+                // Kept aside, never written over: copied when it can't be moved, since the next write takes its place.
+                val aside = File(folder, "$METADATA_FILE.unreadable-${clock()}")
+
+                if (!file.renameTo(aside)) {
+                    runCatching { file.copyTo(aside, overwrite = true) }.onFailure { Logs.warn("MapRepository", "Couldn't keep an unreadable ${file.name} aside", it) }
+                }
             }
 
             fresh
@@ -1458,16 +1630,39 @@ class MapRepository(
     }
 }
 
-/** Moves a folder, or copies it over when it can't simply be renamed. */
-private fun move(from: File, to: File) {
+/**
+ * Moves a folder, or copies it over when it can't simply be renamed. Files
+ * the other side has already stay as they are there. A copy that fails
+ * leaves the folder where it was, whole: nothing of it is deleted unless
+ * every file got across. Says whether it moved.
+ */
+internal fun move(from: File, to: File): Boolean {
     to.parentFile?.mkdirs()
 
     if (!to.exists() && from.renameTo(to)) {
-        return
+        return true
     }
 
-    from.copyRecursively(to, overwrite = false) { _, _ -> OnErrorAction.SKIP }
-    from.deleteRecursively()
+    var whole = true
+
+    // Some failures reach the callback, and some (a file that can't be opened) are thrown: neither deletes anything.
+    try {
+        from.copyRecursively(to, overwrite = false) { _, failure ->
+            if (failure !is FileAlreadyExistsException) {
+                whole = false
+            }
+
+            OnErrorAction.SKIP
+        }
+    } catch (failed: IOException) {
+        whole = false
+    }
+
+    if (whole) {
+        from.deleteRecursively()
+    }
+
+    return whole
 }
 
 /** A zip Orbit won't take in: too big once unpacked, too many files, or files that point outside it. Its message says which, for people. */
@@ -1514,6 +1709,22 @@ internal fun checkEntryName(name: String, words: Words) {
 
 private val DRIVE = Regex("^[A-Za-z]:")
 
+/**
+ * The file `name` names inside `directory`, refusing a name that resolves outside it. The names
+ * are checked as they're read already; this is the check Google Play looks for where a zip is
+ * unpacked, made on the path the file is written to.
+ */
+internal fun fileInside(directory: File, name: String, words: Words): File {
+    val root = directory.canonicalFile
+    val file = File(root, name).canonicalFile
+
+    if (!file.path.startsWith(root.path + File.separator)) {
+        throw RefusedZipException(words.string(R.string.data_zip_points_outside))
+    }
+
+    return file
+}
+
 /** An entry of a zip, refusing one bigger than `limit`, and counting it in `budget`. */
 private fun ZipInputStream.readLimited(budget: ZipBudget, limit: Long = ZIP_ENTRY_LIMIT): ByteArray {
     val output = ByteArrayOutputStream()
@@ -1555,3 +1766,9 @@ private val PICTURE_REFERENCE = Regex("$MEDIA_DIRECTORY/([A-Za-z0-9][A-Za-z0-9._
 
 internal fun digest(text: String): String =
     MessageDigest.getInstance("SHA-1").digest(text.toByteArray()).take(8).joinToString("") { "%02x".format(it) }
+
+/** A picture or video a map's text points to: `media/` and a name of Orbit's own. */
+private val MediaReference = Regex("""\bmedia/([A-Za-z0-9][A-Za-z0-9._-]*)""")
+
+/** The names of the pictures and videos `markdown` points to in its map's `media/`, each once. */
+internal fun mediaNamesIn(markdown: String): List<String> = MediaReference.findAll(markdown).map { it.groupValues[1] }.distinct().toList()

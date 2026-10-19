@@ -35,8 +35,8 @@ android {
         minSdk = 29
         targetSdk = 36
         // One more with each release, whatever its name: stores and Android tie every update to it.
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.2.0"
     }
 
     // The languages the app speaks (see TRANSLATING.md). Android lists them in the app's language
@@ -59,6 +59,8 @@ android {
             // Where About's "Support Orbit" goes: the donation page. -Porbit.supportUrl= leaves the
             // item out, for stores that may refuse apps with donation links, such as AppGallery.
             buildConfigField("String", "SUPPORT_URL", "\"${providers.gradleProperty("orbit.supportUrl").getOrElse("https://orbit.hyuchia.com/support")}\"")
+            // Where About's "Orbit on the web" goes.
+            buildConfigField("String", "WEBSITE_URL", "\"https://orbit.hyuchia.com\"")
             // The APK for the website and GitHub looks for new versions there, since no store updates it:
             // -Porbit.checkForUpdates=true (RELEASE.md). Every other build leaves updates to its store,
             // F-Droid's and AppGallery's included, and so does anyone else's build of this source.
@@ -72,6 +74,9 @@ android {
             // Google Play doesn't allow leading people to pay outside its billing, donations included,
             // so the play build never has "Support Orbit", whatever orbit.supportUrl says.
             buildConfigField("String", "SUPPORT_URL", "\"\"")
+            // For the same reason About's "Orbit on the web" opens the app's own page, not the home page
+            // with its section for supporting Orbit.
+            buildConfigField("String", "WEBSITE_URL", "\"https://orbit.hyuchia.com/android\"")
             // Google Play updates the app, and doesn't allow it to be updated any other way.
             buildConfigField("String", "UPDATES_URL", "\"\"")
             // The Cast receiver TVs present maps with: the site web/build.ts makes, registered with Google
@@ -118,6 +123,14 @@ android {
         buildConfig = true
         // For the app's id as a string, below.
         resValues = true
+    }
+
+    // The build tools add a list of the app's libraries, encrypted so that only Google Play can read it. The Play
+    // bundle keeps it, for Play's warnings about libraries; APKs leave it out, since nobody else can read it, and
+    // F-Droid can't check a developer's APK against its own build of the source while it's there.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = true
     }
 }
 

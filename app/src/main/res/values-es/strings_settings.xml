@@ -172,7 +172,7 @@
     <string name="settings_updates_never">Toca para buscar una versión nueva</string>
     <string name="settings_how_maps_are_written">Cómo se escriben los mapas</string>
     <string name="settings_how_maps_are_written_description">El formato orbit-md, con todos sus atributos</string>
-    <string name="settings_privacy">Privacidad</string>
+    <string name="settings_privacy">Política de privacidad</string>
     <string name="settings_privacy_description">Tus mapas se quedan en tu teléfono</string>
     <string name="settings_source_code">Código fuente</string>
     <string name="settings_source_code_description">Software libre bajo la GNU GPL, versión 3 o posterior</string>

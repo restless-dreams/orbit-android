@@ -6,6 +6,20 @@
     <!-- The share sheet's title. %1$s is what's shared: a map's or idea's name. -->
     <string name="ui_share_named">Share “%1$s”</string>
     <string name="ui_no_icon">No icon</string>
+    <!-- The sheet for a map's tags. %1$s is the map's title. -->
+    <string name="ui_tags_for">Tags for %1$s</string>
+    <string name="ui_new_tag">New tag</string>
+    <string name="ui_add_tag">Add</string>
+    <string name="ui_tags_help">Tags group your maps however you think of them, like Work or Japan trip. A map can have several. Type one to add it.</string>
+    <!-- A map card's tags, as screen readers say them. %1$s is the list. -->
+    <string name="ui_tags_list">Tags: %1$s</string>
+    <!-- The icon sheet's search, which finds emoji by their names and keywords. -->
+    <string name="ui_search_emoji">Search emoji</string>
+    <string name="ui_clear_the_search">Clear the search</string>
+    <!-- %1$s is what was typed. -->
+    <string name="ui_no_emoji_found">No emoji for “%1$s”</string>
+    <!-- What a long press on a found emoji does, as TalkBack says it. -->
+    <string name="ui_choose_a_skin_tone">Choose a skin tone</string>
 
     <!-- When the phone's WebView is too old to draw maps. %1$s is its name, such as Android System WebView. -->
     <string name="ui_web_view_update_to_see_maps">Update %1$s to see your maps</string>
@@ -55,4 +69,35 @@
     <string name="ui_color_gray">Gray</string>
     <!-- A color without a name of its own, by where it is among them. -->
     <string name="ui_color_numbered">Color %1$d</string>
+
+    <!-- Choosing any color: the swatch that opens the picker, and the map's own colors, named roughly for screen readers. -->
+    <string name="ui_color_custom">Custom color</string>
+    <!-- %1$s is the color's rough name, such as "light blue". -->
+    <string name="ui_color_custom_named">Custom color: %1$s</string>
+    <string name="ui_color_family_red">red</string>
+    <string name="ui_color_family_orange">orange</string>
+    <string name="ui_color_family_yellow">yellow</string>
+    <string name="ui_color_family_green">green</string>
+    <string name="ui_color_family_teal">teal</string>
+    <string name="ui_color_family_blue">blue</string>
+    <string name="ui_color_family_purple">purple</string>
+    <string name="ui_color_family_pink">pink</string>
+    <string name="ui_color_family_brown">brown</string>
+    <string name="ui_color_family_gray">gray</string>
+    <string name="ui_color_family_black">black</string>
+    <string name="ui_color_family_white">white</string>
+    <!-- %1$s is a color's name, such as "blue". -->
+    <string name="ui_color_light">light %1$s</string>
+    <string name="ui_color_dark">dark %1$s</string>
+    <!-- The color picker: a slider for the hue, an area for saturation and brightness, and the color's hex code. -->
+    <string name="ui_color_hue">Hue</string>
+    <string name="ui_color_saturation_and_brightness">Saturation and brightness</string>
+    <!-- %1$s and %2$s are percentages, such as 60%. -->
+    <string name="ui_color_saturation_and_brightness_now">Saturation %1$s, brightness %2$s</string>
+    <string name="ui_color_more_vivid">More vivid</string>
+    <string name="ui_color_less_vivid">Less vivid</string>
+    <string name="ui_color_brighter">Brighter</string>
+    <string name="ui_color_darker">Darker</string>
+    <string name="ui_color_hex_code">Hex code</string>
+    <string name="ui_color_hex_code_help">6 digits, 0 to 9 and A to F</string>
 </resources>

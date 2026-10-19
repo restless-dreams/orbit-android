@@ -4,6 +4,15 @@
     <string name="ui_map_deleted">Este mapa se eliminó</string>
     <string name="ui_share_named">Compartir “%1$s”</string>
     <string name="ui_no_icon">Sin ícono</string>
+    <string name="ui_tags_for">Etiquetas de %1$s</string>
+    <string name="ui_new_tag">Nueva etiqueta</string>
+    <string name="ui_add_tag">Agregar</string>
+    <string name="ui_tags_help">Las etiquetas agrupan tus mapas como tú los pienses, como Trabajo o Viaje a Japón. Un mapa puede tener varias. Escribe una para agregarla.</string>
+    <string name="ui_tags_list">Etiquetas: %1$s</string>
+    <string name="ui_search_emoji">Buscar emoji</string>
+    <string name="ui_clear_the_search">Borrar la búsqueda</string>
+    <string name="ui_no_emoji_found">Ningún emoji para “%1$s”</string>
+    <string name="ui_choose_a_skin_tone">Elegir un tono de piel</string>
 
     <string name="ui_web_view_update_to_see_maps">Actualiza %1$s para ver tus mapas</string>
     <string name="ui_web_view_too_old">Orbit dibuja los mapas con %1$s, y el de este teléfono es muy antiguo: Chromium %2$d, y Orbit necesita la versión %3$d o una posterior. Actualízalo desde tu tienda de apps o con una actualización del sistema, y tus mapas aparecerán. Todos siguen aquí.</string>
@@ -46,4 +55,30 @@
     <string name="ui_color_violet">Violeta</string>
     <string name="ui_color_gray">Gris</string>
     <string name="ui_color_numbered">Color %1$d</string>
+
+    <string name="ui_color_custom">Color personalizado</string>
+    <string name="ui_color_custom_named">Color personalizado: %1$s</string>
+    <string name="ui_color_family_red">rojo</string>
+    <string name="ui_color_family_orange">naranja</string>
+    <string name="ui_color_family_yellow">amarillo</string>
+    <string name="ui_color_family_green">verde</string>
+    <string name="ui_color_family_teal">turquesa</string>
+    <string name="ui_color_family_blue">azul</string>
+    <string name="ui_color_family_purple">morado</string>
+    <string name="ui_color_family_pink">rosa</string>
+    <string name="ui_color_family_brown">café</string>
+    <string name="ui_color_family_gray">gris</string>
+    <string name="ui_color_family_black">negro</string>
+    <string name="ui_color_family_white">blanco</string>
+    <string name="ui_color_light">%1$s claro</string>
+    <string name="ui_color_dark">%1$s oscuro</string>
+    <string name="ui_color_hue">Tono</string>
+    <string name="ui_color_saturation_and_brightness">Saturación y brillo</string>
+    <string name="ui_color_saturation_and_brightness_now">Saturación %1$s, brillo %2$s</string>
+    <string name="ui_color_more_vivid">Más intenso</string>
+    <string name="ui_color_less_vivid">Menos intenso</string>
+    <string name="ui_color_brighter">Más brillante</string>
+    <string name="ui_color_darker">Más oscuro</string>
+    <string name="ui_color_hex_code">Código hexadecimal</string>
+    <string name="ui_color_hex_code_help">6 dígitos, del 0 al 9 y de la A a la F</string>
 </resources>

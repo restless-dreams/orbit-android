@@ -80,6 +80,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.Log
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
 import androidx.media3.exoplayer.ExoPlayer
@@ -93,6 +94,7 @@ import androidx.media3.ui.compose.material3.indicator.DurationText
 import androidx.media3.ui.compose.material3.indicator.PositionText
 import androidx.media3.ui.compose.material3.indicator.ProgressSlider
 import coil3.compose.AsyncImage
+import com.hyuchia.orbit.BuildConfig
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.ui.Hint
@@ -162,6 +164,11 @@ fun VideoPlayer(
     val context = LocalContext.current
 
     val player = remember {
+        // Media3 logs its errors, which can name a map's folder or a video's site: not in release builds.
+        if (!BuildConfig.DEBUG) {
+            Log.setLogLevel(Log.LOG_LEVEL_OFF)
+        }
+
         ExoPlayer.Builder(context)
             .setSeekBackIncrementMs(SEEK_MILLISECONDS)
             .setSeekForwardIncrementMs(SEEK_MILLISECONDS)

@@ -71,7 +71,10 @@ class MapWidgetConfigureActivity : ComponentActivity() {
         // Leaving without a choice keeps the widget off the home screen, or as it was.
         setResult(Activity.RESULT_CANCELED, result())
 
-        if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
+        // Another app can start this screen with any number: only Orbit's own widgets are set up here.
+        val widget = AppWidgetManager.getInstance(this).getAppWidgetInfo(appWidgetId)
+
+        if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID || widget?.provider?.packageName != packageName) {
             finish()
             return
         }

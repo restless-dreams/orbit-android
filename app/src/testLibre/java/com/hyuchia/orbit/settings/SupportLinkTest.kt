@@ -9,4 +9,9 @@ class SupportLinkTest {
     fun theLibreBuildLinksToTheSupportPage() {
         assertEquals("https://orbit.hyuchia.com/support", BuildConfig.SUPPORT_URL)
     }
+
+    @Test
+    fun theLibreBuildsWebsiteLinkIsTheHomePage() {
+        assertEquals("https://orbit.hyuchia.com", BuildConfig.WEBSITE_URL)
+    }
 }

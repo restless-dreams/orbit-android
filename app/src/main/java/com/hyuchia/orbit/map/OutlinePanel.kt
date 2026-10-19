@@ -24,7 +24,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.rememberWords
+import com.hyuchia.orbit.ui.WavyProgress
 import kotlinx.serialization.json.JsonPrimitive
 import java.text.NumberFormat
 import kotlin.math.roundToInt
@@ -105,7 +105,7 @@ fun OutlinePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                LinearWavyProgressIndicator(progress = { total.share.toFloat() }, modifier = Modifier.fillMaxWidth())
+                WavyProgress(progress = { total.share.toFloat() }, modifier = Modifier.fillMaxWidth())
             }
         }
 

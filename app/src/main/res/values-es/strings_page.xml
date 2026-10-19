@@ -5,4 +5,6 @@
     <string name="page_stopped">La página se detuvo</string>
     <string name="page_closed">La página se cerró</string>
     <string name="page_sent_nothing_back">La página no devolvió nada</string>
+    <string name="page_did_not_answer">La página no respondió</string>
+    <string name="page_did_not_load">La página no cargó</string>
 </resources>

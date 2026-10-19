@@ -14,6 +14,7 @@
     <string name="common_edit">Editar</string>
     <string name="common_restore">Restaurar</string>
     <string name="common_remove">Quitar</string>
+    <string name="common_tags">Etiquetas</string>
     <string name="common_duplicate">Duplicar</string>
     <string name="common_present">Presentar</string>
     <string name="common_stop_presenting">Dejar de presentar</string>

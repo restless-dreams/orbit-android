@@ -13,12 +13,17 @@ app/src/main/java/com/hyuchia/orbit/
                                  and sending maps between devices (finding them, sealing, offering, answering)
   home/                          your maps, cards and thumbnails, templates
   map/                           the map screen and its panels: editor, details, outline, search, style, text, export, presenting
+  capture/                       ideas caught without opening a map: the sheet that catches them, the Quick Settings tile,
+                                 and text shared from other apps (QuickCapture adds them through a page)
+  voice/                         talking ideas onto a map, through whatever speech service the phone has
+  widget/                        a map on the home screen (Jetpack Glance), its setup and pinning it from the app
   media/                         pictures and videos full screen: the viewer, the video player, YouTube's and Vimeo's players
   settings/                      settings and about
   theme/, ui/                    Material You, Orbit's styles and palettes, shared pieces
 app/src/main/assets/
   map/                           the pages inside the WebViews, built from web/: the map's (index.html, bridge.js)
                                  and the audience's (audience.html, audience.js)
+  emoji/                         the icon search's emoji and their names and keywords, from Unicode's data
   welcome.md, samples/, templates/
 web/
   bridge.ts                      the map page's script: draws maps with Orbit and talks to the app
@@ -32,7 +37,10 @@ web/
   rings.test.ts                  which ideas show rings by themselves, how rings count, and the map's setting
   goal.ts, goal.test.ts          goal ideas: their numbers, how far along they are, and the text their rings fit
   words.ts, words.test.ts        what the pages say themselves, in the app's language: the app hands them its strings
+  paste.ts, paste.test.ts        text pasted onto a map as orbit-md: plain lines become a list, nested as they're indented
   build.ts                       bundles the scripts and Orbit into app/src/main/assets/map/, and the receiver into dist/
+scripts/
+  emoji-names.ts                 writes assets/emoji/ from Unicode's emoji list and ranking and CLDR's names
 ```
 
 - **Maps are folders.** Each holds:

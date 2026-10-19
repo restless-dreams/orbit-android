@@ -23,6 +23,7 @@ import type {
   OrbitDocument,
   OrbitDocumentOptions,
   OrbitInsets,
+  OrbitNewNode,
   OrbitNode,
   OrbitNodeInput,
   OrbitRendererTheme,
@@ -31,8 +32,9 @@ import type {
   ViewMode,
 } from '@restless-dreams/orbit';
 import { mergeAttributes, readGoal, stepGoal } from './goal';
-import { aboutAppSettings, automaticRings, knownStyle, nodeTypeFor, nodeTypes, refreshRings, themeOption, withAutomaticRings } from './look';
+import { aboutAppSettings, automaticRings, knownStyle, nodeTypeFor, nodeTypes, refreshRings, tagsOf, themeOption, withAutomaticRings, withTags } from './look';
 import type { AppTheme } from './look';
+import { pastedText } from './paste';
 import { pageWords, speak } from './words';
 import type { PageWords } from './words';
 
@@ -55,6 +57,9 @@ interface MapOptions {
 
   /** The app's own: `false` turns off the rings ideas with to-dos or goals show by themselves. Saved only while off. */
   progressRings?: boolean | null;
+
+  /** The app's own: the map's tags, which Home groups maps by. None takes the key out. */
+  tags?: string[] | null;
 }
 
 interface Media {
@@ -210,7 +215,9 @@ type Command =
   | SnapshotJob
   | { type: 'convert'; job: number; text: string; to: 'markdown' | 'yaml' }
   | { type: 'check'; job: number; text: string }
-  | { type: 'addIdeas'; job: number; markdown: string; ideas: (string | CapturedIdea)[]; parentId: string | null };
+  | { type: 'addIdeas'; job: number; markdown: string; ideas: (string | CapturedIdea)[]; parentId: string | null }
+  | { type: 'copy'; job: number; id: string }
+  | { type: 'paste'; job: number; parentId: string; text: string };
 
 type Job = Extract<Command, { job: number }>;
 
@@ -230,7 +237,11 @@ type Message =
   | { type: 'open'; url: string }
   | { type: 'haptic' }
   | { type: 'result'; job: number; value?: unknown; error?: string }
+  | { type: 'clipboard'; action: ClipboardAction; id: string }
   | { type: 'error'; message: string };
+
+/** What Ctrl+C, Ctrl+X and Ctrl+V ask the app for: it has the clipboard. */
+type ClipboardAction = 'copy' | 'cut' | 'paste';
 
 declare global {
   interface Window {
@@ -402,6 +413,7 @@ const stateOf = (renderer: OrbitSVGRenderer): MapState | null => {
       maxDepth: options.maxDepth ?? null,
       viewMode: options.viewMode ?? null,
       progressRings: automaticRings(current) ? null : false,
+      tags: tagsOf(current),
     },
     path: renderer.getFocusPath(),
     mode: renderer.getViewMode(),
@@ -574,7 +586,7 @@ const setOptions = (changes: MapOptions): void => {
     return;
   }
 
-  const { progressRings, ...orbitChanges } = changes;
+  const { progressRings, tags, ...orbitChanges } = changes;
   const options: Record<string, unknown> = { ...current.options };
 
   for (const [key, value] of Object.entries(orbitChanges)) {
@@ -590,6 +602,10 @@ const setOptions = (changes: MapOptions): void => {
   if (progressRings !== undefined) {
     // Kept in the frontmatter with keys Orbit doesn't read: only while off, and never as `true`.
     next = withAutomaticRings(next, progressRings !== false);
+  }
+
+  if (tags !== undefined) {
+    next = withTags(next, tags ?? []);
   }
 
   ringsOn = automaticRings(next);
@@ -665,6 +681,74 @@ const duplicate = (renderer: OrbitSVGRenderer, id: string): OrbitNode | null => 
   };
 
   return copyUnder(node, parent.id, parent.children.indexOf(node) + 1);
+};
+
+/** An idea and everything under it, as `addNode` takes them. */
+const newNode = (node: OrbitNode): OrbitNewNode => ({ ...nodeInput(node), children: node.children.map(newNode) });
+
+const countIdeas = (node: OrbitNewNode): number => 1 + (node.children ?? []).reduce((total, child) => total + countIdeas(child), 0);
+
+/** An idea and the ideas under it as plain text, for other apps: its name, then a list. */
+const outline = (node: OrbitNode): string => {
+  const name = (idea: OrbitNode): string => [idea.icon, idea.text].filter(Boolean).join(' ');
+  const lines = [name(node)];
+
+  const list = (parent: OrbitNode, depth: number): void => {
+    for (const child of parent.children) {
+      lines.push(`${'  '.repeat(depth)}- ${name(child)}`);
+      list(child, depth + 1);
+    }
+  };
+
+  list(node, 0);
+  return lines.join('\n');
+};
+
+/** An idea and everything under it, as orbit-md for Orbit to paste, and as an outline for other apps. */
+const copyIdea = (renderer: OrbitSVGRenderer, id: string): { markdown: string; text: string } => {
+  const current = renderer.getDocument();
+  const node = current ? findNode(current.root, id) : null;
+
+  if (!node) {
+    throw new Error(`No idea ${id} to copy`);
+  }
+
+  return { markdown: serializeOrbitMarkdown({ root: node, options: {}, warnings: [] }, { keepSource: false }), text: outline(node) };
+};
+
+/** Pasted text as ideas under `parentId`, after its last, as one change: one save, and one step to undo. */
+const paste = (renderer: OrbitSVGRenderer, parentId: string, text: string): { count: number } => {
+  const current = renderer.getDocument();
+
+  if (!current || !findNode(current.root, parentId)) {
+    throw new Error(`No idea ${parentId} to paste under`);
+  }
+
+  const { markdown, whole } = pastedText(text);
+  const parsed = parse(markdown);
+  const ideas = (whole ? [parsed.root] : parsed.root.children).map(newNode);
+
+  batch('add', () => {
+    let first: OrbitNode | null = null;
+
+    for (const idea of ideas) {
+      const added = renderer.addNode(parentId, idea);
+      first ??= added;
+    }
+
+    return first;
+  });
+
+  return { count: ideas.reduce((total, idea) => total + countIdeas(idea), 0) };
+};
+
+/** Answers a job with what `work` gives, or what went wrong. */
+const answer = (job: number, work: () => unknown): void => {
+  try {
+    post({ type: 'result', job, value: work() });
+  } catch (error) {
+    post({ type: 'result', job, error: error instanceof Error ? error.message : String(error) });
+  }
 };
 
 /** What Orbit says about a map's text, but for the keys the app keeps in its frontmatter itself. */
@@ -1003,6 +1087,27 @@ const handle = (command: Command): void => {
     case 'addIdeas':
       void runJob(command);
       return;
+    case 'copy':
+      answer(command.job, () => {
+        if (!map) {
+          throw new Error('No map to copy from');
+        }
+
+        return copyIdea(map, command.id);
+      });
+
+      return;
+    case 'paste':
+      answer(command.job, () => {
+        // Nothing changes a map that can't be saved, as for the other changes.
+        if (!map || lock() !== null) {
+          throw new Error('This map can\'t be changed');
+        }
+
+        return paste(map, command.parentId, command.text);
+      });
+
+      return;
     case 'theme':
       appTheme = command.theme;
       map?.setOptions({ theme: themeOption(appTheme, knownStyle(map.getDocument()?.options.theme)) });
@@ -1201,6 +1306,33 @@ window.addEventListener('keydown', (event) => {
   if (!stop.dispatchEvent(answer)) {
     event.preventDefault();
   }
+}, true);
+
+/** Ctrl+C, Ctrl+X and Ctrl+V, by the letter typed or, on keyboards for other alphabets, where the letter is. */
+const CLIPBOARD_LETTERS: Record<string, ClipboardAction> = { c: 'copy', x: 'cut', v: 'paste' };
+const CLIPBOARD_CODES: Record<string, ClipboardAction> = { KeyC: 'copy', KeyX: 'cut', KeyV: 'paste' };
+
+/** Whether text is being typed into `element`, which then has these keys to itself. */
+const typing = (element: Element | null): boolean =>
+  element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || (element instanceof HTMLElement && element.isContentEditable);
+
+// Copy, cut and paste work on the idea with the keyboard's focus, or the one in focus: the app has the clipboard.
+window.addEventListener('keydown', (event) => {
+  const action = CLIPBOARD_LETTERS[event.key.toLowerCase()] ?? CLIPBOARD_CODES[event.code];
+  const focused = document.activeElement;
+
+  if (!map || !action || event.defaultPrevented || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || typing(focused)) {
+    return;
+  }
+
+  const id = focused?.closest('[data-orbit-node-id]')?.getAttribute('data-orbit-node-id') ?? map.getFocusPath().at(-1);
+
+  if (!id) {
+    return;
+  }
+
+  event.preventDefault();
+  post({ type: 'clipboard', action, id });
 }, true);
 
 routeHaptics();

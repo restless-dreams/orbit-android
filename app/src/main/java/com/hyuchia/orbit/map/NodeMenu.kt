@@ -18,6 +18,8 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Clear
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.ControlPointDuplicate
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.EmojiEmotions
@@ -58,9 +60,20 @@ sealed interface NodeAction {
     data object Rename : NodeAction
     data object Edit : NodeAction
     data object PickIcon : NodeAction
+
+    /** Any color, from the color picker. */
+    data object PickColor : NodeAction
+
     data class SetStatus(val status: String?) : NodeAction
     data class SetColor(val color: String?) : NodeAction
     data class SetCollapsed(val collapsed: Boolean) : NodeAction
+
+    /** Copies it with everything under it, for pasting here, in another map or in another app. */
+    data object Copy : NodeAction
+
+    /** Pastes what was copied into it: text as ideas under it, a picture as its picture. */
+    data object Paste : NodeAction
+
     data object Duplicate : NodeAction
     data object MoveEarlier : NodeAction
     data object MoveLater : NodeAction
@@ -89,6 +102,8 @@ val Statuses = listOf(
  * Things to do with an idea, in a menu where it was pressed. `parent` and
  * `previous` (the sibling before it) decide where it can move; `under` is
  * the goals and to-dos under it, which a goal without a target follows.
+ * `mapColors` are the map's own colors, to give it again, and `pasteable`
+ * is what the clipboard holds that the idea can take, if anything.
  */
 @Composable
 fun NodeMenu(
@@ -97,6 +112,8 @@ fun NodeMenu(
     y: Float,
     parent: MapNode?,
     under: Rollup = Rollup(),
+    mapColors: List<String> = emptyList(),
+    pasteable: Pasteable? = null,
     onDismiss: () -> Unit,
     onAction: (NodeAction) -> Unit,
 ) {
@@ -147,9 +164,18 @@ fun NodeMenu(
                         }
                     }
 
+                    HorizontalDivider()
+                    Item(stringResource(R.string.map_copy), Icons.Outlined.ContentCopy) { onAction(NodeAction.Copy) }
+
+                    when (pasteable) {
+                        Pasteable.Ideas -> Item(stringResource(R.string.map_paste_as_ideas), Icons.Outlined.ContentPaste) { onAction(NodeAction.Paste) }
+                        Pasteable.Picture -> Item(stringResource(R.string.map_paste_the_picture), Icons.Outlined.ContentPaste) { onAction(NodeAction.Paste) }
+                        null -> Unit
+                    }
+
                     if (!node.isRoot) {
                         Item(stringResource(R.string.map_move), Icons.Outlined.OpenWith, more = true) { page = MenuPage.Move }
-                        Item(stringResource(R.string.common_duplicate), Icons.Outlined.ContentCopy) { onAction(NodeAction.Duplicate) }
+                        Item(stringResource(R.string.common_duplicate), Icons.Outlined.ControlPointDuplicate) { onAction(NodeAction.Duplicate) }
                         HorizontalDivider()
                         DropdownMenuItem(
                             text = {
@@ -186,6 +212,8 @@ fun NodeMenu(
                         automatic = parseCssColor(node.drawnColor).takeIf { node.color == null },
                         onPick = { color -> onAction(NodeAction.SetColor(color)) },
                         size = 34.dp,
+                        mapColors = mapColors,
+                        onCustom = { onAction(NodeAction.PickColor) },
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     )
                 }

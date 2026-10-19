@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -37,7 +38,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.Surface
@@ -72,6 +72,8 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -89,6 +91,7 @@ import com.hyuchia.orbit.page.AppTheme
 import com.hyuchia.orbit.theme.mapStyle
 import com.hyuchia.orbit.theme.mapTheme
 import com.hyuchia.orbit.ui.OrbitGlyph
+import com.hyuchia.orbit.ui.WavyProgress
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -143,6 +146,7 @@ data class MapCardActions(
     val onPresent: () -> Unit,
     val onPin: () -> Unit,
     val onRename: () -> Unit,
+    val onTags: () -> Unit,
     val onDuplicate: () -> Unit,
     val onShare: () -> Unit,
     val onSend: () -> Unit,
@@ -219,6 +223,7 @@ fun MapCard(map: MapSummary, actions: MapCardActions, modifier: Modifier = Modif
                 customActions = listOf(
                     CustomAccessibilityAction(resources.getString(if (pinned) R.string.home_unpin else R.string.home_pin)) { actions.onPin(); true },
                     CustomAccessibilityAction(resources.getString(R.string.common_rename)) { actions.onRename(); true },
+                    CustomAccessibilityAction(resources.getString(R.string.common_tags)) { actions.onTags(); true },
                     CustomAccessibilityAction(resources.getString(R.string.common_duplicate)) { actions.onDuplicate(); true },
                     CustomAccessibilityAction(resources.getString(R.string.home_share)) { actions.onShare(); true },
                     CustomAccessibilityAction(resources.getString(R.string.common_delete)) { actions.onDelete(); true },
@@ -274,12 +279,27 @@ fun MapCard(map: MapSummary, actions: MapCardActions, modifier: Modifier = Modif
                         maxLines = if (snippet != null) 2 else 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    val tags = map.outline.tags
+
+                    if (tags.isNotEmpty()) {
+                        val said = stringResource(R.string.ui_tags_list, tags.joinToString(", "))
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.clearAndSetSemantics { contentDescription = said },
+                        ) {
+                            Icon(Icons.AutoMirrored.Outlined.Label, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
+                            Text(tags.joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+
                     val progress = map.outline.progress
 
                     if (progress.total > 0 && snippet == null) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
                             // As the map's rings fill: goals by how far along they are.
-                            LinearWavyProgressIndicator(progress = { progress.share.toFloat() }, modifier = Modifier.weight(1f))
+                            WavyProgress(progress = { progress.share.toFloat() }, modifier = Modifier.weight(1f))
                             // Goals are reached, to-dos done: when every one is a goal, they're all reached.
                             val allGoals = progress.goals == progress.total
                             Text(
@@ -325,6 +345,7 @@ private fun MapCardMenu(open: Boolean, pinned: Boolean, actions: MapCardActions,
         }
 
         MenuItem(stringResource(R.string.common_rename), Icons.Outlined.DriveFileRenameOutline) { onDismiss(); actions.onRename() }
+        MenuItem(stringResource(R.string.common_tags), Icons.AutoMirrored.Outlined.Label) { onDismiss(); actions.onTags() }
         MenuItem(stringResource(R.string.common_duplicate), Icons.Outlined.ContentCopy) { onDismiss(); actions.onDuplicate() }
         MenuItem(stringResource(R.string.home_send_to_a_device), Icons.Outlined.Devices) { onDismiss(); actions.onSend() }
         MenuItem(stringResource(R.string.home_share), Icons.Outlined.Share) { onDismiss(); actions.onShare() }

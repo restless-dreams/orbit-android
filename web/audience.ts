@@ -84,7 +84,19 @@ const stillPicture = document.querySelector<HTMLImageElement>('.audience__still-
 const stillTitle = document.querySelector<HTMLElement>('.audience__still-title')!;
 const stillText = document.querySelector<HTMLElement>('.audience__still-text')!;
 
+/**
+ * Follows a command from the presenter. One that can't be followed (malformed, say, or from a newer app) is
+ * reported on the console and skipped, as the map's page does, rather than lost without a word.
+ */
 export const receive = (command: AudienceCommand): void => {
+  try {
+    follow(command);
+  } catch (error) {
+    console.error(`Orbit couldn't follow the presenter's "${String((command as { type?: unknown } | null)?.type)}" command:`, error);
+  }
+};
+
+const follow = (command: AudienceCommand): void => {
   switch (command.type) {
     case 'language':
       hear(command.words);

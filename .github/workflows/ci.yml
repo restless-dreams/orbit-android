@@ -9,7 +9,10 @@ permissions:
 
 jobs:
   app:
-    # The unit tests and lint for both builds, and the Kotlin code style (CONTRIBUTING.md, "Before a pull request").
+    # The unit tests and lint for both builds, the Kotlin code style (CONTRIBUTING.md, "Before a pull request"),
+    # and both minified release builds: R8 errors and release-only lint errors fail here. The builds aren't run, so
+    # a crash R8 causes in the running app needs a release build tried on a phone (AGENTS.md, "Test the release
+    # build"). Without the upload key, they're signed with the debug key.
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -23,7 +26,7 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0" > /dev/null
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew testLibreDebugUnitTest testPlayDebugUnitTest lintLibreDebug lintPlayDebug ktlintCheck
+      - run: ./gradlew testLibreDebugUnitTest testPlayDebugUnitTest lintLibreDebug lintPlayDebug ktlintCheck assembleLibreRelease assemblePlayRelease
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -44,8 +47,9 @@ jobs:
       - name: Check out and build that Orbit
         run: |
           commit=$(jq -r .commit app/src/main/assets/map/orbit.json)
-          # Orbit keeps its pictures and screenshots in Git LFS, which building it doesn't need.
-          GIT_LFS_SKIP_SMUDGE=1 git clone --quiet https://github.com/restless-dreams/orbit.git "$RUNNER_TEMP/orbit"
+          # Orbit keeps its pictures and screenshots in Git LFS, which building it doesn't need. A partial clone brings
+          # every commit but no files, so the short commit resolves, and checking it out fetches only that commit's files.
+          GIT_LFS_SKIP_SMUDGE=1 git clone --quiet --filter=blob:none https://github.com/restless-dreams/orbit.git "$RUNNER_TEMP/orbit"
           GIT_LFS_SKIP_SMUDGE=1 git -C "$RUNNER_TEMP/orbit" -c advice.detachedHead=false checkout --quiet "$commit"
           cd "$RUNNER_TEMP/orbit"
           bun install --frozen-lockfile

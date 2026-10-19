@@ -26,7 +26,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -67,6 +66,7 @@ import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.rememberWords
 import com.hyuchia.orbit.ui.EscapeCloses
+import com.hyuchia.orbit.ui.WavyProgress
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -531,7 +531,7 @@ fun GoalDetails(model: MapViewModel, node: MapNode, goal: Goal) {
     val share by animateFloatAsState(goal.share.toFloat(), label = "goal")
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        LinearWavyProgressIndicator(progress = { share }, modifier = Modifier.fillMaxWidth())
+        WavyProgress(progress = { share }, modifier = Modifier.fillMaxWidth())
         Text(GoalNumbers.summary(goal, words, locale), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
 
         when {
@@ -582,7 +582,7 @@ fun ProgressDetails(under: Rollup) {
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (under.total > 0) {
-            LinearWavyProgressIndicator(progress = { share }, modifier = Modifier.fillMaxWidth())
+            WavyProgress(progress = { share }, modifier = Modifier.fillMaxWidth())
             Text(GoalNumbers.progress(under, words, locale), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         } else {
             Text(stringResource(R.string.goal_no_to_dos_or_goals_under_it), color = MaterialTheme.colorScheme.onSurfaceVariant)

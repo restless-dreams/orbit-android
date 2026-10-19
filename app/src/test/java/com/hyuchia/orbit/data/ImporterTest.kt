@@ -1,6 +1,8 @@
 package com.hyuchia.orbit.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ImporterTest {
@@ -35,5 +37,16 @@ class ImporterTest {
             Importer.markdownFor("https://example.com/articles/2026/10/maps-and-minds", "A long read about maps"),
         )
         assertEquals("# Groceries\n\n- Milk\n- Eggs\n", Importer.markdownFor("Milk\nEggs", "Groceries"))
+    }
+
+    @Test
+    fun `only files other apps hand over are imported`() {
+        val own = "com.hyuchia.orbit.files"
+
+        assertTrue(importable("content", "com.android.providers.downloads.documents", own))
+        assertFalse(importable("file", null, own))
+        assertFalse(importable("content", own, own))
+        assertFalse(importable("content", null, own))
+        assertFalse(importable(null, null, own))
     }
 }

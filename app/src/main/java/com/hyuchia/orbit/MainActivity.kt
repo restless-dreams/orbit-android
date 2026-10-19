@@ -63,12 +63,6 @@ class MainActivity : ComponentActivity() {
         splash.setKeepOnScreenCondition { app.maps.maps.value == null || settings.value == null }
         lifecycleScope.launch { app.maps.load() }
 
-        // A page ready before any map opens, made once the first screen is up.
-        Looper.myQueue().addIdleHandler {
-            app.pages.warm()
-            false
-        }
-
         if (savedInstanceState == null) {
             handle(intent)
         }
@@ -108,6 +102,17 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+
+        // A page ready before a map opens, made once the screen is up. Orbit lets it go while
+        // it's out of sight (OrbitApplication.onTrimMemory), so it's made again on every return.
+        Looper.myQueue().addIdleHandler {
+            container.pages.warm()
+            false
         }
     }
 

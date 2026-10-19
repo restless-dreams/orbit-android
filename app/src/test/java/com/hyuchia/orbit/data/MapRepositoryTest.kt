@@ -45,6 +45,127 @@ class MapRepositoryTest {
     private suspend fun loaded(): MapRepository = repository().also { it.load() }
 
     @Test
+    fun `ideas pasted into another map bring the pictures and videos they point to`() = runTest {
+        val repository = loaded()
+        val from = repository.add("# Trip\n- Beach ![](media/picture-1.jpg)\n")
+        val to = repository.add("# Plans\n")
+        File(maps, "$from/media").mkdirs()
+        File(maps, "$from/media/picture-1.jpg").writeBytes(ByteArray(1_000) { 1 })
+        File(maps, "$from/media/video-2.mp4").writeBytes(ByteArray(2_000) { 2 })
+        File(maps, "$from/media/unused.jpg").writeBytes(ByteArray(10))
+
+        repository.copyMedia(from, to, "# Beach <!-- orbit video: media/video-2.mp4 -->\n![](media/picture-1.jpg)\n![](media/missing.jpg)\n")
+
+        assertEquals(1_000L, File(maps, "$to/media/picture-1.jpg").length())
+        assertEquals(2_000L, File(maps, "$to/media/video-2.mp4").length())
+        assertFalse(File(maps, "$to/media/unused.jpg").exists())
+        assertFalse(File(maps, "$to/media/missing.jpg").exists())
+    }
+
+    @Test
+    fun `pasting keeps a picture the map has already, and reaches nothing outside the maps`() = runTest {
+        val repository = loaded()
+        val from = repository.add("# Trip\n")
+        val to = repository.add("# Plans\n")
+        File(maps, "$from/media").mkdirs()
+        File(maps, "$to/media").mkdirs()
+        File(maps, "$from/media/picture-1.jpg").writeBytes(ByteArray(1_000))
+        File(maps, "$to/media/picture-1.jpg").writeBytes(ByteArray(5))
+
+        repository.copyMedia(from, to, "![](media/picture-1.jpg)")
+        repository.copyMedia("../$from", to, "![](media/picture-1.jpg)")
+        repository.copyMedia(from, to, "![](media/../map.md) ![](media/.hidden)")
+
+        assertEquals(5L, File(maps, "$to/media/picture-1.jpg").length())
+        assertEquals(listOf("picture-1.jpg"), File(maps, "$to/media").list()!!.toList())
+    }
+
+    @Test
+    fun `a map's text says which pictures and videos it points to`() {
+        assertEquals(
+            listOf("picture-1.jpg", "video-2.mp4", "poster-2.jpg"),
+            mediaNamesIn("![](media/picture-1.jpg) <!-- orbit video: media/video-2.mp4, poster: media/poster-2.jpg --> ![](media/picture-1.jpg) multimedia/x.jpg"),
+        )
+    }
+
+    @Test
+    fun `a map's tags are kept in its file, where notes apps read them`() = runTest {
+        val repository = loaded()
+        val trip = repository.add("# Trip\n")
+        val plan = repository.add("---\ntheme: night\n---\n\n# Plan\n")
+
+        assertEquals(WriteResult.Written, repository.setTags(trip, listOf("Work", "japan")))
+        assertEquals(WriteResult.Written, repository.setTags(plan, listOf("work")))
+        assertEquals("---\ntags: [Work, japan]\n---\n\n# Trip\n", repository.read(trip))
+        assertEquals("---\ntheme: night\ntags: [work]\n---\n\n# Plan\n", repository.read(plan))
+        assertEquals(listOf("Work", "japan"), repository.maps.value!!.first { it.id == trip }.outline.tags)
+        assertEquals(WriteResult.Missing, repository.setTags("not-a-map", listOf("work")))
+    }
+
+    @Test
+    fun `a tag is renamed or taken out in every map that has it, whatever its capitals`() = runTest {
+        val repository = loaded()
+        val trip = repository.add("---\ntags: [Work, japan]\n---\n\n# Trip\n")
+        val plan = repository.add("---\ntheme: night\ntags: [work]\n---\n\n# Plan\n")
+        val other = repository.add("# Other\n")
+
+        assertEquals(2, repository.renameTag("WORK", "Office"))
+        assertEquals("---\ntags: [Office, japan]\n---\n\n# Trip\n", repository.read(trip))
+        assertEquals("---\ntheme: night\ntags: [Office]\n---\n\n# Plan\n", repository.read(plan))
+        assertEquals("# Other\n", repository.read(other))
+
+        // Renamed to a tag the map has already, it's one tag.
+        assertEquals(1, repository.renameTag("japan", "office"))
+        assertEquals("---\ntags: [Office]\n---\n\n# Trip\n", repository.read(trip))
+
+        assertEquals(2, repository.renameTag("office", null))
+        assertEquals("# Trip\n", repository.read(trip))
+        assertEquals("---\ntheme: night\n---\n\n# Plan\n", repository.read(plan))
+    }
+
+    @Test
+    fun `a new map can start with tags`() = runTest {
+        val repository = loaded()
+        val id = repository.create("Garden", tags = listOf("home"))
+
+        assertEquals("---\ntags: [home]\n---\n\n# Garden\n", repository.read(id))
+    }
+
+    @Test
+    fun `a folder that can't be copied whole stays where it was`() {
+        val from = File(files, "history-from").apply { mkdirs() }
+        File(from, "1000.md").writeText("one")
+        File(from, "2000.md").writeText("two")
+        val to = File(files, "history-to").apply { mkdirs() }
+
+        // A folder it can't write into: the copy fails, and nothing of the history is deleted.
+        to.setWritable(false)
+
+        try {
+            assertFalse(move(from, to))
+            assertEquals(setOf("1000.md", "2000.md"), from.list()!!.toSet())
+        } finally {
+            to.setWritable(true)
+        }
+    }
+
+    @Test
+    fun `a folder moves whole, keeping the files the other side has already`() {
+        val from = File(files, "history-from").apply { mkdirs() }
+        File(from, "1000.md").writeText("one")
+        File(from, "2000.md").writeText("two")
+        val to = File(files, "history-to").apply { mkdirs() }
+        File(to, "1000.md").writeText("kept")
+
+        assertTrue(move(from, to))
+        assertFalse(from.exists())
+        assertEquals("kept", File(to, "1000.md").readText())
+        assertEquals("two", File(to, "2000.md").readText())
+        assertTrue(move(File(files, "history-to"), File(files, "history-elsewhere")))
+        assertTrue(File(files, "history-elsewhere/2000.md").isFile)
+    }
+
+    @Test
     fun `a first launch puts the starter maps in, in this layout`() = runTest {
         val repository = loaded()
         assertEquals(setOf("Sample", "Welcome"), repository.maps.value!!.map { it.title }.toSet())
@@ -348,7 +469,20 @@ class MapRepositoryTest {
         assertTrue(look.pictures.isEmpty())
         val whole = loaded().readBundle(ByteArrayInputStream(bundle))!!
         assertEquals(2, whole.pictureCount)
-        assertEquals(2_000, whole.pictures["two.jpg"]!!.size)
+        assertEquals(2_000L, whole.pictures["two.jpg"]!!.length())
+    }
+
+    @Test
+    fun `a map's pictures from a zip wait in files, not memory, and move into the map it becomes`() = runTest {
+        val repository = loaded()
+        val bundle = repository.readBundle(ByteArrayInputStream(zip("map.md" to "# Trip\n![Beach](media/beach.jpg)\n".toByteArray(), "media/beach.jpg" to ByteArray(5_000))))!!
+        val waiting = bundle.pictures.getValue("beach.jpg")
+
+        assertTrue(waiting.isFile)
+        assertEquals(5_000L, waiting.length())
+        val id = repository.receive(bundle)
+        assertFalse(waiting.exists())
+        assertEquals(5_000L, File(maps, "$id/media/beach.jpg").length())
     }
 
     @Test
@@ -407,6 +541,26 @@ class MapRepositoryTest {
         }
 
         assertEquals(listOf("Sample", "Welcome"), repository.maps.value!!.map { it.title }.sorted())
+    }
+
+    @Test
+    fun `an id no map could have is no map, rather than a crash`() = runTest {
+        val repository = loaded()
+
+        for (id in listOf("", ".", "..", "a/b", ".hidden")) {
+            assertFalse(id, repository.exists(id))
+        }
+    }
+
+    @Test
+    fun `a file unpacked from a zip always lands inside the folder it's unpacked to`() = runTest {
+        val folder = File(files, "unpacked")
+
+        assertEquals(File(folder, "media/photo.jpg").canonicalPath, fileInside(folder, "media/photo.jpg", words).path)
+
+        for (name in listOf("../map.md", "media/../../evil.jpg", "history/../../../map.md")) {
+            assertEquals(name, "That zip has a file that points outside it.", refused { fileInside(folder, name, words) })
+        }
     }
 
     @Test
@@ -478,7 +632,7 @@ class MapRepositoryTest {
         val zip = ByteArrayOutputStream().also { repository.writeZip(id, it) }.toByteArray()
         val bundle = repository.readBundle(ByteArrayInputStream(zip))!!
         assertEquals(setOf("picture-1.jpg", "video-1.jpg", "video-1.mp4"), bundle.pictures.keys)
-        assertEquals(3_000, bundle.pictures["video-1.mp4"]!!.size)
+        assertEquals(3_000L, bundle.pictures["video-1.mp4"]!!.length())
     }
 
     @Test

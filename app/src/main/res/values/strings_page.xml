@@ -6,4 +6,6 @@
     <string name="page_stopped">The page stopped</string>
     <string name="page_closed">The page closed</string>
     <string name="page_sent_nothing_back">The page sent nothing back</string>
+    <string name="page_did_not_answer">The page didn’t answer</string>
+    <string name="page_did_not_load">The page didn’t load</string>
 </resources>

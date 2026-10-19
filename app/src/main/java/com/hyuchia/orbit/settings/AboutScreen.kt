@@ -125,8 +125,8 @@ fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: 
                 }
 
                 ListItem(
-                    onClick = { openLink(context, "https://orbit.hyuchia.com") },
-                    supportingContent = { Text("orbit.hyuchia.com") },
+                    onClick = { openLink(context, BuildConfig.WEBSITE_URL) },
+                    supportingContent = { Text(BuildConfig.WEBSITE_URL.removePrefix("https://")) },
                     leadingContent = { Icon(Icons.Outlined.Language, contentDescription = null) },
                 ) {
                     Text(stringResource(R.string.settings_orbit_on_the_web))

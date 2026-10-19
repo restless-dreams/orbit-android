@@ -7,10 +7,11 @@ Guidance for coding agents (Codex, Claude Code, Kimi Code and others) working in
 Orbit for Android (`com.hyuchia.orbit`): a native app (Kotlin, Jetpack Compose, Material 3 Expressive) whose maps are drawn by Orbit (`@restless-dreams/orbit`, the web library) in WebViews. It's the library's showcase, so it uses Orbit's own features as they're meant to be used rather than working around them. It's GPL 3.0 or later; the `play` build links Google Play services under `LICENSE-EXCEPTION.md`.
 
 - `app/`: the app. `docs/architecture.md` walks through its code (`data/`, `page/`, `map/`, `present/`, `nearby/`, `media/`, `home/`, `settings/`, `widget/`, `capture/`, `voice/`, `theme/`, `ui/`) and the decisions behind it.
-- Two builds: `libre` (the default: no Google code at all, for F-Droid, AppGallery and APKs) and `play` (Google Cast, for Google Play). Code for one build only lives in `app/src/libre/` or `app/src/play/`, and Google Play services only ever come in through `playImplementation`.
+- Two builds: `libre` (the default: no Google Play services or other closed code, for F-Droid, AppGallery and APKs) and `play` (Google Cast, for Google Play). Code for one build only lives in `app/src/libre/` or `app/src/play/`, and Google Play services only ever come in through `playImplementation`.
 - `web/`: the pages inside the WebViews, in TypeScript, built with Orbit into `app/src/main/assets/map/` (committed, so Gradle alone builds the app). `assets/map/orbit.json` records the Orbit commit they were built from. The app and the map's page talk in JSON (`page/Protocol.kt` and `web/bridge.ts`): change both sides together.
 - `baselineprofile/`: records the startup profile in `app/src/main/generated/baselineProfiles/`.
 - `art/logo.ts`: draws the logo and writes every copy of it.
+- `scripts/emoji-names.ts`: writes the icon search's emoji and their names (`app/src/main/assets/emoji/`) from Unicode's data.
 - `fastlane/metadata/android/<locale>/`: the store listings, in English and Spanish.
 - `docs/features.md` is every feature, area by area: keep it current when what the app does changes.
 
@@ -26,8 +27,9 @@ Run from the repository root. JDK 21 comes from `mise install` (`mise.toml`); th
 ./gradlew :app:dependencies --configuration libreReleaseRuntimeClasspath   # which library versions resolve
 (cd web && ORBIT_PATH=../../orbit bun run build)                           # rebuild the pages after changing web/ or Orbit (build Orbit first)
 (cd web && ORBIT_PATH=../../orbit bun test)                                # the pages' tests
-(cd web && ORBIT_PATH=../../orbit bun run lint)                            # the code style of web/ and art/ (bun run lint -- --fix applies it)
+(cd web && ORBIT_PATH=../../orbit bun run lint)                            # the code style of web/, art/ and scripts/ (bun run lint -- --fix applies it)
 bun art/logo.ts                                                            # after changing the logo
+bun scripts/emoji-names.ts                                                 # after changing the Unicode versions the emoji names come from
 ```
 
 `ORBIT_PATH` points at a checkout of the Orbit library (github.com/restless-dreams/orbit; `assets/map/orbit.json` names the commit the pages were built from), built there with `bun run build`; in a worktree, give its full path. Build the pages with the Bun in `web/package.json`: CI checks that the committed pages are exactly what the source builds.
@@ -40,7 +42,7 @@ bun art/logo.ts                                                            # aft
 - **`ui/ListRow`, not Material's `ListItem`,** for rows in the map's panels: on tablets the map's pane animates in a lookahead pass, and `ListItem`'s supporting text crashes it when a side panel closes. After changing panels, open and close each one on a tablet and check the crash log (`adb logcat -b crash`).
 - **Every string in English and Spanish.** Strings go in `app/src/main/res/values/strings_<area>.xml` and the same file in `values-es/`; the starter maps, templates and privacy policy have Spanish copies in `app/src/main/assets/es/`, and the pages get their words from `strings_pages.xml`. Lint lists missing translations (`MissingTranslation`). `TRANSLATING.md` has the glossary and style: neutral Latin American Spanish, with tú.
 - **Maps are people's files.** Never write half a file (`writeAtomically` in `data/Files.kt`), never write a map over text that changed since it was read (`MapRepository.write`), and keep what a newer version of the app wrote. A map Orbit can't fully read is only shown, never rewritten.
-- **No Google code in `libre`.** Anything that needs Google Play services has a fallback that works without them: Android's own network service discovery, folder picker and screen casting.
+- **No Google Play services in `libre`,** nor any other closed code. Anything that needs Google Play services has a fallback that works without them: Android's own network service discovery, folder picker and screen casting. Open-source libraries under Google's name are fine there, such as AndroidX, or ZXing for the QR codes that let browsers join.
 - **AGP 9 has Kotlin built in:** never apply `org.jetbrains.kotlin.android`.
 - **The pages run on WebViews from Chromium 99** (`SystemWebView.MINIMUM_CHROMIUM`): newer CSS needs a plainer fallback there, and older WebViews get the app's notice instead of a map.
 - **The store's pitch** leads with "Your universe of ideas, in orbit.", not with markdown: people build maps on the map and rarely see the markdown, which is the library's story.
