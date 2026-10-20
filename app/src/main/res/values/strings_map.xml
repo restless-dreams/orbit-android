@@ -231,6 +231,8 @@
     <string name="map_history_yesterday">Yesterday</string>
     <!-- A version kept as its file came in from elsewhere, after the time it was kept. -->
     <string name="map_history_original_file">%1$s · the file as it came in</string>
+    <!-- A version that couldn't be shown when it was chosen: its file is gone or can't be read. -->
+    <string name="map_history_version_unreadable">Orbit couldn’t read this version.</string>
     <plurals name="map_history_more_than_now">
         <item quantity="one">%d more than now</item>
         <item quantity="other">%d more than now</item>

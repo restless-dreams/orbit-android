@@ -34,7 +34,7 @@ class JoiningTest {
 
     /** A presentation in browsers, served over the loopback from the app's own pages. */
     private fun present(options: JoiningOptions): BrowserPresenting =
-        BrowserPresenting(::asset, english, mapFolder, scope, options, preferredPort = 0, policy = anyone).also {
+        BrowserPresenting(::asset, english, mapFolder, scope, options, preferredPort = 0, policy = anyone, listenOn = { null }).also {
             rooms += it
             it.start()
         }

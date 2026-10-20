@@ -1,7 +1,8 @@
 /**
  * The page inside the app's WebViews. It draws a map with Orbit and talks
- * to the app: commands arrive through `window.orbitApp.receive()`, and
- * messages go back through the `orbitNative` channel the app adds.
+ * to the app on the `orbitNative` channel the app adds: messages go out on
+ * it, and the app's commands come back on it as JSON, once the page says
+ * hello. Nothing the app sends is ever run as code.
  *
  * A page also works without a map on it: the app asks it for thumbnails,
  * pictures and conversions (commands with a `job` number), which it answers
@@ -13,6 +14,7 @@
  */
 import {
   createOrbitMap,
+  exportOPML,
   parseOrbit,
   renderToSVGString,
   serializeOrbitMarkdown,
@@ -34,7 +36,10 @@ import type {
 import { mergeAttributes, readGoal, stepGoal } from './goal';
 import { aboutAppSettings, automaticRings, knownStyle, nodeTypeFor, nodeTypes, refreshRings, tagsOf, themeOption, withAutomaticRings, withTags } from './look';
 import type { AppTheme } from './look';
+import { importFile } from './other-apps';
 import { pastedText } from './paste';
+import { readingOf } from './reading';
+import type { Reading } from './reading';
 import { pageWords, speak } from './words';
 import type { PageWords } from './words';
 
@@ -103,7 +108,7 @@ interface NodeInfo {
 }
 
 /** The whole map for the app: every node, its options and the reader's place. */
-interface MapState {
+export interface MapState {
   title: string;
   nodes: NodeInfo[];
   options: MapOptions;
@@ -129,17 +134,6 @@ interface MapState {
  * says so: the map was deleted, or the app's files are a newer version's.
  */
 type Lock = 'unreadable' | 'newer' | 'deleted' | 'storage';
-
-/** What reading a map's text found: whether it can be changed without losing any of it. */
-interface Reading {
-  lock: 'unreadable' | 'newer' | null;
-
-  /** What Orbit couldn't read, in its words. */
-  problem: string | null;
-
-  /** Orbit found no ideas at all in text that isn't empty: the page says so in the app's words, in the language it has when it says it. */
-  noIdeas?: boolean;
-}
 
 /** A node that got a new id from new text, so the app can follow it. */
 interface Renamed {
@@ -186,7 +180,12 @@ interface CapturedIdea {
   note?: string | null;
 }
 
-type Command =
+/**
+ * The app's commands (`MapCommand` and the language command in the app's
+ * page/). protocol-examples.ts has one of each, as the app writes it, which
+ * the app's tests check against its own.
+ */
+export type Command =
   | { type: 'language'; words: Partial<PageWords> }
   | { type: 'load'; markdown: string; theme: AppTheme; settings: MapSettings; insets?: OrbitInsets | null; baseUrl?: string | null; focus?: string | null; view?: ViewMode | null; mapId?: string | null }
   | { type: 'insets'; insets: OrbitInsets }
@@ -213,15 +212,17 @@ type Command =
   | { type: 'present'; on: boolean }
   | { type: 'lock'; reason: Lock | null }
   | SnapshotJob
-  | { type: 'convert'; job: number; text: string; to: 'markdown' | 'yaml' }
+  | { type: 'convert'; job: number; text: string; to: 'markdown' | 'yaml' | 'opml' }
   | { type: 'check'; job: number; text: string }
+  | { type: 'importFile'; job: number; data: string; name: string | null }
   | { type: 'addIdeas'; job: number; markdown: string; ideas: (string | CapturedIdea)[]; parentId: string | null }
   | { type: 'copy'; job: number; id: string }
   | { type: 'paste'; job: number; parentId: string; text: string };
 
 type Job = Extract<Command, { job: number }>;
 
-type Message =
+/** What the page tells the app (`MapMessage` in the app's page/): protocol-examples.ts has one of each, which the app's tests read. */
+export type Message =
   | { type: 'hello' }
   | { type: 'ready'; state: MapState }
   | { type: 'saved'; kind: string; markdown: string; state: MapState; added: string | null; renamed: Renamed | null; removed: string | null }
@@ -245,9 +246,14 @@ type ClipboardAction = 'copy' | 'cut' | 'paste';
 
 declare global {
   interface Window {
-    orbitNative?: { postMessage(message: string): void };
-    orbitApp: { receive(command: Command): void };
+    orbitNative?: AppChannel;
   }
+}
+
+/** The channel the app adds to its pages: messages to the app, and the app's commands as they come. */
+interface AppChannel {
+  postMessage(message: string): void;
+  addEventListener(type: 'message', listener: (event: MessageEvent<string>) => void): void;
 }
 
 let map: OrbitSVGRenderer | null = null;
@@ -292,37 +298,6 @@ const post = (message: Message): void => {
  */
 const parse = (text: string): OrbitDocument => {
   return parseOrbit(text, { untitled: pageWords().untitledMap });
-};
-
-/** Diagnostics that say the map came from a newer Orbit, which may have written what this one doesn't know. */
-const NEWER = new Set(['unsupported-schema-version', 'newer-format']);
-
-/**
- * Whether the map in `text`, as Orbit read it, can be changed and saved
- * without losing any of the text: not when Orbit couldn't read part of it
- * (an error, or text it found nothing in), nor when a newer Orbit wrote it.
- * Such a map is only shown. Text without headings or lists can be changed:
- * it's the note of a map with no ideas yet, and saving keeps it.
- */
-const readingOf = (parsed: OrbitDocument, text: string): Reading => {
-  const diagnostics = parsed.diagnostics ?? [];
-  const error = diagnostics.find((item) => item.severity === 'error');
-
-  if (error) {
-    return { lock: 'unreadable', problem: error.message };
-  }
-
-  if (parsed.root.text.trim() === '' && parsed.root.children.length === 0 && text.trim() !== '') {
-    return { lock: 'unreadable', problem: null, noIdeas: true };
-  }
-
-  const newer = diagnostics.find((item) => NEWER.has(item.code));
-
-  if (newer) {
-    return { lock: 'newer', problem: newer.message };
-  }
-
-  return { lock: null, problem: null };
 };
 
 /** What a reading found wrong, in Orbit's words, or in the app's when Orbit found no ideas at all. */
@@ -847,6 +822,11 @@ const inlinePictures = async (svg: string): Promise<string> => {
 
       const blob = await response.blob();
 
+      // Only a picture goes into the picture: whatever else an address answers with stays out of the export.
+      if (!blob.type.startsWith('image/')) {
+        throw new Error(`Not a picture: ${blob.type}`);
+      }
+
       const data = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result as string);
@@ -964,13 +944,21 @@ const snapshot = async (job: SnapshotJob): Promise<string> => {
   return rasterize(svg, width, height, job.scale ?? 2, job.format === 'png' ? 'image/png' : 'image/webp');
 };
 
-/** A map's text in the other flavor. Text Orbit couldn't read all of has no conversion: it would lose what wasn't read. */
-const convert = (text: string, to: 'markdown' | 'yaml'): string => {
+/**
+ * A map's text in the other flavor, or as OPML. Text Orbit couldn't read all
+ * of, or that a newer Orbit wrote, has no conversion: it would lose what this
+ * one didn't read or doesn't know.
+ */
+const convert = (text: string, to: 'markdown' | 'yaml' | 'opml'): string => {
   const parsed = parse(text);
   const read = readingOf(parsed, text);
 
-  if (read.lock === 'unreadable') {
+  if (read.lock !== null) {
     throw new Error(problemOf(read) ?? pageWords().textNotRead);
+  }
+
+  if (to === 'opml') {
+    return exportOPML(parsed);
   }
 
   return to === 'yaml' ? serializeOrbitYAML(parsed) : serializeOrbitMarkdown(parsed);
@@ -1054,6 +1042,9 @@ const runJob = async (command: Job): Promise<void> => {
       case 'check':
         value = check(command.text);
         break;
+      case 'importFile':
+        value = importFile(command.data, command.name, pageWords().untitledMap);
+        break;
       case 'addIdeas':
         value = addIdeas(command.markdown, command.ideas, command.parentId);
         break;
@@ -1084,6 +1075,7 @@ const handle = (command: Command): void => {
     case 'snapshot':
     case 'convert':
     case 'check':
+    case 'importFile':
     case 'addIdeas':
       void runJob(command);
       return;
@@ -1247,15 +1239,14 @@ const handle = (command: Command): void => {
   }
 };
 
-window.orbitApp = {
-  receive(command) {
-    try {
-      handle(command);
-    } catch (error) {
-      post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
-    }
-  },
-};
+window.orbitNative?.addEventListener('message', (event) => {
+  try {
+    handle(JSON.parse(event.data) as Command);
+  } catch (error) {
+    post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 window.addEventListener('error', (event) => post({ type: 'error', message: event.message }));
 
 window.addEventListener('pointerdown', () => {

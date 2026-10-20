@@ -22,6 +22,13 @@
     <!-- "Nearby devices" is the name of a section of Orbit's settings. -->
     <string name="nearby_send_to_an_address_explanation">On the other device, Orbit\'s settings show its address under Nearby devices.</string>
     <string name="nearby_send">Send</string>
+    <!-- Before the map goes, both devices show the same four digits: "it" is the other device. -->
+    <string name="nearby_check_that_it_shows">Check that it shows %1$s</string>
+    <string name="nearby_not_sent">Not sent</string>
+    <!-- %1$s is the other device's name. -->
+    <string name="nearby_check_the_code_title">Does %1$s show this code?</string>
+    <string name="nearby_check_the_code_explanation">Send the map only if both devices show the same code. If they don\'t, another device on this Wi-Fi answered in its place, and it gets nothing.</string>
+    <string name="nearby_yes_send">Yes, send</string>
 
     <!-- Why a map didn't go to the other device: "it" is that device. -->
     <string name="nearby_send_could_not_get_the_map_ready">Couldn\'t get the map ready to send. Is this device\'s storage full?</string>
@@ -32,6 +39,8 @@
     <string name="nearby_send_update_the_other_device">Update Orbit on the other device, then try again.</string>
     <string name="nearby_send_could_not_open">It couldn\'t open the map. Update Orbit on both devices, then try again.</string>
     <string name="nearby_send_maps_already_waiting">It has maps waiting for an answer already. Try again once they\'re answered.</string>
+    <string name="nearby_send_update_this_device">Update Orbit on this device, then try again.</string>
+    <string name="nearby_send_no_room_there">It doesn\'t have room for the map.</string>
 
     <!-- A map that arrived from another device, or from a file of a map that's already here -->
     <string name="nearby_arrival_newer_version_from">A newer “%1$s” from %2$s</string>
@@ -54,6 +63,12 @@
     <string name="nearby_update">Update</string>
     <string name="nearby_decline">Decline</string>
     <string name="nearby_keep_both">Keep both</string>
+    <!-- A map on its way from another device: both show the same code, and the map comes once the person sending checks it. -->
+    <string name="nearby_incoming_title">%1$s wants to send you a map</string>
+    <string name="nearby_incoming_explanation">Check that it shows the same code. The map comes once they\'ve checked it there.</string>
+    <!-- A device with Orbit 0.2.0 or earlier tried to send a map, which this version doesn't take. -->
+    <string name="nearby_older_sender_title">Update Orbit on the other device</string>
+    <string name="nearby_older_sender_text">A device on this network tried to send you a map with an older Orbit, which sends maps before both devices check their codes. Update Orbit there, then send the map again.</string>
 
     <!-- A map opened in a computer's browser -->
     <string name="nearby_connect_to_the_computer_wifi">Connect this device to the same Wi-Fi as the computer, then come back here.</string>

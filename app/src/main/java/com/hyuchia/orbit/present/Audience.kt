@@ -20,6 +20,8 @@ import com.hyuchia.orbit.container
 import com.hyuchia.orbit.page.AudienceCommand
 import com.hyuchia.orbit.page.MapMessage
 import com.hyuchia.orbit.page.OrbitPage
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
 /**
@@ -47,9 +49,18 @@ interface Audience {
      */
     fun reckon(media: ShownMedia?) = Unit
 
+    /**
+     * What the presenter should hear about the screen: for a TV, when its
+     * receiver is older than this map or this app (see [ReceiverWatch]).
+     * Second screens and browsers run the app's own pages, so they never are.
+     */
+    val notice: StateFlow<ScreenNotice?> get() = noNotice
+
     /** The presentation is over, or the screen went away. */
     fun close()
 }
+
+private val noNotice: StateFlow<ScreenNotice?> = MutableStateFlow(null)
 
 /**
  * A second screen attached to the phone, by cable or wirelessly: Android

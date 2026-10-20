@@ -3,6 +3,7 @@ package com.hyuchia.orbit.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -13,6 +14,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import java.io.File
 import java.io.IOException
 
 enum class ThemeMode { System, Light, Dark }
@@ -70,11 +72,17 @@ data class AppSettings(
     val checkForUpdates: Boolean = true,
 )
 
+// A settings file that can't be read starts over instead of stopping the app: settings are quick to choose
+// again, and no map is in them.
 private val Context.settingsStore: DataStore<Preferences> by preferencesDataStore(
     name = "settings",
-    // A settings file that can't be read starts over instead of stopping the app: settings are quick to choose
-    // again, and no map is in them.
     corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
+
+/** The settings in `file` (`datastore/settings.preferences_pb` in the app's files), as the app reads them: for tests. */
+internal fun settingsStoreIn(file: File): DataStore<Preferences> = PreferenceDataStoreFactory.create(
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+    produceFile = { file },
 )
 
 private object Keys {
@@ -97,8 +105,8 @@ private object Keys {
     val checkForUpdates = booleanPreferencesKey("check_for_updates")
 }
 
-class SettingsRepository(context: Context) {
-    private val store = context.settingsStore
+class SettingsRepository internal constructor(private val store: DataStore<Preferences>) {
+    constructor(context: Context) : this(context.settingsStore)
 
     val settings: Flow<AppSettings> = store.data
         // A read that fails (the disk, say) shows the defaults, and the next read tries again.

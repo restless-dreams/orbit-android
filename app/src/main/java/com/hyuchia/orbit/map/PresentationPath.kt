@@ -311,15 +311,16 @@ private fun PathStep(
 }
 
 /**
- * How a rehearsal went: how long it took, and each idea's time as a bar,
- * the longest marked, so the presenter sees where the time goes. The times
- * set the pace for presenting.
+ * How a rehearsal went: how long it took, and each step's time as a bar,
+ * the longest marked, so the presenter sees where the time goes; an idea
+ * the path comes back to shows each visit. The times set the pace for
+ * presenting.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RehearsalSheet(rehearsal: Rehearsal, nodes: Map<String, MapNode>, onAgain: () -> Unit, onDismiss: () -> Unit) {
     val colors = MaterialTheme.colorScheme
-    val longest = rehearsal.seconds.values.maxOrNull()?.coerceAtLeast(1) ?: 1
+    val longest = rehearsal.steps.maxOfOrNull { it.seconds }?.coerceAtLeast(1) ?: 1
     val state = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded))
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state) {
@@ -341,10 +342,10 @@ fun RehearsalSheet(rehearsal: Rehearsal, nodes: Map<String, MapNode>, onAgain: (
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.weight(1f, fill = false),
             ) {
-                itemsIndexed(rehearsal.order, key = { _, id -> id }) { index, id ->
-                    val seconds = rehearsal.seconds[id] ?: 0
+                // Keyed by place: a path can come back to an idea.
+                itemsIndexed(rehearsal.steps, key = { index, _ -> index }) { index, (id, seconds) ->
                     val node = nodes[id]
-                    val isLongest = seconds == longest && rehearsal.order.size > 1
+                    val isLongest = seconds == longest && rehearsal.steps.size > 1
 
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

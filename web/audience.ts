@@ -6,9 +6,9 @@
  * show an idea's picture or play its video big over the map, in Orbit's
  * media viewer, which the page drives: it takes no input of its own.
  *
- * The presenter's phone drives it with commands: through
- * `window.orbitApp.receive()` in the app's WebView, or Cast messages on a TV
- * (see receiver.ts). It speaks the phone's language: the phone says which,
+ * The presenter's phone drives it with commands: messages on the app's
+ * channel in its WebView (see second-screen.ts), or Cast messages on a TV
+ * (see cast-receiver.ts). It speaks the phone's language: the phone says which,
  * with its words, before a presentation starts (`language`).
  */
 import { createOrbitMap, findNodeById, parseOrbit, renderNoteMarkdown, themeTokens } from '@restless-dreams/orbit';

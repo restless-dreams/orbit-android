@@ -153,6 +153,22 @@ data class Diagnostic(val message: String, val line: Int? = null, val severity: 
 @Serializable
 data class CheckedMap(val title: String, val nodes: Int, val diagnostics: List<Diagnostic>, val markdown: String)
 
+/** What a file from another app makes: its maps (one, or one for each sheet of an XMind workbook), or why it makes none. */
+@Serializable
+data class ImportedFile(val format: String? = null, val maps: List<ImportedFileMap> = emptyList(), val error: ImportProblem? = null)
+
+/** One map from another app's file: its orbit-md, its pictures as base64 by name, and what didn't come over as it was. */
+@Serializable
+data class ImportedFileMap(val markdown: String, val media: Map<String, String> = emptyMap(), val warnings: List<ImportWarning> = emptyList())
+
+/** Something the other app's map had that Orbit keeps another way, or couldn't keep, with how many places it's about. */
+@Serializable
+data class ImportWarning(val code: String, val count: Int = 1, val message: String = "")
+
+/** Why a file from another app makes no map, by Orbit's code (`unreadable`, `empty`, `password-protected`, …). */
+@Serializable
+data class ImportProblem(val code: String, val message: String = "")
+
 /** Messages from the page. */
 @Serializable
 sealed interface MapMessage {
@@ -393,9 +409,16 @@ sealed interface MapCommand {
         val baseUrl: String? = null,
     ) : MapCommand
 
-    /** Converts a map's text to orbit-md (`markdown`) or `yaml`. */
+    /** Converts a map's text to orbit-md (`markdown`), `yaml` or `opml`. */
     @Serializable @SerialName("convert")
     data class Convert(val job: Int, val text: String, val to: String) : MapCommand
+
+    /**
+     * Reads a map from another app (OPML, FreeMind or Freeplane, XMind), its
+     * file's bytes as base64, and answers with an [ImportedFile].
+     */
+    @Serializable @SerialName("importFile")
+    data class ImportFile(val job: Int, val data: String, val name: String? = null) : MapCommand
 
     /** Reads a map's text: its title, size, diagnostics, and the map as orbit-md. */
     @Serializable @SerialName("check")

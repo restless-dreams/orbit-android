@@ -43,6 +43,8 @@
     <!-- %1$s is what went wrong, as Orbit's reader says it, and %2$d the line of the file it went wrong on. -->
     <string name="data_yaml_unreadable_at_line">Orbit couldn\'t read all of that YAML, so it didn\'t make a map of it: %1$s (line %2$d)</string>
     <string name="data_newer_version_keeps_maps">A newer version of Orbit keeps these maps: update Orbit to change them.</string>
+    <!-- A new map, a template's, a copy or the welcome map couldn't be added: its files couldn't be written. -->
+    <string name="data_could_not_add_map">Orbit couldn’t add the map. Is this device’s storage full?</string>
 
     <!-- Zips Orbit won't take in -->
     <string name="data_zip_too_many_files">That zip holds too many files to be maps.</string>
@@ -85,4 +87,59 @@
     <string name="data_folder_tries_again">Orbit tries again in a moment.</string>
     <!-- A picture or video too big to join its map, in the list settings_folder_too_big ends with: %1$s is its file's name, %2$s the map's title. -->
     <string name="data_folder_too_big_file">%1$s, in “%2$s”</string>
+
+    <!-- Maps brought in from other apps: OPML, FreeMind and Freeplane (.mm), XMind (.xmind). -->
+    <string name="data_import_unknown_format">Orbit can\'t read that kind of file. It reads its own maps, OPML, FreeMind and Freeplane maps (.mm) and XMind files (.xmind).</string>
+    <string name="data_import_unreadable">That file is damaged, or isn\'t what its name says.</string>
+    <string name="data_import_password_protected">That XMind file has a password. Open it in XMind, save it without one, then bring it in again.</string>
+    <string name="data_import_too_large">That map is too big for Orbit: it has more than 100,000 ideas, or goes more than 500 levels deep.</string>
+    <!-- What a map from another app had that Orbit keeps another way, or couldn\'t keep, shown after it comes in. Each counts the places it\'s about, %1$d. "Topic", "summary", "callout" and "boundary" are what XMind calls those parts of its maps. -->
+    <plurals name="data_import_floating_ideas_moved">
+        <item quantity="one">%1$d floating topic is now an idea under the center.</item>
+        <item quantity="other">%1$d floating topics are now ideas under the center.</item>
+    </plurals>
+    <plurals name="data_import_summaries_moved">
+        <item quantity="one">%1$d summary is now an idea beside the ideas it sums up.</item>
+        <item quantity="other">%1$d summaries are now ideas beside the ideas they sum up.</item>
+    </plurals>
+    <plurals name="data_import_callouts_moved">
+        <item quantity="one">%1$d callout is now an idea under its topic.</item>
+        <item quantity="other">%1$d callouts are now ideas under their topics.</item>
+    </plurals>
+    <plurals name="data_import_boundaries_in_notes">
+        <item quantity="one">The title of %1$d boundary is now in a note.</item>
+        <item quantity="other">The titles of %1$d boundaries are now in notes.</item>
+    </plurals>
+    <plurals name="data_import_links_in_notes">
+        <item quantity="one">%1$d extra link is now in its idea\'s note.</item>
+        <item quantity="other">%1$d extra links are now in their ideas\' notes.</item>
+    </plurals>
+    <plurals name="data_import_missing_link_targets">
+        <item quantity="one">%1$d link to an idea that isn\'t in this map was left out.</item>
+        <item quantity="other">%1$d links to ideas that aren\'t in this map were left out.</item>
+    </plurals>
+    <plurals name="data_import_icons_not_kept">
+        <item quantity="one">%1$d icon was left out: an idea shows one icon, as an emoji.</item>
+        <item quantity="other">%1$d icons were left out: an idea shows one icon, as an emoji.</item>
+    </plurals>
+    <plurals name="data_import_pictures_not_kept">
+        <item quantity="one">%1$d picture wasn\'t in the file, so it was left out.</item>
+        <item quantity="other">%1$d pictures weren\'t in the file, so they were left out.</item>
+    </plurals>
+    <plurals name="data_import_attachments_not_kept">
+        <item quantity="one">%1$d attached file was left out. Its idea keeps its name.</item>
+        <item quantity="other">%1$d attached files were left out. Their ideas keep their names.</item>
+    </plurals>
+    <plurals name="data_import_local_links_not_kept">
+        <item quantity="one">%1$d link to a file on another computer was left out.</item>
+        <item quantity="other">%1$d links to files on another computer were left out.</item>
+    </plurals>
+    <plurals name="data_import_encrypted_branches_not_read">
+        <item quantity="one">%1$d encrypted branch couldn\'t be read, so its ideas were left out.</item>
+        <item quantity="other">%1$d encrypted branches couldn\'t be read, so their ideas were left out.</item>
+    </plurals>
+    <plurals name="data_import_formatting_not_kept">
+        <item quantity="one">%1$d note is plain text now, without its bold, italics or lists.</item>
+        <item quantity="other">%1$d notes are plain text now, without their bold, italics or lists.</item>
+    </plurals>
 </resources>

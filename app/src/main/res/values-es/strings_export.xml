@@ -11,16 +11,29 @@
     <string name="export_background">Fondo</string>
 
     <string name="export_web_page_description">Vuela en cualquier navegador, incluso sin conexión, y presenta</string>
+    <string name="export_pdf">PDF o impresión</string>
+    <string name="export_pdf_description">El mapa, su esquema y todas sus notas, en papel o en PDF</string>
     <string name="export_picture">Imagen</string>
     <string name="export_picture_description">Un PNG, dibujado por Orbit</string>
     <string name="export_drawing">Dibujo</string>
     <string name="export_drawing_description">Un SVG que se ve nítido en cualquier tamaño</string>
     <string name="export_markdown_description">El mapa en orbit-md, para editarlo donde quieras</string>
     <string name="export_yaml_description">El mapa como datos, para apps y scripts</string>
+    <string name="export_opml_description">El esquema, para otras apps de esquemas y mapas mentales</string>
     <string name="export_zip">Archivo zip</string>
     <string name="export_zip_description">El markdown con las imágenes y los videos que muestra</string>
 
     <string name="export_copy_format">Copiar %1$s</string>
     <string name="export_save_format">Guardar %1$s</string>
     <string name="export_share_format">Compartir %1$s</string>
+    <string name="export_print">Imprimir o guardar como PDF</string>
+
+    <string name="export_print_failed">No se pudo preparar el mapa para imprimir</string>
+
+    <string name="export_could_not_make">Orbit no pudo crear este archivo. Vuelve a intentarlo en un momento.</string>
+    <string name="export_no_room_to_share">Orbit no pudo crear este archivo para compartirlo. ¿Está lleno el almacenamiento de este dispositivo?</string>
+    <string name="export_could_not_save">Orbit no pudo guardar este archivo ahí. Prueba en otro lugar.</string>
+    <string name="export_too_much_to_copy">Esto es demasiado para copiarlo de una vez. Compártelo o guárdalo.</string>
+    <string name="export_newer_map_not_written">Una versión más reciente de Orbit hizo este mapa, así que esta no puede escribirlo así. Actualiza Orbit o expórtalo como markdown.</string>
+    <string name="export_unreadable_map_not_written">Orbit no pudo leer todo este mapa, así que no puede escribirlo así. Corrige el texto o expórtalo como markdown.</string>
 </resources>

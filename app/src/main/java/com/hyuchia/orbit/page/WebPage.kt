@@ -19,17 +19,26 @@ private const val MEDIA = "media"
 /**
  * A map as one HTML file that opens in any browser, offline, and flies like
  * the app: Orbit, the map and its pictures inside (web/web-page.ts). Readers
- * explore it or present it.
+ * explore it or present it, and printed it's the map laid out for paper.
  */
 object WebPage {
     /** What the page reads from its #orbit-map script: web/web-page.ts's PageData. */
     @Serializable
-    private data class PageData(val markdown: String, val theme: AppTheme, val path: List<String>, val download: String? = null, val words: PageWords? = null)
+    private data class PageData(
+        val markdown: String,
+        val theme: AppTheme,
+        val path: List<String>,
+        val download: String? = null,
+        val words: PageWords? = null,
+        val print: PrintRequest? = null,
+    )
 
     /**
      * The page for the map, in the language of `context`: the app's, for the
      * page's own words, and Orbit's that follow its `lang`. `download` links
      * to the map itself, for a page a device serves on the local network.
+     * With `print`, the page is only the map laid out for paper, for
+     * [MapPrinter].
      */
     suspend fun build(
         context: Context,
@@ -39,11 +48,12 @@ object WebPage {
         mapFolder: File,
         path: List<String> = emptyList(),
         download: String? = null,
+        print: PrintRequest? = null,
     ): String =
         withContext(Dispatchers.IO) {
             val template = context.assets.open("map/web-page.html").bufferedReader().use { it.readText() }
             val script = context.assets.open("map/web-page.js").bufferedReader().use { it.readText() }
-            page(template, script, title, inlinePictures(markdown, mapFolder), theme, path, download, pageWords(context))
+            page(template, script, title, inlinePictures(markdown, mapFolder), theme, path, download, pageWords(context), print)
         }
 
     /** The page from its template and script, for a map whose pictures are inside it, in the language of `words`. */
@@ -56,8 +66,9 @@ object WebPage {
         path: List<String>,
         download: String?,
         words: PageWords,
+        print: PrintRequest? = null,
     ): String {
-        val data = protocolJson.encodeToString(PageData.serializer(), PageData(markdown, theme, path, download, words))
+        val data = protocolJson.encodeToString(PageData.serializer(), PageData(markdown, theme, path, download, words, print))
         return fill(
             template,
             mapOf(

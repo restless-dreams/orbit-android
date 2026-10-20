@@ -14,7 +14,9 @@ import com.hyuchia.orbit.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 import java.io.OutputStream
+import java.util.UUID
 
 /** A file name for a map's export: its title, without characters file systems refuse, or "Map" in the app's language when that leaves nothing. */
 fun exportName(context: Context, title: String, extension: String): String {
@@ -23,14 +25,41 @@ fun exportName(context: Context, title: String, extension: String): String {
     return "$name.$extension"
 }
 
-/** Writes an export to the cache, where other apps can be given it. */
+/**
+ * How long an export stays for the app it went to: one that reads it later,
+ * as an email being written does, still finds it.
+ */
+private const val EXPORT_KEPT = 24 * 60 * 60 * 1000L
+
+/** Writes an export to the cache, where other apps can be given it. Throws when it can't be written whole (a full phone, a picture that went). */
 suspend fun exportFile(context: Context, name: String, write: suspend (OutputStream) -> Unit): Uri = withContext(Dispatchers.IO) {
-    val directory = File(context.cacheDir, "exports").apply { mkdirs() }
-    // One export at a time is enough: older ones were shared already.
-    directory.listFiles()?.forEach { it.delete() }
-    val file = File(directory, name)
-    file.outputStream().use { write(it) }
+    val file = exportDestination(File(context.cacheDir, "exports"), name, System.currentTimeMillis())
+
+    try {
+        file.outputStream().use { write(it) }
+    } catch (failed: Exception) {
+        // Half an export is of no use to the app it would go to.
+        file.parentFile?.deleteRecursively()
+        throw failed
+    }
+
     FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+}
+
+/**
+ * Where a new export named `name` goes in `directory`: a folder of its own,
+ * so it never takes the place of one shared a moment ago that the app it
+ * went to hasn't read yet. Exports older than [EXPORT_KEPT] go now.
+ */
+internal fun exportDestination(directory: File, name: String, now: Long): File {
+    directory.listFiles().orEmpty().filter { now - it.lastModified() > EXPORT_KEPT }.forEach { it.deleteRecursively() }
+    val folder = File(directory, UUID.randomUUID().toString())
+
+    if (!folder.mkdirs()) {
+        throw IOException("Couldn't make a folder for an export")
+    }
+
+    return File(folder, name)
 }
 
 /**
@@ -84,6 +113,14 @@ fun cleanLink(url: String): String = url.trim { it <= ' ' }.replace(Regex("[\\t\
 /** The link's scheme when a map may open it, else null. */
 fun linkScheme(url: String): String? =
     Regex("^([A-Za-z][A-Za-z0-9+.-]*):").find(cleanLink(url))?.groupValues?.get(1)?.lowercase()?.takeIf { it in LINK_SCHEMES }
+
+/**
+ * A picture's web address as the app loads it: an http one over https, since
+ * the app sends nothing over the web in the clear (Android's default), as the
+ * map's page does, its WebView upgrading such pictures. Links still open as
+ * they are, in the browser, and videos at http addresses play there.
+ */
+fun pictureAddress(url: String): String = if (linkScheme(url) == "http") "https${cleanLink(url).substring(4)}" else url
 
 /** Opens a web page in a tab that keeps the app's colors, or a mail, call or text link in its app. Other links stay closed. */
 fun openLink(context: Context, url: String) {

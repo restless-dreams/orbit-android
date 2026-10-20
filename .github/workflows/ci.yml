@@ -9,10 +9,10 @@ permissions:
 
 jobs:
   app:
-    # The unit tests and lint for both builds, the Kotlin code style (CONTRIBUTING.md, "Before a pull request"),
-    # and both minified release builds: R8 errors and release-only lint errors fail here. The builds aren't run, so
-    # a crash R8 causes in the running app needs a release build tried on a phone (AGENTS.md, "Test the release
-    # build"). Without the upload key, they're signed with the debug key.
+    # The unit tests and lint for both builds, the Kotlin code style and its rules' own tests (CONTRIBUTING.md,
+    # "Before a pull request"), and both minified release builds: R8 errors and release-only lint errors fail
+    # here. The builds aren't run, so a crash R8 causes in the running app needs a release build tried on a
+    # phone (AGENTS.md, "Test the release build"). Without the upload key, they're signed with the debug key.
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -26,17 +26,20 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0" > /dev/null
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew testLibreDebugUnitTest testPlayDebugUnitTest lintLibreDebug lintPlayDebug ktlintCheck assembleLibreRelease assemblePlayRelease
+      - run: ./gradlew testLibreDebugUnitTest testPlayDebugUnitTest lintLibreDebug lintPlayDebug ktlintCheck :code-style:test assembleLibreRelease assemblePlayRelease
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: reports
-          path: app/build/reports
+          path: |
+            app/build/reports
+            code-style/build/reports
 
   pages:
     # The map's pages in web/, against the Orbit they were built with (the commit in
-    # app/src/main/assets/map/orbit.json): their tests and code style, and a check that the
-    # committed pages are exactly what the source builds.
+    # app/src/main/assets/map/orbit.json): their tests, types and code style, and a check that
+    # the committed pages, and the protocol's examples the app's tests read, are exactly what
+    # the source builds, in JavaScript WebViews from Chromium 99 on read.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -55,19 +58,20 @@ jobs:
           bun install --frozen-lockfile
           bun run build
           echo "ORBIT_PATH=$RUNNER_TEMP/orbit" >> "$GITHUB_ENV"
-      - name: The pages' tests and code style
+      - name: The pages' tests, types and code style
         working-directory: web
         run: |
           bun install --frozen-lockfile
           bun test
+          bun run typecheck
           bun run lint
-      - name: The committed pages are what the source builds
+      - name: The committed pages and protocol examples are what the source builds
         run: |
           (cd web && bun run build)
           # orbit.json names the Orbit commit, whose short form can be longer in a bigger clone.
-          changes=$(git status --porcelain -- app/src/main/assets/map ':(exclude)app/src/main/assets/map/orbit.json')
+          changes=$(git status --porcelain -- app/src/main/assets/map app/src/test/resources/page-protocol.json ':(exclude)app/src/main/assets/map/orbit.json')
           if [ -n "$changes" ]; then
-            echo "The committed pages differ from what web/ builds. Rebuild them as CONTRIBUTING.md says, with the Bun in web/package.json, and commit them:"
+            echo "The committed pages or protocol examples differ from what web/ builds. Rebuild them as CONTRIBUTING.md says, with the Bun in web/package.json, and commit them:"
             echo "$changes"
             exit 1
           fi

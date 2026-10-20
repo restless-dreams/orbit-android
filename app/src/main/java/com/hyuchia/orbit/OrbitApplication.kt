@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.IOException
@@ -150,8 +151,9 @@ class OrbitApplication : Application() {
 
     /**
      * Draws the maps on the home screen again once a change settles: an edit,
-     * ideas caught, a map renamed or deleted. Once the maps are read, the
-     * launcher's list of widgets gets a preview of them.
+     * ideas caught, a map renamed or deleted; and when the wallpaper's colors
+     * are turned on or off, which the pictures are drawn in. Once the maps
+     * are read, the launcher's list of widgets gets a preview of them.
      */
     @OptIn(FlowPreview::class)
     private fun keepWidgetsCurrent() {
@@ -166,6 +168,14 @@ class OrbitApplication : Application() {
                 .distinctUntilChanged()
                 .drop(1)
                 .debounce(WIDGET_SETTLE)
+                .collect { updateMapWidgets(this@OrbitApplication) }
+        }
+
+        container.applicationScope.launch {
+            container.settings.settings
+                .map { it.dynamicColor }
+                .distinctUntilChanged()
+                .drop(1)
                 .collect { updateMapWidgets(this@OrbitApplication) }
         }
     }

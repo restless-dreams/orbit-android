@@ -13,6 +13,17 @@ class MapTextTest {
     private val words = FileWords(Locale.US)
 
     @Test
+    fun aMapSaysTheVersionOfTheFormatItIsWrittenFor() {
+        assertEquals(1, MapText.formatVersion("# Talk\n"))
+        assertEquals(2, MapText.formatVersion("---\ntitle: Talk\nschemaVersion: 2\n---\n# Talk\n"))
+        assertEquals(3, MapText.formatVersion("---\nschemaVersion: \"3\"\n---\n# Talk\n"))
+        assertEquals(2, MapText.formatVersion("title: Talk\nschemaVersion: 2\nnodes:\n  - text: Talk\n"))
+        // In a markdown map's body, the same words are only text.
+        assertEquals(1, MapText.formatVersion("# Talk\nschemaVersion: 4\n"))
+        assertEquals(1, MapText.formatVersion("---\nschemaVersion: soon\n---\n# Talk\n"))
+    }
+
+    @Test
     fun headingsAndListsMakeTheOutline() {
         val outline = MapText.outline(
             """

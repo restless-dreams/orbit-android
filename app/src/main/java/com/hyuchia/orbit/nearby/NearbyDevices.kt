@@ -15,17 +15,24 @@ import com.hyuchia.orbit.Logs
 
 /**
  * Another device with Orbit open on the same network, where to reach it,
- * and the key maps sent to it are sealed to, when its advertisement has one.
+ * and, when its advertisement says, the key maps sent to it are sealed to
+ * and the version of offers it takes.
  */
-data class NearbyDevice(val name: String, val address: String, val key: String? = null)
+data class NearbyDevice(val name: String, val address: String, val key: String? = null, val version: Int? = null)
 
-/** A resolved advertisement as a device to send maps to, or null when it's this launch of Orbit or has no address. */
+/**
+ * A resolved advertisement as a device to send maps to, or null when it's
+ * this launch of Orbit or has no address. Anything on the network can
+ * advertise any name, so it's shown as sender names are, without what hides
+ * or reorders text, and as its address when nothing's left.
+ */
 internal fun nearbyDevice(name: String, attributes: Map<String, ByteArray?>, host: String?, port: Int, selfId: String): NearbyDevice? {
     if (host == null || attributes[SERVICE_ID]?.decodeToString() == selfId) {
         return null
     }
 
-    return NearbyDevice(name, "$host:$port", attributes[SERVICE_KEY]?.decodeToString())
+    val address = "$host:$port"
+    return NearbyDevice(senderName(name) ?: address, address, attributes[SERVICE_KEY]?.decodeToString(), attributes[SERVICE_VERSION]?.decodeToString()?.toIntOrNull())
 }
 
 /**

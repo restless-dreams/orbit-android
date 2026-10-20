@@ -1,0 +1,705 @@
+{
+  "map": {
+    "commands": [
+      {
+        "type": "language",
+        "words": {
+          "goalOfTarget": "of {target}",
+          "goalLeft": "left",
+          "language": "en",
+          "kinds": {},
+          "untitledMap": "Untitled map",
+          "noIdeas": "Orbit found no ideas in this text.",
+          "textNotRead": "Orbit couldn't read all of this text.",
+          "mapNotAddedTo": "Orbit couldn't read all of this map, so it didn't add to it.",
+          "mapFromNewerOrbit": "A newer version of Orbit made this map. Update Orbit to add to it.",
+          "waiting": "Waiting for the presenter",
+          "looking": "Looking for the presenter…",
+          "removed": "The presenter removed you.",
+          "full": "This presentation is full.",
+          "closed": "The presenter isn't letting anyone new in.",
+          "ended": "The presentation ended.",
+          "tapForSound": "Tap for sound"
+        }
+      },
+      {
+        "type": "load",
+        "markdown": "# Trip to Japan\n- Tokyo\n",
+        "theme": {
+          "dark": false,
+          "tokens": {
+            "background": "#fff8f6",
+            "node-text-dark": "#201a19"
+          },
+          "seed": "#8f4c38"
+        },
+        "settings": {
+          "haptics": true,
+          "snap": false,
+          "longPressDelay": 400
+        },
+        "insets": {
+          "top": 56,
+          "right": 0,
+          "bottom": 96.5,
+          "left": 0
+        },
+        "baseUrl": "https://appassets.androidplatform.net/maps/trip/",
+        "focus": "tokyo",
+        "view": "all",
+        "mapId": "trip"
+      },
+      {
+        "type": "insets",
+        "insets": {
+          "top": 0,
+          "right": 80,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      {
+        "type": "unload"
+      },
+      {
+        "type": "theme",
+        "theme": {
+          "dark": true,
+          "tokens": {},
+          "seed": null
+        }
+      },
+      {
+        "type": "settings",
+        "settings": {
+          "haptics": false,
+          "snap": true,
+          "longPressDelay": 500
+        }
+      },
+      {
+        "type": "edit",
+        "id": "tokyo"
+      },
+      {
+        "type": "editNew",
+        "parentId": "trip-to-japan",
+        "index": 1
+      },
+      {
+        "type": "stopEditing",
+        "save": true
+      },
+      {
+        "type": "add",
+        "parentId": "trip-to-japan",
+        "node": {
+          "text": "Kyoto",
+          "status": "todo"
+        },
+        "index": null
+      },
+      {
+        "type": "update",
+        "id": "tokyo",
+        "changes": {
+          "color": "#3f51b5",
+          "note": null,
+          "attrs": {
+            "current": 1300
+          }
+        }
+      },
+      {
+        "type": "addToGoal",
+        "id": "tokyo",
+        "amount": 25.5
+      },
+      {
+        "type": "remove",
+        "id": "tokyo"
+      },
+      {
+        "type": "move",
+        "id": "tokyo",
+        "parentId": "trip-to-japan",
+        "index": 0
+      },
+      {
+        "type": "duplicate",
+        "id": "tokyo"
+      },
+      {
+        "type": "focus",
+        "id": "tokyo"
+      },
+      {
+        "type": "view",
+        "mode": "all"
+      },
+      {
+        "type": "zoom",
+        "factor": 1.25
+      },
+      {
+        "type": "fit"
+      },
+      {
+        "type": "restore",
+        "markdown": "# Trip to Japan\n"
+      },
+      {
+        "type": "preview",
+        "markdown": "# Trip to Japan\n- Osaka\n",
+        "editable": false
+      },
+      {
+        "type": "source",
+        "text": "title: Trip\nnodes:\n  - text: Tokyo\n"
+      },
+      {
+        "type": "options",
+        "options": {
+          "theme": "cosmos",
+          "palette": null,
+          "progressRings": null,
+          "tags": [
+            "travel",
+            "family"
+          ]
+        }
+      },
+      {
+        "type": "present",
+        "on": true
+      },
+      {
+        "type": "lock",
+        "reason": "deleted"
+      },
+      {
+        "type": "snapshot",
+        "job": 3,
+        "format": "png",
+        "markdown": null,
+        "width": 1600,
+        "height": 1100,
+        "scale": 2,
+        "theme": {
+          "dark": false,
+          "tokens": {
+            "background": "#fff8f6",
+            "node-text-dark": "#201a19"
+          },
+          "seed": "#8f4c38"
+        },
+        "transparent": true,
+        "style": "",
+        "viewMode": "all",
+        "focus": null,
+        "baseUrl": "https://appassets.androidplatform.net/maps/trip/"
+      },
+      {
+        "type": "convert",
+        "job": 4,
+        "text": "# Trip to Japan\n",
+        "to": "opml"
+      },
+      {
+        "type": "check",
+        "job": 5,
+        "text": "nodes:\n  - text: Tokyo\n"
+      },
+      {
+        "type": "importFile",
+        "job": 6,
+        "data": "PG9wbWw+PC9vcG1sPg==",
+        "name": "Trip.opml"
+      },
+      {
+        "type": "addIdeas",
+        "job": 7,
+        "markdown": "# Trip to Japan\n",
+        "ideas": [
+          {
+            "text": "Call the hotel",
+            "note": null
+          },
+          {
+            "text": "Pack the adapter",
+            "note": "Type A, two of them"
+          }
+        ],
+        "parentId": null
+      },
+      {
+        "type": "copy",
+        "job": 8,
+        "id": "tokyo"
+      },
+      {
+        "type": "paste",
+        "job": 9,
+        "parentId": "tokyo",
+        "text": "- Shibuya\n- Asakusa"
+      }
+    ],
+    "messages": [
+      {
+        "type": "hello"
+      },
+      {
+        "type": "ready",
+        "state": {
+          "title": "Trip to Japan",
+          "nodes": [
+            {
+              "id": "trip-to-japan",
+              "text": "Trip to Japan",
+              "parentId": null,
+              "depth": 0,
+              "index": 0,
+              "childCount": 1,
+              "icon": null,
+              "color": null,
+              "drawnColor": "var(--_orbit-color-0)",
+              "status": null,
+              "priority": null,
+              "tags": [],
+              "collapsed": false,
+              "type": null,
+              "link": null,
+              "note": null,
+              "noteFormat": null,
+              "image": null,
+              "video": null,
+              "embed": null,
+              "attrs": null
+            },
+            {
+              "id": "tokyo",
+              "text": "Tokyo",
+              "parentId": "trip-to-japan",
+              "depth": 1,
+              "index": 0,
+              "childCount": 0,
+              "icon": "🗼",
+              "color": "#e91e63",
+              "drawnColor": "#e91e63",
+              "status": "todo",
+              "priority": 2,
+              "tags": [
+                "city"
+              ],
+              "collapsed": true,
+              "type": "goal",
+              "link": "https://example.com/tokyo",
+              "note": "Book the **ryokan**",
+              "noteFormat": "markdown",
+              "image": {
+                "src": "media/tokyo.jpg",
+                "alt": "The tower at night",
+                "caption": "Tokyo Tower",
+                "provider": null,
+                "thumbnail": null
+              },
+              "video": {
+                "src": "https://www.youtube.com/watch?v=abc",
+                "alt": null,
+                "caption": null,
+                "provider": "youtube",
+                "thumbnail": "https://i.ytimg.com/vi/abc/hqdefault.jpg"
+              },
+              "embed": null,
+              "attrs": {
+                "target": 3000,
+                "current": 1250,
+                "unit": "USD"
+              }
+            }
+          ],
+          "options": {
+            "theme": "night",
+            "palette": [
+              "#e91e63",
+              "#3f51b5"
+            ],
+            "showRings": true,
+            "orbitAnimation": false,
+            "orbitSpeed": 1.5,
+            "maxDepth": 3,
+            "viewMode": "focus",
+            "progressRings": false,
+            "tags": [
+              "travel"
+            ]
+          },
+          "path": [
+            "trip-to-japan",
+            "tokyo"
+          ],
+          "mode": "focus",
+          "style": "night",
+          "surface": "#0b1020",
+          "readOnly": "newer",
+          "problem": "This map is written for version 2 of the format, and this version of Orbit reads up to 1."
+        }
+      },
+      {
+        "type": "saved",
+        "kind": "update",
+        "markdown": "# Trip to Japan\n- Tokyo\n",
+        "state": {
+          "title": "Trip to Japan",
+          "nodes": [
+            {
+              "id": "trip-to-japan",
+              "text": "Trip to Japan",
+              "parentId": null,
+              "depth": 0,
+              "index": 0,
+              "childCount": 1,
+              "icon": null,
+              "color": null,
+              "drawnColor": "var(--_orbit-color-0)",
+              "status": null,
+              "priority": null,
+              "tags": [],
+              "collapsed": false,
+              "type": null,
+              "link": null,
+              "note": null,
+              "noteFormat": null,
+              "image": null,
+              "video": null,
+              "embed": null,
+              "attrs": null
+            },
+            {
+              "id": "tokyo",
+              "text": "Tokyo",
+              "parentId": "trip-to-japan",
+              "depth": 1,
+              "index": 0,
+              "childCount": 0,
+              "icon": "🗼",
+              "color": "#e91e63",
+              "drawnColor": "#e91e63",
+              "status": "todo",
+              "priority": 2,
+              "tags": [
+                "city"
+              ],
+              "collapsed": true,
+              "type": "goal",
+              "link": "https://example.com/tokyo",
+              "note": "Book the **ryokan**",
+              "noteFormat": "markdown",
+              "image": {
+                "src": "media/tokyo.jpg",
+                "alt": "The tower at night",
+                "caption": "Tokyo Tower",
+                "provider": null,
+                "thumbnail": null
+              },
+              "video": {
+                "src": "https://www.youtube.com/watch?v=abc",
+                "alt": null,
+                "caption": null,
+                "provider": "youtube",
+                "thumbnail": "https://i.ytimg.com/vi/abc/hqdefault.jpg"
+              },
+              "embed": null,
+              "attrs": {
+                "target": 3000,
+                "current": 1250,
+                "unit": "USD"
+              }
+            }
+          ],
+          "options": {
+            "theme": "night",
+            "palette": [
+              "#e91e63",
+              "#3f51b5"
+            ],
+            "showRings": true,
+            "orbitAnimation": false,
+            "orbitSpeed": 1.5,
+            "maxDepth": 3,
+            "viewMode": "focus",
+            "progressRings": false,
+            "tags": [
+              "travel"
+            ]
+          },
+          "path": [
+            "trip-to-japan",
+            "tokyo"
+          ],
+          "mode": "focus",
+          "style": "night",
+          "surface": "#0b1020",
+          "readOnly": "newer",
+          "problem": "This map is written for version 2 of the format, and this version of Orbit reads up to 1."
+        },
+        "added": null,
+        "renamed": {
+          "from": "tokio",
+          "to": "tokyo"
+        },
+        "removed": null
+      },
+      {
+        "type": "state",
+        "state": {
+          "title": "Trip to Japan",
+          "nodes": [
+            {
+              "id": "trip-to-japan",
+              "text": "Trip to Japan",
+              "parentId": null,
+              "depth": 0,
+              "index": 0,
+              "childCount": 1,
+              "icon": null,
+              "color": null,
+              "drawnColor": "var(--_orbit-color-0)",
+              "status": null,
+              "priority": null,
+              "tags": [],
+              "collapsed": false,
+              "type": null,
+              "link": null,
+              "note": null,
+              "noteFormat": null,
+              "image": null,
+              "video": null,
+              "embed": null,
+              "attrs": null
+            },
+            {
+              "id": "tokyo",
+              "text": "Tokyo",
+              "parentId": "trip-to-japan",
+              "depth": 1,
+              "index": 0,
+              "childCount": 0,
+              "icon": "🗼",
+              "color": "#e91e63",
+              "drawnColor": "#e91e63",
+              "status": "todo",
+              "priority": 2,
+              "tags": [
+                "city"
+              ],
+              "collapsed": true,
+              "type": "goal",
+              "link": "https://example.com/tokyo",
+              "note": "Book the **ryokan**",
+              "noteFormat": "markdown",
+              "image": {
+                "src": "media/tokyo.jpg",
+                "alt": "The tower at night",
+                "caption": "Tokyo Tower",
+                "provider": null,
+                "thumbnail": null
+              },
+              "video": {
+                "src": "https://www.youtube.com/watch?v=abc",
+                "alt": null,
+                "caption": null,
+                "provider": "youtube",
+                "thumbnail": "https://i.ytimg.com/vi/abc/hqdefault.jpg"
+              },
+              "embed": null,
+              "attrs": {
+                "target": 3000,
+                "current": 1250,
+                "unit": "USD"
+              }
+            }
+          ],
+          "options": {
+            "theme": "night",
+            "palette": [
+              "#e91e63",
+              "#3f51b5"
+            ],
+            "showRings": true,
+            "orbitAnimation": false,
+            "orbitSpeed": 1.5,
+            "maxDepth": 3,
+            "viewMode": "focus",
+            "progressRings": false,
+            "tags": [
+              "travel"
+            ]
+          },
+          "path": [
+            "trip-to-japan",
+            "tokyo"
+          ],
+          "mode": "focus",
+          "style": "night",
+          "surface": "#0b1020",
+          "readOnly": "newer",
+          "problem": "This map is written for version 2 of the format, and this version of Orbit reads up to 1."
+        }
+      },
+      {
+        "type": "focus",
+        "path": [
+          "trip-to-japan",
+          "tokyo"
+        ],
+        "mode": "all"
+      },
+      {
+        "type": "context",
+        "id": "tokyo",
+        "x": 120.5,
+        "y": 340
+      },
+      {
+        "type": "held"
+      },
+      {
+        "type": "drag",
+        "phase": "end",
+        "id": "tokyo",
+        "parentId": "trip-to-japan",
+        "index": 2
+      },
+      {
+        "type": "details",
+        "id": "tokyo"
+      },
+      {
+        "type": "editorOpen",
+        "id": null,
+        "parentId": "trip-to-japan"
+      },
+      {
+        "type": "editorClose"
+      },
+      {
+        "type": "source",
+        "diagnostics": [
+          {
+            "message": "Unknown attribute \"colour\".",
+            "line": 3,
+            "severity": "warning"
+          }
+        ],
+        "drawn": true
+      },
+      {
+        "type": "open",
+        "url": "https://example.com/tokyo"
+      },
+      {
+        "type": "haptic"
+      },
+      {
+        "type": "result",
+        "job": 4,
+        "value": "<opml version=\"2.0\"></opml>"
+      },
+      {
+        "type": "clipboard",
+        "action": "paste",
+        "id": "tokyo"
+      },
+      {
+        "type": "error",
+        "message": "Orbit couldn't draw this map."
+      }
+    ]
+  },
+  "audience": {
+    "commands": [
+      {
+        "type": "language",
+        "words": {
+          "goalOfTarget": "of {target}",
+          "goalLeft": "left",
+          "language": "en",
+          "kinds": {},
+          "untitledMap": "Untitled map",
+          "noIdeas": "Orbit found no ideas in this text.",
+          "textNotRead": "Orbit couldn't read all of this text.",
+          "mapNotAddedTo": "Orbit couldn't read all of this map, so it didn't add to it.",
+          "mapFromNewerOrbit": "A newer version of Orbit made this map. Update Orbit to add to it.",
+          "waiting": "Waiting for the presenter",
+          "looking": "Looking for the presenter…",
+          "removed": "The presenter removed you.",
+          "full": "This presentation is full.",
+          "closed": "The presenter isn't letting anyone new in.",
+          "ended": "The presentation ended.",
+          "tapForSound": "Tap for sound"
+        }
+      },
+      {
+        "type": "show",
+        "markdown": "# Trip to Japan\n- Tokyo\n",
+        "theme": {
+          "dark": false,
+          "tokens": {
+            "background": "#fff8f6",
+            "node-text-dark": "#201a19"
+          },
+          "seed": "#8f4c38"
+        },
+        "baseUrl": null,
+        "focus": "tokyo",
+        "captions": false
+      },
+      {
+        "type": "step",
+        "id": "tokyo",
+        "index": 1,
+        "total": 4
+      },
+      {
+        "type": "captions",
+        "on": true
+      },
+      {
+        "type": "media",
+        "id": "tokyo",
+        "kind": "video",
+        "playing": true,
+        "at": 42.5
+      },
+      {
+        "type": "playback",
+        "playing": false
+      },
+      {
+        "type": "seek",
+        "at": 90
+      },
+      {
+        "type": "closeMedia"
+      },
+      {
+        "type": "end"
+      }
+    ],
+    "messages": [
+      {
+        "type": "hello"
+      },
+      {
+        "type": "mediaState",
+        "id": "tokyo",
+        "playing": true,
+        "time": 42.5,
+        "duration": 190,
+        "ended": false,
+        "muted": true
+      }
+    ]
+  }
+}

@@ -105,6 +105,16 @@ class FolderSyncTest {
     }
 
     @Test
+    fun `a map deleted while the maps were kept in another folder waits for that folder`() {
+        val deleted = SyncRecord("content://other", "Plan.md", digest("# Plan"), 1, 1)
+
+        // Kept in this folder for now: the deletion isn't forgotten, but waits for the maps to be kept in the other one again.
+        assertEquals(emptyList<SyncStep>(), planSync(folder, emptyList(), emptyList(), listOf(deleted)))
+        // Back in the other folder, its file there goes, and it doesn't come back as a map.
+        assertEquals(listOf(SyncStep.DeleteFile(deleted)), planSync("content://other", emptyList(), listOf(file("Plan.md", null)), listOf(deleted)))
+    }
+
+    @Test
     fun `a deleted map's file that couldn't be read is deleted later, not forgotten`() {
         val deleted = SyncRecord(folder, "Plan.md", digest("# Plan"), 1, 1)
         val unreadable = RemoteFile(FolderFile("Plan.md", 2, 2), null, unreadable = true)

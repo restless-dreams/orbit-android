@@ -4,7 +4,7 @@ Construye un mapa sobre el mapa. Agrega ideas alrededor de la del centro, escrib
 
 Preséntalo. Orbit muestra tu mapa en pantalla completa, paso a paso por el recorrido que elijas, con una vista de quien presenta en tu teléfono mientras los demás ven el mapa en una segunda pantalla, una TV o cualquier navegador de la sala. Ensaya con un cronómetro que te avisa cuando vas atrasado.
 
-Tus mapas son tuyos. Cada uno es un archivo markdown sencillo que cualquier editor de texto puede abrir. Guárdalos en una carpeta que elijas y se mantendrán sincronizados con tus otras apps y dispositivos; cuando Orbit guarda un archivo, cambia solo lo que editaste y deja el resto como lo escribiste. Cada mapa tiene un historial de versiones, y los mapas eliminados esperan 30 días en la papelera.
+Tus mapas son tuyos. Cada uno es un archivo markdown sencillo que cualquier editor de texto puede abrir. Guárdalos en una carpeta que elijas y se mantendrán sincronizados con tus otras apps y dispositivos; cuando Orbit guarda un archivo, cambia solo lo que editaste y deja el resto como lo escribiste. Cada mapa tiene un historial de versiones, y los mapas eliminados esperan 30 días en la papelera. Trae mapas de OPML, FreeMind, Freeplane y XMind, llévatelos como OPML, o imprímelos y guárdalos como PDF con su esquema y sus notas.
 
 Envía un mapa a tu tablet o a otro teléfono cercano sin necesidad de cuenta, ábrelo en un navegador de tu computadora o compártelo como una página web que cualquiera puede recorrer.
 

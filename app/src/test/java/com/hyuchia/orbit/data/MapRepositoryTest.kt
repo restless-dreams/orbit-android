@@ -14,6 +14,7 @@ import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import java.util.Locale
 import java.util.zip.ZipEntry
@@ -43,6 +44,24 @@ class MapRepositoryTest {
     }
 
     private suspend fun loaded(): MapRepository = repository().also { it.load() }
+
+    @Test
+    fun `a map from another app comes with its pictures, and with nothing that isn't one`() = runTest {
+        val repository = loaded()
+        val id = repository.add(
+            "# Garden\n![](media/plan.png)\n",
+            original = "<opml version=\"2.0\"><body><outline text=\"Garden\"><outline text=\"Seeds\"/></outline></body></opml>",
+            pictures = mapOf("plan.png" to ByteArray(10) { 7 }, "script.js" to ByteArray(3), "../outside.png" to ByteArray(3)),
+        )
+
+        assertEquals(10L, File(maps, "$id/media/plan.png").length())
+        assertFalse(File(maps, "$id/media/script.js").exists())
+        assertFalse(File(maps, "outside.png").exists())
+        // The OPML it came from is kept in its history as it came in, counting its own ideas.
+        val original = repository.versions(id).single()
+        assertTrue(original.original)
+        assertEquals(1, original.ideas)
+    }
 
     @Test
     fun `ideas pasted into another map bring the pictures and videos they point to`() = runTest {
@@ -196,6 +215,53 @@ class MapRepositoryTest {
         assertEquals(WriteResult.Changed, repository.write(id, "# Plan\n- From the phone\n", base = "# Plan\n"))
         assertEquals("# Plan\n- From the laptop\n", repository.read(id))
         assertTrue(repository.versions(id).any { repository.readVersion(id, it.time) == "# Plan\n- From the phone\n" })
+    }
+
+    @Test
+    fun `a version that can't be read is left out of the history, rather than stopping it`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Plan\n")
+        repository.write(id, "# Plan\n- A\n", checkpoint = Checkpoint.Always)
+        val kept = repository.versions(id).single().time
+        // Thinned out as the history was listed: the name is still there, but no file to read.
+        val gone = kept + minute
+        File(history, "$id/$gone.md").mkdirs()
+
+        assertEquals(listOf(kept), repository.versions(id).map { it.time })
+        assertNull(repository.readVersion(id, gone))
+        assertEquals("# Plan\n", repository.readVersion(id, kept))
+    }
+
+    @Test
+    fun `renaming a map whose file can't be read is refused, and the file stays as it is`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Plan\n")
+        val file = File(maps, "$id/map.md")
+        file.setReadable(false)
+
+        try {
+            assertEquals(WriteResult.Refused, repository.rename(id, "Trip"))
+        } finally {
+            file.setReadable(true)
+        }
+
+        assertEquals("# Plan\n", repository.read(id))
+    }
+
+    @Test
+    fun `a map that can't be added says why, in the app's language`() = runTest {
+        assertEquals("Orbit couldn’t add the map. Is this device’s storage full?", loaded().whyNotAdded())
+        File(maps, ".layout.json").writeText("""{"version":${LAYOUT_VERSION + 1},"compatible":${LAYOUT_VERSION + 1}}""")
+        val readOnly = loaded()
+
+        try {
+            readOnly.add("# Plan\n")
+            fail("A map was added to maps a newer version keeps")
+        } catch (refused: IOException) {
+            assertEquals(readOnly.whyNotAdded(), refused.message)
+        }
+
+        assertEquals("A newer version of Orbit keeps these maps: update Orbit to change them.", readOnly.whyNotAdded())
     }
 
     @Test
@@ -633,6 +699,16 @@ class MapRepositoryTest {
         val bundle = repository.readBundle(ByteArrayInputStream(zip))!!
         assertEquals(setOf("picture-1.jpg", "video-1.jpg", "video-1.mp4"), bundle.pictures.keys)
         assertEquals(3_000L, bundle.pictures["video-1.mp4"]!!.length())
+    }
+
+    @Test
+    fun `a map has pictures for a zip only when its text points at ones in its folder`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Trip\n- Beach ![](media/picture-1.jpg)\n")
+        assertFalse(repository.hasPictures(id))
+        repository.addMediaFile(id, "picture-1.jpg") { it.write(ByteArray(10)); true }
+        assertTrue(repository.hasPictures(id))
+        assertFalse(repository.hasPictures(repository.add("# Plan\n- ![](https://example.com/picture.jpg)\n")))
     }
 
     @Test

@@ -7,22 +7,27 @@ import com.hyuchia.orbit.BuildConfig
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.page.CheckedMap
+import com.hyuchia.orbit.page.ImportProblem
+import com.hyuchia.orbit.page.ImportWarning
+import com.hyuchia.orbit.page.ImportedFile
 import com.hyuchia.orbit.page.MapCommand
 import com.hyuchia.orbit.page.PageException
 import com.hyuchia.orbit.page.PagePool
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 sealed interface ImportResult {
-    data class Imported(val id: String, val title: String) : ImportResult
+    /** A map that came in; `notes` say what another app's map had that Orbit keeps another way, or couldn't keep. */
+    data class Imported(val id: String, val title: String, val notes: List<String> = emptyList()) : ImportResult
 
-    /** A zip of maps, as Export all writes them: `added` came in, `alreadyHere` were here. */
-    data class ImportedMany(val added: Int, val alreadyHere: Int) : ImportResult
+    /** A zip of maps, as Export all writes them, or a workbook's sheets: `added` came in, `alreadyHere` were here. */
+    data class ImportedMany(val added: Int, val alreadyHere: Int, val notes: List<String> = emptyList()) : ImportResult
 
     /** A map that's already here, `existing`, in another version: it can update it, or be kept as well. */
     data class AlreadyHere(val bundle: MapBundle, val existing: String) : ImportResult
@@ -45,15 +50,32 @@ private val YAML_NODES = Regex("""(?m)^nodes:\s*$""")
 /** The longest a map's title gets from shared text; a longer line is kept whole as the map's note. */
 private const val TITLE_LENGTH = 80
 
+/** What each of Orbit's warnings about another app's map says, by its code. */
+private val WARNING_TEXTS = mapOf(
+    "floating-ideas-moved" to R.plurals.data_import_floating_ideas_moved,
+    "summaries-moved" to R.plurals.data_import_summaries_moved,
+    "callouts-moved" to R.plurals.data_import_callouts_moved,
+    "boundaries-in-notes" to R.plurals.data_import_boundaries_in_notes,
+    "links-in-notes" to R.plurals.data_import_links_in_notes,
+    "missing-link-targets" to R.plurals.data_import_missing_link_targets,
+    "icons-not-kept" to R.plurals.data_import_icons_not_kept,
+    "pictures-not-kept" to R.plurals.data_import_pictures_not_kept,
+    "attachments-not-kept" to R.plurals.data_import_attachments_not_kept,
+    "local-links-not-kept" to R.plurals.data_import_local_links_not_kept,
+    "encrypted-branches-not-read" to R.plurals.data_import_encrypted_branches_not_read,
+    "formatting-not-kept" to R.plurals.data_import_formatting_not_kept,
+)
+
 /** Whether a file at an address with this scheme and authority comes from another app: a content address that isn't Orbit's own. */
 internal fun importable(scheme: String?, authority: String?, ownAuthority: String): Boolean =
     scheme == ContentResolver.SCHEME_CONTENT && authority != null && authority != ownAuthority
 
 /**
  * Turns what other apps hand Orbit into maps: markdown and YAML files, zips
- * of a map and its pictures, and text shared from anywhere. Each map keeps
- * the text it came from in its history, as it came in. What went wrong is
- * said in `words`.
+ * of a map and its pictures, maps from other apps (OPML, FreeMind and
+ * Freeplane, XMind), and text shared from anywhere. Each map keeps the text
+ * it came from in its history, as it came in. What went wrong is said in
+ * `words`.
  */
 class Importer(private val maps: MapRepository, private val pages: PagePool, private val words: Words) {
 
@@ -68,8 +90,23 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
             // Even asking a file's name can be refused, when the app that gave it can't give it.
             val name = withContext(Dispatchers.IO) { displayName(uri, resolver) }.orEmpty()
             val type = resolver.getType(uri).orEmpty()
+            val zipNamed = name.endsWith(".zip", ignoreCase = true) || type in ZIP_TYPES
+            val kind = withContext(Dispatchers.IO) { resolver.openInputStream(uri)?.use { OtherApps.kindOf(name, type, zipNamed, it) } }
+                ?: return ImportResult.Failed(words.string(R.string.data_file_unreadable))
 
-            if (name.endsWith(".zip", ignoreCase = true) || type in ZIP_TYPES) {
+            if (kind is FileKind.FromOtherApp) {
+                val limit = if (kind.format == OtherFormat.XMind) OtherApps.WORKBOOK_LIMIT else MAXIMUM_SIZE
+                val bytes = withContext(Dispatchers.IO) { resolver.openInputStream(uri)?.use { it.readAtMost((limit + 1).toInt()) } }
+                    ?: return ImportResult.Failed(words.string(R.string.data_file_unreadable))
+
+                if (bytes.size > limit) {
+                    return ImportResult.Failed(words.string(R.string.data_file_too_big_for_map))
+                }
+
+                return importFromOtherApp(bytes, name.ifBlank { null }, kind.format)
+            }
+
+            if (kind == FileKind.Zip) {
                 // The maps here must be known first, to find the one the zip is.
                 maps.maps.filterNotNull().first()
                 val many = withContext(Dispatchers.IO) { resolver.openInputStream(uri)?.use { maps.holdsManyMaps(it) } }
@@ -161,7 +198,72 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
         page.request(CheckedMap.serializer()) { job -> MapCommand.Check(job, text) }
     }
 
+    /**
+     * Maps from another app's file, read by Orbit on a page: one, or one for
+     * each sheet of an XMind workbook, with the pictures inside it. An OPML
+     * or `.mm` file is kept in the map's history as it came in, as text files
+     * are; a workbook isn't text, so it isn't.
+     */
+    suspend fun importFromOtherApp(bytes: ByteArray, name: String?, format: OtherFormat): ImportResult {
+        val file = try {
+            pages.work { page ->
+                page.request(ImportedFile.serializer()) { job -> MapCommand.ImportFile(job, Base64.getEncoder().encodeToString(bytes), name) }
+            }
+        } catch (unreadable: PageException) {
+            return ImportResult.Failed(words.string(R.string.data_could_not_read_that, unreadable.message.orEmpty()))
+        }
+
+        file.error?.let { return ImportResult.Failed(problemText(it, words)) }
+
+        if (file.maps.isEmpty()) {
+            return ImportResult.Failed(words.string(R.string.data_nothing_to_make_a_map_from))
+        }
+
+        val original = if (format == OtherFormat.XMind || file.maps.size > 1) null else decodeText(bytes)
+
+        val ids = try {
+            file.maps.map { map ->
+                val pictures = map.media.mapValues { (_, data) -> Base64.getDecoder().decode(data) }
+                maps.add(map.markdown, original = original, pictures = pictures)
+            }
+        } catch (failed: IOException) {
+            return ImportResult.Failed(failed.message ?: words.string(R.string.common_could_not_keep_that_map))
+        } catch (damaged: IllegalArgumentException) {
+            return ImportResult.Failed(words.string(R.string.data_file_unreadable))
+        }
+
+        val notes = importNotes(file.maps.flatMap { it.warnings }, words)
+
+        return if (ids.size == 1) {
+            ImportResult.Imported(ids.single(), maps.summary(ids.single())?.title ?: words.string(R.string.data_map_without_a_title), notes)
+        } else {
+            ImportResult.ImportedMany(added = ids.size, alreadyHere = 0, notes = notes)
+        }
+    }
+
+
     companion object {
+        /**
+         * What didn't come over from another app's map as it was, in `words`:
+         * a line for each kind, its places counted across the file's maps. A
+         * kind the app has no words for says Orbit's own message.
+         */
+        fun importNotes(warnings: List<ImportWarning>, words: Words): List<String> =
+            warnings.groupBy { it.code }.map { (code, found) ->
+                val count = found.sumOf { it.count }
+                WARNING_TEXTS[code]?.let { words.plural(it, count, count) } ?: found.first().message
+            }
+
+        /** Why a file from another app makes no map, in `words`. */
+        fun problemText(problem: ImportProblem, words: Words): String = when (problem.code) {
+            "unknown-format" -> words.string(R.string.data_import_unknown_format)
+            "unreadable" -> words.string(R.string.data_import_unreadable)
+            "empty" -> words.string(R.string.data_nothing_to_make_a_map_from)
+            "password-protected" -> words.string(R.string.data_import_password_protected)
+            "too-large" -> words.string(R.string.data_import_too_large)
+            else -> words.string(R.string.data_could_not_read_that, problem.message)
+        }
+
         /**
          * Markdown text as Orbit reads it: orbit-md is kept as written, a
          * single line becomes a map's title, and plain lines become a list
@@ -215,7 +317,7 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
 }
 
 /** Up to `limit` bytes of the stream: Android has `readNBytes` only from API 33. */
-private fun InputStream.readAtMost(limit: Int): ByteArray {
+internal fun InputStream.readAtMost(limit: Int): ByteArray {
     val bytes = ByteArrayOutputStream()
     val chunk = ByteArray(DEFAULT_BUFFER_SIZE)
 

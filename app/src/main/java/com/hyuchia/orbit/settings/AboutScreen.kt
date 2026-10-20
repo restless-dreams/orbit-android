@@ -30,11 +30,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +57,7 @@ import com.hyuchia.orbit.ui.openLink
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.IOException
 
 /** Where the app's source is published, as the GPL asks. */
 private const val SOURCE_CODE = "https://github.com/restless-dreams/orbit-android"
@@ -63,6 +67,7 @@ private const val SOURCE_CODE = "https://github.com/restless-dreams/orbit-androi
 fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: () -> Unit, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val snackbars = remember { SnackbarHostState() }
 
     val orbit by produceState<OrbitBuild?>(null) {
         value = withContext(Dispatchers.IO) { OrbitBuild.bundled(context) }
@@ -77,6 +82,7 @@ fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: 
                 },
             )
         },
+        snackbarHost = { SnackbarHost(snackbars) },
     ) { padding ->
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -183,7 +189,15 @@ fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: 
                             val markdown = withContext(Dispatchers.IO) { context.openAsset("welcome.md").bufferedReader().use { it.readText() } }
                             val title = MapText.outline(markdown, container.words).title
                             val existing = container.maps.maps.value?.firstOrNull { it.title == title }
-                            onOpenMap(existing?.id ?: container.maps.add(markdown, pinned = true))
+
+                            val id = existing?.id ?: try {
+                                container.maps.add(markdown, pinned = true)
+                            } catch (failed: IOException) {
+                                snackbars.showSnackbar(container.maps.whyNotAdded())
+                                return@launch
+                            }
+
+                            onOpenMap(id)
                         }
                     },
                     supportingContent = { Text(stringResource(R.string.settings_welcome_map_description)) },

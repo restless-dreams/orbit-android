@@ -6,10 +6,13 @@
   "scripts": {
     "build": "bun run build.ts",
     "test": "bun test",
+    "typecheck": "bun run typecheck.ts",
     "lint": "cd .. && eslint --config web/eslint.config.js web art scripts"
   },
   "devDependencies": {
+    "acorn": "^8.15.0",
     "eslint": "^9.39.4",
+    "typescript": "~5.9.3",
     "typescript-eslint": "^8.61.0"
   }
 }

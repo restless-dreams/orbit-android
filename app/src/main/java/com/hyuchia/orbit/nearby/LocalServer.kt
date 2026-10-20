@@ -1,6 +1,9 @@
 package com.hyuchia.orbit.nearby
 
 import com.hyuchia.orbit.Logs
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.runBlocking
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
@@ -8,6 +11,7 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -64,6 +68,13 @@ private val SAFETY_HEADERS = listOf(
     "Cache-Control" to "no-store",
 )
 
+/**
+ * The content policy of every answer that isn't a page: a picture or video
+ * opened on its own, an SVG with a script inside say, runs nothing, loads
+ * nothing and stays apart from the phone's pages.
+ */
+internal const val FILE_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+
 /** How many connections the server holds at once. Past either, it answers 503 at once and hangs up. */
 data class ServerLimits(val connections: Int = 128, val perAddress: Int = 8)
 
@@ -74,6 +85,16 @@ data class ServerTimings(
 
     /** How long one read may wait for the next bytes of a request. */
     val read: Int = 15_000,
+
+    /**
+     * How long a connection may take to send a request's body, all told,
+     * besides [bodyPerMegabyte] for each megabyte it says it holds: a body
+     * dripping in a byte at a time can't hold a connection for long.
+     */
+    val body: Long = 15_000,
+
+    /** How much longer a body may take for each megabyte it holds: it has to come at 33 KB a second on the whole. */
+    val bodyPerMegabyte: Long = 30_000,
 
     /** How long a write may go without progress before its connection is dropped: a reader that stopped reading. */
     val stall: Long = 30_000,
@@ -86,6 +107,9 @@ data class ServerTimings(
 
     /** How long a thread with nothing to do waits for more before it ends. */
     val idleThread: Long = 30_000,
+
+    /** How often the server looks whether the addresses it listens on changed, as the device joins and leaves networks. */
+    val addresses: Long = 5_000,
 )
 
 /** A request from a device on the local network. */
@@ -117,6 +141,30 @@ class Request(
         headers["cookie"].orEmpty().split(';').map { it.trim() }.filter { it.substringBefore('=') == name }.map { it.substringAfter('=') }
 }
 
+/** A request before its body is read: enough to refuse it without taking the body. */
+class RequestHead(
+    val method: String,
+    val path: String,
+
+    /** Header names in lower case. */
+    val headers: Map<String, String>,
+
+    /** The address the request came from. */
+    val from: String,
+
+    /** How long its body says it is. */
+    val length: Long,
+)
+
+/** What the server does with a request before reading its body. */
+sealed interface Admission {
+    /** Reads the body and answers the request; `release` runs once it's done with, whether or not the body arrived whole. */
+    class Read(val release: () -> Unit = {}) : Admission
+
+    /** Answers at once, without reading any of the body. */
+    class Refuse(val response: Response) : Admission
+}
+
 sealed interface Response {
     class Bytes(val status: Int, val type: String, val body: ByteArray, val headers: Map<String, String> = emptyMap()) : Response {
         fun withHeaders(more: Map<String, String>) = Bytes(status, type, body, headers + more)
@@ -125,8 +173,10 @@ sealed interface Response {
     /**
      * A file, read as it's written, never all at once. The server answers
      * a request for part of it, as a video asks, with that part (see [byteRange]).
+     * A `temporary` file, made for this answer alone, goes whole, and is
+     * deleted once it's written, or once writing it fails.
      */
-    class FromFile(val type: String, val file: File) : Response
+    class FromFile(val type: String, val file: File, val headers: Map<String, String> = emptyMap(), val temporary: Boolean = false) : Response
 
     /** Server-sent events: the connection stays open and gets each event as it's sent, until either side closes. */
     class Events(val stream: EventStream) : Response
@@ -263,12 +313,13 @@ class EventStream(private val onClose: () -> Unit = {}) {
  * connection carries one request, except event streams, which stay open.
  *
  * It keeps to itself: connections run on its own few small threads, never
- * the app's, and an event stream holds no thread while it waits. It takes
- * only connections its `policy` admits (from the room, by default), holds
- * at most `limits` of them, and answers only requests that name the
- * address they arrived at. `bodyLimit` caps what a request may upload, by
- * its method and path; a body bigger than fits in memory goes to a file in
- * `spool`, when there is one.
+ * the app's, and an event stream holds no thread while it waits. It listens
+ * only on the addresses it's started with, takes only connections its
+ * `policy` admits (from the room, by default), holds at most `limits` of
+ * them, and answers only requests that name the address they arrived at.
+ * `bodyLimit` caps what a request may upload, by its method and path, and
+ * `admit` can refuse a request before any of its body is read; a body
+ * bigger than fits in memory goes to a file in `spool`, when there is one.
  */
 class LocalServer(
     private val bodyLimit: (method: String, path: String) -> Long,
@@ -276,38 +327,121 @@ class LocalServer(
     private val policy: ConnectionPolicy = RoomNetworks(),
     private val limits: ServerLimits = ServerLimits(),
     private val timings: ServerTimings = ServerTimings(),
+    private val admit: (RequestHead) -> Admission = { Admission.Read() },
     private val handle: suspend (Request) -> Response,
 ) {
     @Volatile private var running: Running? = null
+    private var listenOn: () -> List<InetAddress>? = { null }
+    private var onChange: (Boolean) -> Unit = {}
+    private var preferredPort = 0
 
-    /** The port it listens on, once started. */
-    val port: Int get() = running?.socket?.localPort ?: 0
+    /** The port it last listened on: the address people were given keeps it while the network changes. */
+    private var lastPort = 0
 
-    val isRunning: Boolean get() = running?.socket?.isClosed == false
+    private var follower: ScheduledThreadPoolExecutor? = null
+    private val listeningNow = MutableStateFlow(false)
 
-    /** Listens on `preferredPort`, or any free port if that one's taken. */
+    /** The port it listens on, while it does. */
+    val port: Int get() = running?.sockets?.firstOrNull()?.localPort ?: 0
+
+    val isRunning: Boolean get() = running?.sockets?.any { !it.isClosed } == true
+
+    /** Whether it listens now: started, and on a network it listens on. */
+    val listening: StateFlow<Boolean> = listeningNow.asStateFlow()
+
+    /**
+     * Listens on `preferredPort`, or any free port if that one's taken, at
+     * the addresses `listenOn` gives: every address this device has when it
+     * gives null, and nowhere while it gives none. It follows them as the
+     * device joins and leaves networks, starting again at the new addresses,
+     * on the same port when it can; `onChange` hears whenever it starts or
+     * stops listening that way.
+     */
     @Synchronized
-    fun start(preferredPort: Int) {
-        if (isRunning) {
+    fun start(preferredPort: Int, listenOn: () -> List<InetAddress>? = { null }, onChange: (Boolean) -> Unit = {}) {
+        if (follower != null) {
             return
         }
 
-        val socket = try {
-            ServerSocket().apply {
-                reuseAddress = true
-                bind(InetSocketAddress(preferredPort))
-            }
-        } catch (taken: IOException) {
-            ServerSocket(0)
+        this.listenOn = listenOn
+        this.onChange = onChange
+        this.preferredPort = preferredPort
+        open(listenOn(), preferredPort)
+
+        follower = ScheduledThreadPoolExecutor(1, threads("Orbit server addresses")).also {
+            it.scheduleWithFixedDelay({ runCatching { follow() } }, timings.addresses, timings.addresses, TimeUnit.MILLISECONDS)
+        }
+    }
+
+    /** Starts again at the addresses `listenOn` gives now, when they changed. */
+    @Synchronized
+    private fun follow() {
+        if (follower == null) {
+            return
         }
 
-        running = Running(socket).also { it.start() }
+        val addresses = listenOn()
+        val current = running
+
+        if (current != null && sameAddresses(current.addresses, addresses)) {
+            return
+        }
+
+        if (current == null && addresses != null && addresses.isEmpty()) {
+            return
+        }
+
+        // The address people were given keeps its port: only the address itself changed.
+        val port = lastPort.takeIf { it > 0 } ?: preferredPort
+        current?.stop()
+        running = null
+        open(addresses, port)
+        onChange(running != null)
+    }
+
+    /** Listens at `addresses` on `port`, or any free port; nowhere when there are none. */
+    private fun open(addresses: List<InetAddress>?, port: Int) {
+        val sockets = if (addresses != null && addresses.isEmpty()) null else bind(addresses, port) ?: bind(addresses, 0)
+        running = sockets?.let { Running(it, addresses).also { started -> started.start() } }
+        sockets?.firstOrNull()?.localPort?.let { lastPort = it }
+        listeningNow.value = running != null
+    }
+
+    private fun sameAddresses(first: List<InetAddress>?, second: List<InetAddress>?): Boolean =
+        first?.map { it.hostAddress }?.toSet() == second?.map { it.hostAddress }?.toSet()
+
+    /**
+     * A socket at each address, all on `port` (any free one for 0, the same
+     * for every address), or null when one of them can't have it.
+     */
+    private fun bind(addresses: List<InetAddress>?, port: Int): List<ServerSocket>? {
+        val sockets = ArrayList<ServerSocket>()
+
+        try {
+            for (address in addresses ?: listOf(null)) {
+                val chosen = sockets.firstOrNull()?.localPort ?: port
+
+                sockets += ServerSocket().apply {
+                    reuseAddress = true
+                    bind(InetSocketAddress(address, chosen))
+                }
+            }
+        } catch (taken: IOException) {
+            sockets.forEach { runCatching { it.close() } }
+            return null
+        }
+
+        return sockets
     }
 
     @Synchronized
     fun stop() {
+        follower?.shutdownNow()
+        follower = null
         running?.stop()
         running = null
+        lastPort = 0
+        listeningNow.value = false
     }
 
     private class TooBigException : Exception()
@@ -315,9 +449,9 @@ class LocalServer(
     /** Where a connection is: its clocks run differently in each. */
     private enum class Phase { Head, Body, Answering, Streaming }
 
-    /** One start of the server: its socket, threads and connections, all ended together. */
-    private inner class Running(val socket: ServerSocket) {
-        private val name = "Orbit server ${socket.localPort}"
+    /** One start of the server: its sockets, threads and connections, all ended together. */
+    private inner class Running(val sockets: List<ServerSocket>, val addresses: List<InetAddress>?) {
+        private val name = "Orbit server ${sockets.first().localPort}"
         private val workers = ThreadPoolExecutor(
             0,
             limits.connections + SPARE_THREADS,
@@ -333,17 +467,20 @@ class LocalServer(
 
         fun start() {
             clock.scheduleWithFixedDelay({ runCatching { tick() } }, timings.tick, timings.tick, TimeUnit.MILLISECONDS)
-            threads("$name accepting").newThread { accept() }.start()
+
+            sockets.forEach { socket ->
+                threads("$name accepting").newThread { accept(socket) }.start()
+            }
         }
 
         fun stop() {
-            runCatching { socket.close() }
+            sockets.forEach { runCatching { it.close() } }
             clock.shutdownNow()
             connections.forEach { it.close() }
             workers.shutdown()
         }
 
-        private fun accept() {
+        private fun accept(socket: ServerSocket) {
             while (!socket.isClosed) {
                 val connection = try {
                     socket.accept()
@@ -432,6 +569,7 @@ class LocalServer(
             connections.forEach { connection ->
                 when {
                     connection.phase == Phase.Head && now - connection.since > timings.head -> connection.close()
+                    connection.phase == Phase.Body && now - connection.since > connection.bodyTime -> connection.close()
                     connection.writing && now - connection.progress > timings.stall -> connection.close()
                     connection.phase == Phase.Streaming && now - connection.lastWrite >= timings.heartbeat -> connection.heartbeat()
                 }
@@ -444,6 +582,10 @@ class LocalServer(
             @Volatile var writing = false
             @Volatile var progress = 0L
             @Volatile var lastWrite = monotonic()
+
+            /** How long the request's body may take to arrive, by its length. */
+            @Volatile var bodyTime = 0L
+
             @Volatile private var stream: EventStream? = null
             private val closed = AtomicBoolean(false)
             private val draining = AtomicBoolean(false)
@@ -451,7 +593,9 @@ class LocalServer(
 
             fun serve() {
                 var request: Request? = null
+                var answer: Response? = null
                 var streaming = false
+                var release: () -> Unit = {}
 
                 try {
                     socket.soTimeout = timings.read
@@ -476,8 +620,28 @@ class LocalServer(
                         return
                     }
 
+                    val length = bodyLength(parsed)
+
+                    if (length == null) {
+                        write(Response.text(400, "Bad request"))
+                        return
+                    }
+
+                    when (val admission = admit(RequestHead(parsed.method, parsed.path, parsed.headers, address, length))) {
+                        is Admission.Refuse -> {
+                            write(admission.response)
+                            return
+                        }
+                        is Admission.Read -> release = admission.release
+                    }
+
+                    if (length > bodyLimit(parsed.method, parsed.path)) {
+                        throw TooBigException()
+                    }
+
+                    bodyTime = timings.body + length * timings.bodyPerMegabyte / 1_000_000
                     moveTo(Phase.Body)
-                    request = readBody(input, parsed, address)
+                    request = readBody(input, parsed, address, length)
 
                     if (request == null) {
                         write(Response.text(400, "Bad request"))
@@ -494,6 +658,8 @@ class LocalServer(
                         Response.text(500, "Something went wrong")
                     }
 
+                    answer = response
+
                     if (response is Response.Events) {
                         streaming = stream(response.stream)
                     } else {
@@ -507,8 +673,10 @@ class LocalServer(
                     // A thread of the server's that ended this way would take the app with it.
                     Logs.warn(TAG, "Couldn't serve a connection", failure)
                 } finally {
-                    // A body the handler didn't take for itself.
+                    runCatching { release() }
+                    // A body the handler didn't take for itself, and a file made for this answer alone.
                     request?.bodyFile?.delete()
+                    (answer as? Response.FromFile)?.takeIf { it.temporary }?.file?.delete()
 
                     if (!streaming) {
                         finish()
@@ -613,7 +781,7 @@ class LocalServer(
                         val policy = if (response.type.startsWith("text/html")) {
                             mapOf("Content-Security-Policy" to pagePolicy(response.body.decodeToString()))
                         } else {
-                            emptyMap()
+                            mapOf("Content-Security-Policy" to FILE_POLICY)
                         }
 
                         send(head(response.status, response.type, response.body.size.toLong(), policy + response.headers))
@@ -627,7 +795,15 @@ class LocalServer(
             /** A file, or the part of it the request asks for, as it reads: a big video never sits in memory. */
             private fun writeFile(response: Response.FromFile, request: Request?) {
                 val length = response.file.length()
-                val ranges = mapOf("Accept-Ranges" to "bytes")
+
+                if (response.temporary) {
+                    // The next request makes the file again, so no part of this one is offered on its own.
+                    send(head(200, response.type, length, mapOf("Content-Security-Policy" to FILE_POLICY) + response.headers))
+                    sendFile(response.file.inputStream())
+                    return
+                }
+
+                val ranges = mapOf("Accept-Ranges" to "bytes", "Content-Security-Policy" to FILE_POLICY) + response.headers
 
                 when (val range = byteRange(request?.headers?.get("range"), length, request?.headers?.get("if-range"))) {
                     ByteRange.Whole -> {
@@ -764,19 +940,19 @@ class LocalServer(
     private fun isTokenCharacter(character: Char): Boolean =
         character in 'a'..'z' || character in 'A'..'Z' || character in '0'..'9' || character in "!#$%&'*+-.^_`|~"
 
-    private fun readBody(input: InputStream, head: Head, from: String): Request? {
+    /** How long a request's body says it is: none without a length, and null when the length isn't a number. */
+    private fun bodyLength(head: Head): Long? {
         val lengthText = head.headers["content-length"] ?: "0"
 
         if (lengthText.isEmpty() || lengthText.length > 18 || !lengthText.all { it in '0'..'9' }) {
             return null
         }
 
-        val length = lengthText.toLong()
+        return lengthText.toLong()
+    }
 
-        if (length > bodyLimit(head.method, head.path)) {
-            throw TooBigException()
-        }
-
+    /** The body of a request within its limit. */
+    private fun readBody(input: InputStream, head: Head, from: String, length: Long): Request? {
         if (length > IN_MEMORY_BODY && spool != null) {
             spool.mkdirs()
             val file = File.createTempFile("body", ".part", spool)

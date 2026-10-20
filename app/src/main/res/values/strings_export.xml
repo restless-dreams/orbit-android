@@ -14,6 +14,8 @@
 
     <!-- The ways to take the map out of the app, each with what it is. -->
     <string name="export_web_page_description">Flies in any browser, even offline, and presents</string>
+    <string name="export_pdf">PDF or print</string>
+    <string name="export_pdf_description">The map, its outline and every note, on paper or as a PDF</string>
     <string name="export_picture">Picture</string>
     <string name="export_picture_description">A PNG, drawn by Orbit</string>
     <string name="export_drawing">Drawing</string>
@@ -22,6 +24,8 @@
     <string name="export_markdown_description">The map as orbit-md, to edit anywhere</string>
     <string name="export_yaml" translatable="false">YAML</string>
     <string name="export_yaml_description">The map as data, for apps and scripts</string>
+    <string name="export_opml" translatable="false">OPML</string>
+    <string name="export_opml_description">The outline, for outliners and other mind map apps</string>
     <string name="export_zip">Zip</string>
     <string name="export_zip_description">The markdown with the pictures and videos it shows</string>
 
@@ -29,4 +33,18 @@
     <string name="export_copy_format">Copy %1$s</string>
     <string name="export_save_format">Save %1$s</string>
     <string name="export_share_format">Share %1$s</string>
+    <!-- What TalkBack reads for the PDF way's button, which opens Android's print dialog. -->
+    <string name="export_print">Print or save as PDF</string>
+
+    <!-- When a map couldn't be laid out to print. -->
+    <string name="export_print_failed">The map couldn’t be laid out for printing</string>
+
+    <!-- In a way's row, when its file couldn't be made, shared, saved or copied. -->
+    <string name="export_could_not_make">Orbit couldn’t make this file. Try again in a moment.</string>
+    <string name="export_no_room_to_share">Orbit couldn’t make this file to share. Is this device’s storage full?</string>
+    <string name="export_could_not_save">Orbit couldn’t save this file there. Try another place.</string>
+    <string name="export_too_much_to_copy">This is too much to copy at once. Share or save it instead.</string>
+    <!-- In the YAML and OPML rows of a map Orbit only shows, which it won't write anew. -->
+    <string name="export_newer_map_not_written">A newer version of Orbit made this map, so this one can’t write it this way. Update Orbit, or export it as markdown.</string>
+    <string name="export_unreadable_map_not_written">Orbit couldn’t read all of this map, so it can’t write it this way. Fix the text, or export it as markdown.</string>
 </resources>

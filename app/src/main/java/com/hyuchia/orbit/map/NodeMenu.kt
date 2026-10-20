@@ -90,6 +90,20 @@ sealed interface NodeAction {
 
 private enum class MenuPage { Main, Status, Color, Move }
 
+/** How many ideas are under idea `id` among `nodes`, all the way down: deleting it deletes them all. */
+internal fun ideasUnder(nodes: List<MapNode>, id: String): Int {
+    val children = nodes.groupBy { it.parentId }
+    val waiting = ArrayDeque(children[id].orEmpty())
+    var count = 0
+
+    while (waiting.isNotEmpty()) {
+        count += 1
+        children[waiting.removeFirst().id]?.let { waiting.addAll(it) }
+    }
+
+    return count
+}
+
 /** Orbit's status words, as people say them. */
 val Statuses = listOf(
     Triple("todo", R.string.map_status_to_do, Icons.Outlined.RadioButtonUnchecked),
@@ -101,9 +115,11 @@ val Statuses = listOf(
 /**
  * Things to do with an idea, in a menu where it was pressed. `parent` and
  * `previous` (the sibling before it) decide where it can move; `under` is
- * the goals and to-dos under it, which a goal without a target follows.
- * `mapColors` are the map's own colors, to give it again, and `pasteable`
- * is what the clipboard holds that the idea can take, if anything.
+ * the goals and to-dos under it, which a goal without a target follows, and
+ * `ideasUnder` how many ideas are under it all the way down, which Delete
+ * deletes with it. `mapColors` are the map's own colors, to give it again,
+ * and `pasteable` is what the clipboard holds that the idea can take, if
+ * anything.
  */
 @Composable
 fun NodeMenu(
@@ -112,6 +128,7 @@ fun NodeMenu(
     y: Float,
     parent: MapNode?,
     under: Rollup = Rollup(),
+    ideasUnder: Int = node.childCount,
     mapColors: List<String> = emptyList(),
     pasteable: Pasteable? = null,
     onDismiss: () -> Unit,
@@ -180,10 +197,10 @@ fun NodeMenu(
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    if (node.childCount == 0) {
+                                    if (ideasUnder == 0) {
                                         stringResource(R.string.common_delete)
                                     } else {
-                                        pluralStringResource(R.plurals.map_delete_with_its_ideas, node.childCount, node.childCount)
+                                        pluralStringResource(R.plurals.map_delete_with_its_ideas, ideasUnder, ideasUnder)
                                     },
                                 )
                             },

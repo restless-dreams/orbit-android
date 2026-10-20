@@ -19,6 +19,7 @@ import com.hyuchia.orbit.data.MapSummary
 import com.hyuchia.orbit.data.MapText
 import com.hyuchia.orbit.data.MapVersion
 import com.hyuchia.orbit.data.MediaRefusedException
+import com.hyuchia.orbit.data.OtherApps
 import com.hyuchia.orbit.data.WriteResult
 import com.hyuchia.orbit.media.GalleryItem
 import com.hyuchia.orbit.media.MediaKind
@@ -28,6 +29,7 @@ import com.hyuchia.orbit.page.AppTheme
 import com.hyuchia.orbit.page.AudienceCommand
 import com.hyuchia.orbit.page.CopiedIdea
 import com.hyuchia.orbit.page.Diagnostic
+import com.hyuchia.orbit.page.ImportedFile
 import com.hyuchia.orbit.page.MapCommand
 import com.hyuchia.orbit.page.MapInsets
 import com.hyuchia.orbit.page.MapMessage
@@ -39,10 +41,12 @@ import com.hyuchia.orbit.page.OrbitPage
 import com.hyuchia.orbit.page.PageException
 import com.hyuchia.orbit.page.PastedIdeas
 import com.hyuchia.orbit.page.PictureRequest
+import com.hyuchia.orbit.page.PrintRequest
 import com.hyuchia.orbit.page.WebPage
 import com.hyuchia.orbit.page.mapBaseUrl
 import com.hyuchia.orbit.present.Audience
 import com.hyuchia.orbit.present.ShownMedia
+import com.hyuchia.orbit.ui.pictureAddress
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -69,6 +73,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import java.io.IOException
 import java.math.BigDecimal
+import java.util.Base64
 
 /** How far back undo goes. */
 private const val HISTORY = 100
@@ -79,12 +84,17 @@ private const val INSETS_WAIT_MILLISECONDS = 1_000L
 /** A rehearsal shorter than this was stopped at once, and keeps nothing. */
 private const val REHEARSAL_MINIMUM_MILLISECONDS = 3_000L
 
+/** The encoding an XML file's declaration names, which a file kept as Unicode text no longer has. */
+private val XML_ENCODING = Regex("""^(\uFEFF?\s*<\?xml[^>]*?\bencoding\s*=\s*)["'][^"']*["']""")
+
 /** What sits over the map: one menu or panel at a time. */
 sealed interface Panel {
     /** The long-press menu, at (`x`, `y`) dp from the map's top left. */
     data class Menu(val id: String, val x: Float, val y: Float) : Panel
 
-    data class Editor(val id: String) : Panel
+    /** The idea editor, on idea `id`: `opened` tells each time it opens on an idea from the next, and stays as new text gives the idea a new id. */
+    data class Editor(val id: String, val opened: Int = 0) : Panel
+
     data class Details(val id: String) : Panel
     data object Outline : Panel
     data object Search : Panel
@@ -98,7 +108,14 @@ sealed interface Panel {
  * they're read), the one on the map (null: the map as it is now), and how
  * many ideas the map has now, to compare.
  */
-data class HistoryUi(val versions: List<MapVersion>? = null, val showing: Long? = null, val ideasNow: Int = 0)
+data class HistoryUi(
+    val versions: List<MapVersion>? = null,
+    val showing: Long? = null,
+    val ideasNow: Int = 0,
+
+    /** Versions that couldn't be read when they were chosen: gone as the history was thinned, or a file that can't be read. */
+    val unreadable: Set<Long> = emptySet(),
+)
 
 /** The map as text, while the source editor is open. */
 data class SourceState(
@@ -144,8 +161,11 @@ data class Presentation(
     /** Seconds spent on the idea on screen, at `now` ([SystemClock.elapsedRealtime]). */
     fun onStep(now: Long): Int = ((now - stepStartedAt) / 1_000).toInt()
 
+    /** Seconds the last rehearsal spent on each step, when there was one (see [stepSeconds]). */
+    private val plannedSteps: List<Int?>? by lazy { planned?.let { stepSeconds(order, it) } }
+
     /** Seconds the last rehearsal spent on the idea on screen, if it got to it. */
-    val plannedForStep: Int? get() = planned?.get(current)
+    val plannedForStep: Int? get() = plannedSteps?.get(index)
 
     /**
      * How far behind the last rehearsal's pace the presentation is at `now`,
@@ -153,16 +173,50 @@ data class Presentation(
      * only puts the presenter behind once it runs over its rehearsed time.
      */
     fun behind(now: Long): Int? {
-        val planned = planned?.takeIf { times -> order.any { it in times } } ?: return null
-        val plannedBefore = (firstIndex until index).sumOf { planned[order[it]] ?: 0 }
-        val plannedNow = plannedBefore + minOf(onStep(now), planned[current] ?: 0)
+        val planned = plannedSteps?.takeIf { steps -> steps.any { it != null } } ?: return null
+        val plannedBefore = (firstIndex until index).sumOf { planned[it] ?: 0 }
+        val plannedNow = plannedBefore + minOf(onStep(now), planned[index] ?: 0)
         return ((now - startedAt) / 1_000).toInt() - plannedNow
     }
 }
 
-/** How a rehearsal went: the ideas in the order they came up, and the seconds spent on each. */
-data class Rehearsal(val order: List<String>, val seconds: Map<String, Int>) {
-    val total: Int get() = seconds.values.sum()
+/**
+ * The seconds for each step of the path `order`, from seconds by idea: an
+ * idea the path comes back to shares its seconds among its visits, the
+ * first ones taking any left over. Null for an idea without seconds.
+ */
+internal fun stepSeconds(order: List<String>, seconds: Map<String, Int>): List<Int?> {
+    val visits = order.groupingBy { it }.eachCount()
+    val visited = HashMap<String, Int>()
+
+    return order.map { idea ->
+        val total = seconds[idea] ?: return@map null
+        val count = visits.getValue(idea)
+        val visit = visited.getOrDefault(idea, 0)
+        visited[idea] = visit + 1
+        total / count + if (visit < total % count) 1 else 0
+    }
+}
+
+/**
+ * How a rehearsal went: each step it came to, in the path's order, and the
+ * seconds spent on it. An idea the path comes back to has a step for each
+ * visit, with that visit's own time.
+ */
+data class Rehearsal(val steps: List<Step>) {
+    /** A step of the rehearsal: its idea, and the seconds spent on it. */
+    data class Step(val idea: String, val seconds: Int)
+
+    val total: Int get() = steps.sumOf { it.seconds }
+
+    /** The seconds spent on each idea, its visits together, by id: the pace of the next presentation. */
+    val seconds: Map<String, Int> get() = steps.groupingBy { it.idea }.fold(0) { sum, step -> sum + step.seconds }
+
+    companion object {
+        /** The rehearsal of the path `order`, from the milliseconds spent on its steps, by place; steps it never came to are left out. */
+        fun of(order: List<String>, milliseconds: Map<Int, Long>): Rehearsal =
+            Rehearsal(order.indices.filter { it in milliseconds }.map { place -> Step(order[place], ((milliseconds.getValue(place) + 500) / 1_000).toInt()) })
+    }
 }
 
 /** A video on its way into the map from the phone, for idea `nodeId`: how far along the copy is, from 0 to 1, or null while that isn't known. */
@@ -356,7 +410,20 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
     /** The map before the source editor opened, to undo it in one step. */
     private var sourceStart: String? = null
 
-    private var sourceJob: Job? = null
+    /** How many times the idea editor has opened on an idea (see [Panel.Editor]). */
+    private var editorOpenings = 0
+
+    /** The map edited as text, while the source editor is open. */
+    private val sourceEditing = SourceEditing(
+        scope = viewModelScope,
+        ui = state,
+        draw = { text -> page.send(MapCommand.Source(text)) },
+        convert = ::convert,
+        keep = { text ->
+            markdown = text
+            save(text)
+        },
+    )
 
     /** The presentation as it goes: its steps, its timer, what the audience sees over the map, and the audiences. */
     private val control = PresentationControl(
@@ -367,7 +434,7 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
         map = { presentation -> theme?.let { AudienceCommand.Show(markdown, it, mapBaseUrl(id), presentation.current, presentation.captions) } },
         leaving = { presentation, now ->
             if (presentation.rehearsing) {
-                rehearsed[presentation.current] = (rehearsed[presentation.current] ?: 0L) + now - presentation.stepStartedAt
+                rehearsed[presentation.index] = (rehearsed[presentation.index] ?: 0L) + now - presentation.stepStartedAt
             }
         },
         length = ::videoLength,
@@ -376,8 +443,8 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
     /** The presentation's path, as it's being made or since it was saved. */
     private var path: List<String> = emptyList()
 
-    /** A rehearsal's time on each idea so far, in milliseconds. */
-    private val rehearsed = mutableMapOf<String, Long>()
+    /** A rehearsal's time on each step of its path so far, by place, in milliseconds: an idea the path comes back to has a time for each visit. */
+    private val rehearsed = mutableMapOf<Int, Long>()
 
     /** Where an idea being dragged came from: under which idea, to tell it moved somewhere else. */
     private var dragFrom: String? = null
@@ -405,10 +472,10 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
         viewModelScope.launch { maps.markOpened(id) }
 
         // A newer version from elsewhere (another device, the folder, ideas caught on the go) replaced this map:
-        // it shows at once, and undo brings this one back.
+        // it shows at once, and undo brings this one back, with what was just typed as text.
         viewModelScope.launch {
             maps.replaced.filter { it == id }.collect {
-                runCatching { maps.read(id) }.getOrNull()?.let(::catchUp)
+                runCatching { maps.read(id) }.getOrNull()?.let { text -> sourceEditing.afterTyping { catchUp(text) } }
             }
         }
 
@@ -479,6 +546,7 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
         checkpointNext = true
         state.update { it.copy(canUndo = undoStack.isNotEmpty(), canRedo = redoStack.isNotEmpty()) }
         page.send(MapCommand.Restore(text))
+        sourceEditing.follow(text)
     }
 
     /** Saves text the map has now: written soon, once the saves before it are. */
@@ -581,7 +649,7 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
             MapMessage.Hello -> Unit
             is MapMessage.Ready -> state.update { it.copy(ready = true, map = message.state, error = null).reading(message.state) }
             is MapMessage.Saved -> saved(message)
-            is MapMessage.State -> state.update { it.copy(map = message.state).reading(message.state) }
+            is MapMessage.State -> state.update { it.copy(map = message.state).reading(message.state).withoutPanelOnGoneIdea() }
             is MapMessage.Focus -> {
                 state.update { ui -> ui.copy(map = ui.map?.copy(path = message.path, mode = message.mode)) }
                 rememberPlace(message.path.lastOrNull(), message.mode)
@@ -667,10 +735,11 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
                 revision = ui.revision + 1,
                 canUndo = undoStack.isNotEmpty(),
                 canRedo = redoStack.isNotEmpty(),
-                // The source editor follows edits made on the map.
-                source = ui.source?.takeIf { !it.yaml }?.copy(text = message.markdown) ?: ui.source,
-            )
+            ).withoutPanelOnGoneIdea()
         }
+
+        // The source editor follows edits made on the map.
+        sourceEditing.follow(message.markdown)
     }
 
     /**
@@ -726,7 +795,7 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
 
         state.update { ui ->
             val panel = when (val current = ui.panel) {
-                is Panel.Editor -> if (current.id == from) Panel.Editor(to) else current
+                is Panel.Editor -> if (current.id == from) current.copy(id = to) else current
                 is Panel.Details -> if (current.id == from) Panel.Details(to) else current
                 is Panel.Menu -> if (current.id == from) current.copy(id = to) else current
                 else -> current
@@ -916,9 +985,12 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
             return
         }
 
-        val version = undoStack.removeLastOrNull() ?: return
-        redoStack.addLast(markdown)
-        restore(version)
+        // Text just typed in the source editor is saved first: undone, redo brings it back.
+        sourceEditing.afterTyping {
+            val version = undoStack.removeLastOrNull() ?: return@afterTyping
+            redoStack.addLast(markdown)
+            restore(version)
+        }
     }
 
     fun redo() {
@@ -926,28 +998,41 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
             return
         }
 
-        val version = redoStack.removeLastOrNull() ?: return
-        undoStack.addLast(markdown)
-        restore(version)
+        sourceEditing.afterTyping {
+            val version = redoStack.removeLastOrNull() ?: return@afterTyping
+            undoStack.addLast(markdown)
+            restore(version)
+        }
     }
 
-    /** Makes `version` the map again: drawn, and saved exactly as it is. */
+    /** Makes `version` the map again: drawn, saved exactly as it is, and in the source editor if it's open. */
     private fun restore(version: String) {
         state.update { it.copy(canUndo = undoStack.isNotEmpty(), canRedo = redoStack.isNotEmpty()) }
         markdown = version
         page.send(MapCommand.Restore(version))
         save(version)
+        sourceEditing.follow(version)
     }
 
     fun show(panel: Panel?) {
-        if (panel != state.value.panel) {
+        // The editor opening on an idea starts its fields over; asked for the idea it's on, it stays as it is.
+        val shown = when {
+            panel !is Panel.Editor -> panel
+            (state.value.panel as? Panel.Editor)?.id == panel.id -> state.value.panel
+            else -> {
+                editorOpenings += 1
+                panel.copy(opened = editorOpenings)
+            }
+        }
+
+        if (shown != state.value.panel) {
             state.update { it.copy(mediaProblem = null) }
         }
 
         // Leaving the version history: the map as it is now comes back.
         val history = state.value.history
 
-        if (history != null && panel !is Panel.History) {
+        if (history != null && shown !is Panel.History) {
             if (history.showing != null) {
                 page.send(MapCommand.Preview(markdown, editable = true))
             }
@@ -955,7 +1040,7 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
             state.update { it.copy(history = null) }
         }
 
-        state.update { it.copy(panel = panel) }
+        state.update { it.copy(panel = shown) }
     }
 
     // Version history
@@ -978,16 +1063,48 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
         }
 
         viewModelScope.launch {
-            val text = if (time == null) markdown else maps.readVersion(id, time) ?: return@launch
+            val text = if (time == null) markdown else readVersion(time) ?: return@launch
             state.update { ui -> ui.history?.let { ui.copy(history = it.copy(showing = time)) } ?: ui }
             page.send(MapCommand.Preview(text, editable = time == null))
+        }
+    }
+
+    /** A version as orbit-md; null, with its row in the history saying so until it's read, when it can't be read. */
+    private suspend fun readVersion(time: Long): String? {
+        val text = maps.readVersion(id, time)?.let { versionMarkdown(it) }
+
+        state.update { ui ->
+            val history = ui.history ?: return@update ui
+            ui.copy(history = history.copy(unreadable = if (text == null) history.unreadable + time else history.unreadable - time))
+        }
+
+        return text
+    }
+
+    /**
+     * A version as orbit-md. The file another app wrote (OPML, a FreeMind or
+     * Freeplane map), kept as it came in, is read the way it was brought in;
+     * null when it can't be. It's kept as Unicode text, so the encoding its
+     * declaration names no longer holds.
+     */
+    private suspend fun versionMarkdown(text: String): String? {
+        if (OtherApps.formatOfText(text.take(4096)) == null) {
+            return text
+        }
+
+        val unicode = text.replaceFirst(XML_ENCODING, "$1\"UTF-8\"")
+
+        return try {
+            page.request(ImportedFile.serializer()) { job -> MapCommand.ImportFile(job, Base64.getEncoder().encodeToString(unicode.toByteArray()), null) }.maps.firstOrNull()?.markdown
+        } catch (failed: PageException) {
+            null
         }
     }
 
     /** Makes a version the map again: the map as it is now goes into the history first, and Undo brings it back. */
     fun restoreVersion(time: Long) {
         viewModelScope.launch {
-            val text = maps.readVersion(id, time) ?: return@launch
+            val text = readVersion(time) ?: return@launch
 
             // What's on screen and not written yet goes into the history too, so nothing is lost on the way.
             if (written != markdown) {
@@ -1172,49 +1289,16 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
     }
 
     /** Draws the text as it's typed, a moment after the typing stops, and saves it when Orbit reads it. */
-    fun editSource(text: String) {
-        val source = state.value.source ?: return
-        state.update { it.copy(source = source.copy(text = text)) }
-        sourceJob?.cancel()
+    fun editSource(text: String) = sourceEditing.edit(text)
 
-        sourceJob = viewModelScope.launch {
-            delay(280)
-            page.send(MapCommand.Source(text))
-            // Typed markdown is saved as typed. YAML only once Orbit reads all of it: its conversion would lose the rest.
-            val converted = if (source.yaml) convert(text, "markdown") else text
-
-            if (converted != null && converted.isNotBlank() && state.value.readOnly.let { it == null || it == ReadOnly.Unreadable }) {
-                markdown = converted
-                save(converted)
-            }
-        }
-    }
-
-    fun setSourceYaml(yaml: Boolean) {
-        val source = state.value.source ?: return
-
-        if (source.yaml == yaml) {
-            return
-        }
-
-        state.update { it.copy(source = source.copy(converting = true)) }
-
-        viewModelScope.launch {
-            val text = convert(source.text, if (yaml) "yaml" else "markdown")
-
-            state.update { ui ->
-                ui.copy(source = ui.source?.copy(text = text ?: ui.source.text, yaml = if (text != null) yaml else ui.source.yaml, converting = false))
-            }
-        }
-    }
+    fun setSourceYaml(yaml: Boolean) = sourceEditing.setYaml(yaml)
 
     fun closeSource() {
-        sourceJob?.cancel()
         val start = sourceStart
         sourceStart = null
-        state.update { it.copy(source = null) }
 
-        viewModelScope.launch {
+        // Text typed a moment before is saved first, so closing never loses it.
+        sourceEditing.close {
             // The map as the last text says, drawn; that text was saved as it was typed.
             page.send(MapCommand.Restore(markdown))
 
@@ -1286,18 +1370,18 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
      * its own, and sums it up. A rehearsal stopped at once keeps nothing.
      */
     private fun finishRehearsal(presentation: Presentation) {
-        val current = presentation.current
-        rehearsed[current] = (rehearsed[current] ?: 0L) + SystemClock.elapsedRealtime() - presentation.stepStartedAt
+        val index = presentation.index
+        rehearsed[index] = (rehearsed[index] ?: 0L) + SystemClock.elapsedRealtime() - presentation.stepStartedAt
 
         if (rehearsed.values.sum() < REHEARSAL_MINIMUM_MILLISECONDS) {
             return
         }
 
-        val seconds = rehearsed.mapValues { (_, milliseconds) -> ((milliseconds + 500) / 1_000).toInt() }
+        val rehearsal = Rehearsal.of(presentation.order, rehearsed)
         val ideas = state.value.nodes.keys
         val earlier = maps.summary(id)?.metadata?.rehearsal.orEmpty().filterKeys { it in ideas }
-        viewModelScope.launch { maps.saveRehearsal(id, earlier + seconds) }
-        state.update { it.copy(rehearsal = Rehearsal(presentation.order.filter { idea -> idea in seconds }, seconds)) }
+        viewModelScope.launch { maps.saveRehearsal(id, earlier + rehearsal.seconds) }
+        state.update { it.copy(rehearsal = rehearsal) }
     }
 
     fun closeRehearsal() {
@@ -1456,15 +1540,19 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
 
     suspend fun yaml(): String? = convert(currentMarkdown(), "yaml")
 
-    fun hasPictures(): Boolean = maps.hasPictures(id)
+    /** The map as OPML, for outliners and other mind map apps. */
+    suspend fun opml(): String? = convert(currentMarkdown(), "opml")
+
+    suspend fun hasPictures(): Boolean = maps.hasPictures(id)
 
     /**
-     * What Coil loads for a picture or thumbnail: a web address, or a file in
-     * the map's folder. A path that leads out of the folder loads nothing.
+     * What Coil loads for a picture or thumbnail: a web address (an http one
+     * over https, see [pictureAddress]), or a file in the map's folder. A path
+     * that leads out of the folder loads nothing.
      */
     fun mediaModel(src: String): Any? {
         if (src.contains("://") || src.startsWith("data:")) {
-            return src
+            return pictureAddress(src)
         }
 
         val folder = maps.folder(id).canonicalFile
@@ -1480,11 +1568,25 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
     /** The map as one web page that flies in any browser, offline (see [WebPage]). */
     suspend fun webPage(context: Context): String? {
         val theme = theme ?: return null
-        val title = state.value.map?.title ?: summary()?.title ?: context.getString(R.string.map_web_page_title)
         val ideas = state.value.nodes.keys
         val presentPath = path.filter { it in ideas }.takeIf { it.size > 1 }.orEmpty()
-        return WebPage.build(context, title, currentMarkdown(), theme, maps.folder(id), path = presentPath)
+        return WebPage.build(context, pageTitle(context), currentMarkdown(), theme, maps.folder(id), path = presentPath)
     }
+
+    /** The map's web page laid out for paper only, for printing (MapPrinter): `theme` is the app's colors in light. Null when it couldn't be made. */
+    suspend fun printPage(context: Context, theme: AppTheme, request: PrintRequest): String? = try {
+        WebPage.build(context, pageTitle(context), currentMarkdown(), theme, maps.folder(id), print = request)
+    } catch (failed: java.io.IOException) {
+        null
+    }
+
+    /** Says the map couldn't be laid out for printing. */
+    fun printFailed() {
+        events.trySend(MapEvent.Snackbar(ShownText.Resource(R.string.export_print_failed)))
+    }
+
+    /** The title a page of the map has, and a print job. */
+    fun pageTitle(context: Context): String = state.value.map?.title ?: summary()?.title ?: context.getString(R.string.map_web_page_title)
 
     /** Moves the map to the trash; the home screen offers it back with Undo. */
     fun deleteMap() {
@@ -1507,6 +1609,8 @@ class MapViewModel(private val container: AppContainer, val id: String) : ViewMo
 
     override fun onCleared() {
         maps.showing(id, false)
+        // A presentation is over once its map goes: a TV or browsers still watching go back to waiting.
+        control.stop()
         val unsaved = markdown
         val base = written
         val unchangeable = state.value.readOnly != null
@@ -1548,6 +1652,22 @@ private fun MapUi.reading(page: MapState): MapUi {
     }
 
     return copy(readOnly = readOnly, readProblem = page.problem, panel = if (readOnly != null && panel is Panel.Menu) null else panel)
+}
+
+/**
+ * The screen's state without a panel on an idea the map no longer has, which
+ * would show nothing: an undo took back the text that gave the idea its id,
+ * say, or the idea was deleted.
+ */
+internal fun MapUi.withoutPanelOnGoneIdea(): MapUi {
+    val idea = when (val shown = panel) {
+        is Panel.Editor -> shown.id
+        is Panel.Details -> shown.id
+        is Panel.Menu -> shown.id
+        else -> return this
+    }
+
+    return if (map?.nodes?.any { it.id == idea } == true) this else copy(panel = null)
 }
 
 /** Whether an edit took a goal to its target: one that wasn't reached before it is now. */

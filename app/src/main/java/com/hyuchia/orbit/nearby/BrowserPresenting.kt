@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
+import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 
 /** The port browsers find presentations at: the same every time, so a room's address doesn't change between talks. */
@@ -50,10 +51,10 @@ private const val ENDED_PRESENTATIONS = 16
  * and how, is up to the presenter ([joining]).
  *
  * `asset` reads one of the app's map assets by name, and `words` its
- * strings. `policy` says which connections it takes: the room's, unless a
- * test over this machine's loopback says otherwise. `clock` reads
- * milliseconds, for where a video is when a browser joins: the phone's own
- * clock, which its reckoning uses.
+ * strings. `policy` says which connections it takes, and `listenOn` where
+ * it listens: the room's, unless a test over this machine's loopback says
+ * otherwise. `clock` reads milliseconds, for where a video is when a
+ * browser joins: the phone's own clock, which its reckoning uses.
  */
 class BrowserPresenting internal constructor(
     private val asset: (String) -> String,
@@ -63,6 +64,7 @@ class BrowserPresenting internal constructor(
     options: JoiningOptions,
     private val preferredPort: Int = PORT,
     policy: ConnectionPolicy = RoomNetworks(),
+    private val listenOn: () -> List<InetAddress>? = ::roomAddresses,
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     constructor(context: Context, mapFolder: File, scope: CoroutineScope, options: JoiningOptions) :
@@ -136,7 +138,7 @@ class BrowserPresenting internal constructor(
     }
 
     fun start() {
-        server.start(preferredPort)
+        server.start(preferredPort, listenOn)
 
         tidying = scope.launch {
             while (true) {
@@ -154,8 +156,8 @@ class BrowserPresenting internal constructor(
         server.stop()
     }
 
-    /** What to type in a browser, or null when the phone isn't on a network others can reach. */
-    fun address(): String? = localAddress()?.let { "http://$it:${server.port}/$code" }
+    /** What to type in a browser, or null when the phone isn't on a network others can reach, so nothing listens. */
+    fun address(): String? = if (server.isRunning) localAddress()?.let { "http://$it:${server.port}/$code" } else null
 
     /** The port it listens on, once started. */
     internal val port: Int get() = server.port

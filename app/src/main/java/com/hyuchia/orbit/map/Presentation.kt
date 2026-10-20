@@ -65,6 +65,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -256,33 +257,33 @@ private fun stepKeys(event: ComposeKeyEvent, model: MapViewModel, presentation: 
     }
 
     val media = presentation.media
+    val first = event.nativeKeyEvent.repeatCount == 0
+
+    // A key held down repeats: a press does one thing, as a clicker's click does, and its repeats are taken for nothing.
+    fun once(action: () -> Unit): Boolean {
+        if (first) {
+            action()
+        }
+
+        return true
+    }
 
     return when (event.key) {
-        Key.DirectionRight, Key.PageDown, Key.Spacebar, Key.Enter, Key.VolumeDown -> {
-            model.step(1, seconds)
-            true
-        }
-        Key.DirectionLeft, Key.PageUp, Key.VolumeUp -> {
-            model.step(-1, seconds)
-            true
-        }
-        Key.Escape -> {
+        Key.DirectionRight, Key.PageDown, Key.Spacebar, Key.Enter, Key.VolumeDown -> once { model.step(1, seconds) }
+        Key.DirectionLeft, Key.PageUp, Key.VolumeUp -> once { model.step(-1, seconds) }
+        Key.Escape -> once {
             if (media != null) {
                 model.closeMedia()
             } else {
                 model.stopPresentation()
             }
-
-            true
         }
-        else -> event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE && run {
+        else -> event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE && once {
             if (media?.isVideo == true) {
                 model.playMedia(!media.playingAt(SystemClock.elapsedRealtime()))
             } else {
                 model.setPlaying(!presentation.playing, seconds.coerceAtLeast(8))
             }
-
-            true
         }
     }
 }
@@ -355,6 +356,8 @@ private fun OnThisScreen(
     val node = ui.nodes[presentation.current]
     var controls by remember { mutableStateOf(true) }
     var touches by remember { mutableIntStateOf(0) }
+    // The swipes outlive this composition: they step at the pace set now, not the one when they began.
+    val pace by rememberUpdatedState(seconds)
 
     LaunchedEffect(controls, touches, presentation.playing) {
         if (controls) {
@@ -413,7 +416,7 @@ private fun OnThisScreen(
                             touch()
                         }
                     },
-                    onStep = { by -> model.step(by, seconds) },
+                    onStep = { by -> model.step(by, pace) },
                 ),
         )
         LinearProgressIndicator(

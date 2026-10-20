@@ -47,7 +47,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Open markdown and YAML files, and zips of maps, from other apps. -->
+            <!-- Open markdown and YAML files, zips of maps, and other apps' maps (OPML, FreeMind and Freeplane, XMind). -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -59,8 +59,34 @@
                 <data android:mimeType="application/x-yaml" />
                 <data android:mimeType="application/zip" />
                 <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="text/x-opml" />
+                <data android:mimeType="application/x-opml" />
+                <data android:mimeType="application/x-freemind" />
+                <data android:mimeType="application/vnd.xmind.workbook" />
+                <data android:mimeType="application/x-xmind" />
+                <data android:mimeType="application/xmind" />
             </intent-filter>
-            <!-- Text, files and zips of maps shared to Orbit become maps. -->
+            <!--
+                OPML files and XMind workbooks have no type of their own on Android: file managers open them as
+                application/octet-stream, so they're known by their names. pathSuffix takes any name; the patterns
+                cover older Android, whose matching stops at the first dot.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:pathSuffix=".opml" />
+                <data android:pathSuffix=".xmind" />
+                <data android:pathPattern=".*\\.opml" />
+                <data android:pathPattern=".*\\..*\\.opml" />
+                <data android:pathPattern=".*\\..*\\..*\\.opml" />
+                <data android:pathPattern=".*\\.xmind" />
+                <data android:pathPattern=".*\\..*\\.xmind" />
+                <data android:pathPattern=".*\\..*\\..*\\.xmind" />
+            </intent-filter>
+            <!-- Text, files, zips of maps and other apps' maps shared to Orbit become maps. -->
             <intent-filter android:label="@string/share_new_map">
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -69,6 +95,12 @@
                 <data android:mimeType="text/x-markdown" />
                 <data android:mimeType="application/zip" />
                 <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="text/x-opml" />
+                <data android:mimeType="application/x-opml" />
+                <data android:mimeType="application/x-freemind" />
+                <data android:mimeType="application/vnd.xmind.workbook" />
+                <data android:mimeType="application/x-xmind" />
+                <data android:mimeType="application/xmind" />
             </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"

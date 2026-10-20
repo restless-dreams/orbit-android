@@ -93,7 +93,13 @@ fun EmojiPickerSheet(title: String, hasIcon: Boolean, onPick: (String?) -> Unit,
     val index by produceState<EmojiIndex?>(null) { value = EmojiNames.index(context) }
     var query by rememberSaveable { mutableStateOf("") }
     val searching = query.isNotBlank()
-    val matches = remember(index, query) { index?.search(query).orEmpty() }
+
+    // Every emoji's words are searched again for each letter typed: off the main thread, and only the latest letter's matches arrive.
+    val found by produceState<EmojiResults?>(null, index, query) {
+        val names = index
+        val typed = query
+        value = if (names == null || typed.isBlank()) null else EmojiResults(typed, withContext(Dispatchers.Default) { names.search(typed) })
+    }
 
     // The sheet's window has Android's dark dialog theme, whose text the picker would write its headings in on a light sheet.
     val pickerTheme = if (MaterialTheme.colorScheme.isDark) android.R.style.Theme_DeviceDefault_NoActionBar else android.R.style.Theme_DeviceDefault_Light_NoActionBar
@@ -148,7 +154,7 @@ fun EmojiPickerSheet(title: String, hasIcon: Boolean, onPick: (String?) -> Unit,
                 },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { matches.firstOrNull()?.let { pickFound(shownEmoji(it, chosenTones)) } }),
+                keyboardActions = KeyboardActions(onSearch = { found?.matches?.firstOrNull()?.let { pickFound(shownEmoji(it, chosenTones)) } }),
                 shape = RoundedCornerShape(28.dp),
                 colors = TextFieldDefaults.colors(
                     focusedIndicatorColor = Color.Transparent,
@@ -181,13 +187,18 @@ fun EmojiPickerSheet(title: String, hasIcon: Boolean, onPick: (String?) -> Unit,
                         .padding(horizontal = 8.dp),
                 )
 
-                if (searching && index != null) {
-                    EmojiMatches(matches, query.trim(), chosenTones, onPick = ::pickFound)
+                val results = found
+
+                if (searching && results != null) {
+                    EmojiMatches(results.matches, results.query.trim(), chosenTones, onPick = ::pickFound)
                 }
             }
         }
     }
 }
+
+/** What a search found, and what was typed for it: the field can be a letter ahead while the next search runs. */
+private class EmojiResults(val query: String, val matches: List<EmojiMatch>)
 
 /** The search's matches in a grid, the first one marked, since Enter picks it; a long press offers an emoji's skin tones. */
 @Composable

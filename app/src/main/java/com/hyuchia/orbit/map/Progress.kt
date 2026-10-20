@@ -57,20 +57,28 @@ data class Rollup(val total: Int = 0, val done: Double = 0.0, val finished: Int 
 class MapProgress(nodes: List<MapNode>, private val ringsOn: Boolean = true) {
     private val children: Map<String?, List<MapNode>> = nodes.groupBy { it.parentId }
 
-    /** The goals and to-dos under each idea, by id. */
+    /** The goals and to-dos under each idea, by id: counted without recursion, so maps of any depth count. */
     val rollUps: Map<String, Rollup> = HashMap<String, Rollup>(nodes.size).also { result ->
-        fun visit(node: MapNode): Rollup {
+        // Every idea after the one above it: counted from the last, each idea's ideas are counted before it.
+        val order = ArrayList<MapNode>(nodes.size)
+        val waiting = ArrayDeque<MapNode>()
+        nodes.firstOrNull()?.let { waiting.addLast(it) }
+
+        while (waiting.isNotEmpty()) {
+            val node = waiting.removeLast()
+            order.add(node)
+            children[node.id]?.let { waiting.addAll(it) }
+        }
+
+        for (node in order.asReversed()) {
             var under = Rollup()
 
             for (child in children[node.id].orEmpty()) {
-                under += asItem(child) + visit(child)
+                under += asItem(child) + result.getValue(child.id)
             }
 
             result[node.id] = under
-            return under
         }
-
-        nodes.firstOrNull()?.let(::visit)
     }
 
     /** The goals and to-dos under the idea. */

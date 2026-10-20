@@ -237,6 +237,7 @@
     <string name="map_history_yesterday">Ayer</string>
     <!-- Una versión guardada como llegó su archivo de otro lugar, después de la hora en que se guardó. -->
     <string name="map_history_original_file">%1$s · el archivo como llegó</string>
+    <string name="map_history_version_unreadable">Orbit no pudo leer esta versión.</string>
     <plurals name="map_history_more_than_now">
         <item quantity="one">%d más que ahora</item>
         <item quantity="many">%d más que ahora</item>

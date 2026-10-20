@@ -9,6 +9,8 @@
     <!-- A map was moved to the trash; Undo brings it back. %1$s is its title. -->
     <string name="home_deleted_map">Deleted “%1$s”</string>
     <string name="home_add_widget_from_list">Add Orbit’s widget from your home screen’s list of widgets</string>
+    <!-- Sharing a map from its card, when no file of it could be made to share. -->
+    <string name="home_could_not_share_map">Orbit couldn’t make a file of that map to share. Is this device’s storage full?</string>
     <string name="home_pinned_maps">Pinned</string>
     <string name="home_everything_else">Everything else</string>
     <string name="home_clear_the_search">Clear the search</string>
@@ -106,7 +108,7 @@
     <string name="home_start_a_map">Start a map</string>
     <string name="home_templates_drawn_live">Templates are drawn live by Orbit, in their own styles</string>
     <string name="home_blank_map_description">Just a title, and room for ideas</string>
-    <string name="home_open_a_file_description">Markdown, YAML or a zip with pictures</string>
+    <string name="home_open_a_file_description">Markdown, YAML, a zip with pictures, OPML, FreeMind or XMind</string>
     <!-- What tapping a template does, as TalkBack says it. -->
     <string name="home_start_a_map_from_template">Start a map from it</string>
 

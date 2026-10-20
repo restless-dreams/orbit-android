@@ -4,7 +4,7 @@ Build a map right on the map. Add ideas around the one in the middle, type their
 
 Present it. Orbit plays your map full screen, step by step along a path you pick, with a presenter view on your phone while everyone else sees the map on a second screen, a TV or any browser in the room. Rehearse with a timer that tells you when you're running behind.
 
-Your maps are yours. Each one is a plain markdown file that any text editor can open. Keep them in a folder you choose and they stay in step with your other apps and devices; when Orbit saves a file, it changes only what you edited and leaves the rest as you wrote it. Every map has a version history, and deleted maps wait in the trash for 30 days.
+Your maps are yours. Each one is a plain markdown file that any text editor can open. Keep them in a folder you choose and they stay in step with your other apps and devices; when Orbit saves a file, it changes only what you edited and leaves the rest as you wrote it. Every map has a version history, and deleted maps wait in the trash for 30 days. Bring maps in from OPML, FreeMind, Freeplane and XMind, take them out as OPML, or print them and save them as PDFs with their outline and notes.
 
 Send a map to your tablet or another phone nearby without an account, open it in a browser on your computer, or share it as a web page anyone can fly through.
 

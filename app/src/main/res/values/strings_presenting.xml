@@ -25,6 +25,10 @@
     <!-- %1$s is the screen's name, as the phone or the TV calls it: "HDMI screen", "Living room TV". -->
     <string name="present_on_screen">On %1$s</string>
     <string name="present_on_the_tv">On the TV</string>
+    <!-- Under the presenter's bar, when the TV's side of Orbit, which TVs load from Orbit's website, is older than this app. -->
+    <string name="present_tv_too_old">This TV can\'t show presentations from this version of Orbit yet. Present on this phone or another screen.</string>
+    <!-- Under the presenter's bar, when the map is written for a newer version of Orbit's format than the TV's Orbit reads. -->
+    <string name="present_tv_older_maps">The TV draws maps with an older Orbit, so parts of this one may look different there.</string>
     <plurals name="present_browsers_watching">
         <item quantity="one">%d browser</item>
         <item quantity="other">%d browsers</item>

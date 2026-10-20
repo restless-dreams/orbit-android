@@ -48,6 +48,8 @@ class OrbitBackupAgentTest {
         file("maps/trip/media/picture-old.jpg", 100_000)
         // A copy that never finished.
         file("maps/trip/media/.video-cut.mp4.partial", 1_000)
+        // A write of the layout's record that never finished, beside the maps.
+        file("maps/..layout.json.partial", text = "{")
         file("maps/walk/map.md", text = "# Walk\n- Hill [![](media/video-hill.jpg)](media/video-hill.mp4)\n")
         file("maps/walk/media/video-hill.jpg", 100_000)
         file("maps/walk/media/video-hill.mp4", 5 * megabyte)

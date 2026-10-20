@@ -21,18 +21,19 @@ Run from the repository root. JDK 21 comes from `mise install` (`mise.toml`); th
 
 ```bash
 ./gradlew assembleLibreDebug                                               # the default build
-./gradlew testLibreDebugUnitTest testPlayDebugUnitTest lintLibreDebug lintPlayDebug ktlintCheck   # before every pull request (CI runs them too)
+./gradlew testLibreDebugUnitTest testPlayDebugUnitTest lintLibreDebug lintPlayDebug ktlintCheck :code-style:test   # before every pull request (CI runs them too)
 ./gradlew ktlintFormat                                                     # apply the Kotlin code style (see Rules)
 ./gradlew assembleLibreRelease assemblePlayRelease                         # minified with R8
 ./gradlew :app:dependencies --configuration libreReleaseRuntimeClasspath   # which library versions resolve
 (cd web && ORBIT_PATH=../../orbit bun run build)                           # rebuild the pages after changing web/ or Orbit (build Orbit first)
 (cd web && ORBIT_PATH=../../orbit bun test)                                # the pages' tests
+(cd web && ORBIT_PATH=../../orbit bun run typecheck)                       # the pages' types, against Orbit's
 (cd web && ORBIT_PATH=../../orbit bun run lint)                            # the code style of web/, art/ and scripts/ (bun run lint -- --fix applies it)
 bun art/logo.ts                                                            # after changing the logo
 bun scripts/emoji-names.ts                                                 # after changing the Unicode versions the emoji names come from
 ```
 
-`ORBIT_PATH` points at a checkout of the Orbit library (github.com/restless-dreams/orbit; `assets/map/orbit.json` names the commit the pages were built from), built there with `bun run build`; in a worktree, give its full path. Build the pages with the Bun in `web/package.json`: CI checks that the committed pages are exactly what the source builds.
+`ORBIT_PATH` points at a checkout of the Orbit library (github.com/restless-dreams/orbit; `assets/map/orbit.json` names the commit the pages were built from), built there with `bun run build`; in a worktree, give its full path. Build the pages with the Bun in `web/package.json`: CI checks that the committed pages are exactly what the source builds, along with `app/src/test/resources/page-protocol.json`, the protocol's examples (`web/protocol-examples.ts`) that `ProtocolTest` reads.
 
 ## Rules
 
@@ -42,6 +43,7 @@ bun scripts/emoji-names.ts                                                 # aft
 - **`ui/ListRow`, not Material's `ListItem`,** for rows in the map's panels: on tablets the map's pane animates in a lookahead pass, and `ListItem`'s supporting text crashes it when a side panel closes. After changing panels, open and close each one on a tablet and check the crash log (`adb logcat -b crash`).
 - **Every string in English and Spanish.** Strings go in `app/src/main/res/values/strings_<area>.xml` and the same file in `values-es/`; the starter maps, templates and privacy policy have Spanish copies in `app/src/main/assets/es/`, and the pages get their words from `strings_pages.xml`. Lint lists missing translations (`MissingTranslation`). `TRANSLATING.md` has the glossary and style: neutral Latin American Spanish, with tú.
 - **Maps are people's files.** Never write half a file (`writeAtomically` in `data/Files.kt`), never write a map over text that changed since it was read (`MapRepository.write`), and keep what a newer version of the app wrote. A map Orbit can't fully read is only shown, never rewritten.
+- **Upgrades lose nothing.** A change to the files' layout, `meta.json`, the settings or what crosses to other devices follows the rules in `docs/architecture.md` ("Every version opens what the earlier ones left"), and `ReleaseDataTest` opens every release's files with each build. Never edit a release's files in `app/src/test/resources/releases/` to make a test pass: they're what people's phones hold.
 - **No Google Play services in `libre`,** nor any other closed code. Anything that needs Google Play services has a fallback that works without them: Android's own network service discovery, folder picker and screen casting. Open-source libraries under Google's name are fine there, such as AndroidX, or ZXing for the QR codes that let browsers join.
 - **AGP 9 has Kotlin built in:** never apply `org.jetbrains.kotlin.android`.
 - **The pages run on WebViews from Chromium 99** (`SystemWebView.MINIMUM_CHROMIUM`): newer CSS needs a plainer fallback there, and older WebViews get the app's notice instead of a map.

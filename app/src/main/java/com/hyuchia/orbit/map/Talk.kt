@@ -127,6 +127,14 @@ class Talk internal constructor(private val listening: Listening) {
         }
     }
 
+    /** Ends the talk at once, the idea being said left out, and lets the microphone go. */
+    fun cancel() {
+        if (active) {
+            listening.close()
+            finished(null)
+        }
+    }
+
     internal fun start(keep: Boolean) {
         count = 0
         kept = keep

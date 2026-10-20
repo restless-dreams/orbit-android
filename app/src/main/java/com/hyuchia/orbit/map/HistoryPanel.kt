@@ -23,7 +23,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.data.MapVersion
@@ -108,18 +111,34 @@ private fun VersionList(versions: List<MapVersion>, history: HistoryUi, onShow: 
                     listOfNotNull(ideas(version.ideas), difference(version.ideas, history.ideasNow)).map { it.text() }.joinToString(" · "),
                     selected = history.showing == version.time,
                     original = version.original,
+                    problem = if (version.time in history.unreadable) stringResource(R.string.map_history_version_unreadable) else null,
                 ) { onShow(version.time) }
             }
         }
     }
 }
 
+/** A version in the history; `problem` says why it couldn't be shown, in place of its details. */
 @Composable
-private fun VersionRow(name: String, detail: String, selected: Boolean, current: Boolean = false, original: Boolean = false, onClick: () -> Unit) {
+private fun VersionRow(
+    name: String,
+    detail: String,
+    selected: Boolean,
+    current: Boolean = false,
+    original: Boolean = false,
+    problem: String? = null,
+    onClick: () -> Unit,
+) {
     val colors = MaterialTheme.colorScheme
     ListRow(
         headline = { Text(name) },
-        supporting = { Text(detail) },
+        supporting = {
+            if (problem != null) {
+                Text(problem, color = colors.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+            } else {
+                Text(detail)
+            }
+        },
         leading = {
             Icon(
                 when {

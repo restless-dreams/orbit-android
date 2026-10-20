@@ -131,6 +131,54 @@
   .page__credit:hover {
     opacity: 1;
   }
+
+  /* Printed, the page is the map laid out for paper (web/print.ts), and nothing else. */
+  .page__print {
+    display: none;
+  }
+
+  /* A goal's or a Progress idea's ring, written out on paper (web/print.ts). */
+  .print-ring {
+    display: inline-flex;
+    align-items: center;
+    gap: 6pt;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .print-ring__track {
+    width: 48pt;
+    height: 4pt;
+    border-radius: 2pt;
+    background: var(--orbit-print-chip-background, var(--_orbit-print-chip-background));
+    overflow: hidden;
+  }
+
+  .print-ring__fill {
+    display: block;
+    height: 100%;
+    background: var(--orbit-print-link-text, var(--_orbit-print-link-text));
+  }
+
+  @media print {
+    @page {
+      margin: 16mm 14mm;
+    }
+
+    html,
+    body {
+      height: auto;
+      overflow: visible;
+      background: #ffffff;
+    }
+
+    body > :not(.page__print) {
+      display: none !important;
+    }
+
+    .page__print {
+      display: block;
+    }
+  }
 </style>
 </head>
 <body class="page audience audience--captions">
@@ -162,6 +210,7 @@
   <!-- download for orbit -->
 </a>
 <a class="page__credit" href="https://orbit.hyuchia.com" target="_blank" rel="noopener"><!-- drawn with orbit --></a>
+<div id="print" class="page__print"></div>
 <!-- data -->
 <!-- script -->
 </body>

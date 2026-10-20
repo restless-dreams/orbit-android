@@ -61,15 +61,36 @@ fun interface ConnectionPolicy {
 
 /**
  * Connections from the room only: arrived on Wi-Fi, this device's hotspot,
- * a cable or USB tethering, never mobile data; from an address in the room;
- * and neither end this device's loopback. `interfaceOf` names the interface
- * an address of this device is on.
+ * a cable or USB tethering, never mobile data; from an address in the room
+ * that isn't one of this device's own, so another app on this device can't
+ * come in through the Wi-Fi's address; and neither end this device's
+ * loopback. `interfaceOf` names the interface an address of this device is
+ * on, and has none for another device's.
  */
 class RoomNetworks(private val interfaceOf: (InetAddress) -> String? = InterfaceNames()::of) : ConnectionPolicy {
     override fun admits(local: InetAddress, remote: InetAddress): Boolean {
         val here = unmapped(local)
-        return !here.isLoopbackAddress && isRoomAddress(remote) && isRoomInterface(interfaceOf(here))
+        return !here.isLoopbackAddress && isRoomAddress(remote) && isRoomInterface(interfaceOf(here)) && interfaceOf(unmapped(remote)) == null
     }
+}
+
+/**
+ * The addresses devices in the room reach this one at, to listen on: those
+ * of the Wi-Fi, a hotspot this device shares, a cable or USB tethering, in
+ * the room's ranges (never one the internet reaches). Empty on mobile data
+ * alone, which doesn't take connections from other devices.
+ */
+fun roomAddresses(): List<InetAddress> {
+    val interfaces = try {
+        NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+    } catch (unavailable: SocketException) {
+        return emptyList()
+    }
+
+    return interfaces
+        .filter { network -> isRoomInterface(network.name) && runCatching { network.isUp && !network.isLoopback && !network.isVirtual }.getOrDefault(false) }
+        .flatMap { network -> network.inetAddresses.toList().filter(::isRoomAddress) }
+        .sortedBy { addressKey(it) }
 }
 
 /**

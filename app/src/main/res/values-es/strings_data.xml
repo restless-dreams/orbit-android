@@ -38,6 +38,7 @@
     <string name="data_yaml_unreadable">Orbit no pudo leer todo ese YAML, así que no hizo un mapa con él: %1$s</string>
     <string name="data_yaml_unreadable_at_line">Orbit no pudo leer todo ese YAML, así que no hizo un mapa con él: %1$s (línea %2$d)</string>
     <string name="data_newer_version_keeps_maps">Una versión más reciente de Orbit guarda estos mapas: actualiza Orbit para cambiarlos.</string>
+    <string name="data_could_not_add_map">Orbit no pudo agregar el mapa. ¿Está lleno el almacenamiento de este dispositivo?</string>
 
     <!-- Archivos zip que Orbit no acepta -->
     <string name="data_zip_too_many_files">Ese archivo zip tiene demasiados archivos para ser mapas.</string>
@@ -73,4 +74,70 @@
     </plurals>
     <string name="data_folder_tries_again">Orbit lo intentará de nuevo en un momento.</string>
     <string name="data_folder_too_big_file">%1$s, en “%2$s”</string>
+
+    <!-- Mapas importados de otras apps: OPML, FreeMind y Freeplane (.mm), XMind (.xmind). -->
+    <string name="data_import_unknown_format">Orbit no puede leer ese tipo de archivo. Lee sus propios mapas, OPML, mapas de FreeMind y Freeplane (.mm) y archivos de XMind (.xmind).</string>
+    <string name="data_import_unreadable">Ese archivo está dañado o no es lo que dice su nombre.</string>
+    <string name="data_import_password_protected">Ese archivo de XMind tiene contraseña. Ábrelo en XMind, guárdalo sin contraseña y vuelve a importarlo.</string>
+    <string name="data_import_too_large">Ese mapa es demasiado grande para Orbit: tiene más de 100 000 ideas o más de 500 niveles.</string>
+    <plurals name="data_import_floating_ideas_moved">
+        <item quantity="one">%1$d tema flotante ahora es una idea bajo el centro.</item>
+        <item quantity="many">%1$d temas flotantes ahora son ideas bajo el centro.</item>
+        <item quantity="other">%1$d temas flotantes ahora son ideas bajo el centro.</item>
+    </plurals>
+    <plurals name="data_import_summaries_moved">
+        <item quantity="one">%1$d resumen ahora es una idea junto a las ideas que resume.</item>
+        <item quantity="many">%1$d resúmenes ahora son ideas junto a las ideas que resumen.</item>
+        <item quantity="other">%1$d resúmenes ahora son ideas junto a las ideas que resumen.</item>
+    </plurals>
+    <plurals name="data_import_callouts_moved">
+        <item quantity="one">%1$d llamada ahora es una idea bajo su tema.</item>
+        <item quantity="many">%1$d llamadas ahora son ideas bajo sus temas.</item>
+        <item quantity="other">%1$d llamadas ahora son ideas bajo sus temas.</item>
+    </plurals>
+    <plurals name="data_import_boundaries_in_notes">
+        <item quantity="one">El título de %1$d límite ahora está en una nota.</item>
+        <item quantity="many">Los títulos de %1$d límites ahora están en notas.</item>
+        <item quantity="other">Los títulos de %1$d límites ahora están en notas.</item>
+    </plurals>
+    <plurals name="data_import_links_in_notes">
+        <item quantity="one">%1$d enlace de más ahora está en la nota de su idea.</item>
+        <item quantity="many">%1$d enlaces de más ahora están en las notas de sus ideas.</item>
+        <item quantity="other">%1$d enlaces de más ahora están en las notas de sus ideas.</item>
+    </plurals>
+    <plurals name="data_import_missing_link_targets">
+        <item quantity="one">Se omitió %1$d enlace a una idea que no está en este mapa.</item>
+        <item quantity="many">Se omitieron %1$d enlaces a ideas que no están en este mapa.</item>
+        <item quantity="other">Se omitieron %1$d enlaces a ideas que no están en este mapa.</item>
+    </plurals>
+    <plurals name="data_import_icons_not_kept">
+        <item quantity="one">Se omitió %1$d ícono: cada idea muestra un solo ícono, como emoji.</item>
+        <item quantity="many">Se omitieron %1$d íconos: cada idea muestra un solo ícono, como emoji.</item>
+        <item quantity="other">Se omitieron %1$d íconos: cada idea muestra un solo ícono, como emoji.</item>
+    </plurals>
+    <plurals name="data_import_pictures_not_kept">
+        <item quantity="one">Se omitió %1$d imagen que no estaba en el archivo.</item>
+        <item quantity="many">Se omitieron %1$d imágenes que no estaban en el archivo.</item>
+        <item quantity="other">Se omitieron %1$d imágenes que no estaban en el archivo.</item>
+    </plurals>
+    <plurals name="data_import_attachments_not_kept">
+        <item quantity="one">Se omitió %1$d archivo adjunto. Su idea conserva el nombre.</item>
+        <item quantity="many">Se omitieron %1$d archivos adjuntos. Sus ideas conservan los nombres.</item>
+        <item quantity="other">Se omitieron %1$d archivos adjuntos. Sus ideas conservan los nombres.</item>
+    </plurals>
+    <plurals name="data_import_local_links_not_kept">
+        <item quantity="one">Se omitió %1$d enlace a un archivo de otra computadora.</item>
+        <item quantity="many">Se omitieron %1$d enlaces a archivos de otra computadora.</item>
+        <item quantity="other">Se omitieron %1$d enlaces a archivos de otra computadora.</item>
+    </plurals>
+    <plurals name="data_import_encrypted_branches_not_read">
+        <item quantity="one">No se pudo leer %1$d rama cifrada, así que se omitieron sus ideas.</item>
+        <item quantity="many">No se pudieron leer %1$d ramas cifradas, así que se omitieron sus ideas.</item>
+        <item quantity="other">No se pudieron leer %1$d ramas cifradas, así que se omitieron sus ideas.</item>
+    </plurals>
+    <plurals name="data_import_formatting_not_kept">
+        <item quantity="one">%1$d nota ahora es texto sin formato, sin negritas, cursivas ni listas.</item>
+        <item quantity="many">%1$d notas ahora son texto sin formato, sin negritas, cursivas ni listas.</item>
+        <item quantity="other">%1$d notas ahora son texto sin formato, sin negritas, cursivas ni listas.</item>
+    </plurals>
 </resources>

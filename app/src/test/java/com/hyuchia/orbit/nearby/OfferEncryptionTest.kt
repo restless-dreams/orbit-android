@@ -276,6 +276,19 @@ class OfferEncryptionTest {
     }
 
     @Test
+    fun `the hello and the map are sealed with keys of their own`() {
+        val (sending, receiving) = pair()
+        val map = "# Plan\n- The map itself\n".toByteArray()
+        val sealedMap = ByteArrayOutputStream().also { sending.sealMap(map.inputStream(), map.size.toLong(), it) }.toByteArray()
+        assertArrayEquals(map, receiving.openMap(sealedMap.inputStream(), OFFER_LIMIT).use { it.readBytes() })
+
+        // A hello can't pass for the map, nor the map for a hello.
+        assertThrows(UnreadableOfferException::class.java) { receiving.open(sealedMap.inputStream(), OFFER_LIMIT).use { it.readBytes() } }
+        val hello = sealed(sending, "hello".toByteArray())
+        assertThrows(UnreadableOfferException::class.java) { receiving.openMap(hello.inputStream(), OFFER_LIMIT).use { it.readBytes() } }
+    }
+
+    @Test
     fun `both sides get the same four-digit check code`() {
         val (sending, receiving) = pair()
         val receiverHalf = randomBytes(CHECK_NONCE_BYTES)

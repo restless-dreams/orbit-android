@@ -19,6 +19,8 @@
 
     <string name="present_on_screen">En %1$s</string>
     <string name="present_on_the_tv">En la TV</string>
+    <string name="present_tv_too_old">Esta TV todavía no puede mostrar presentaciones de esta versión de Orbit. Presenta en este teléfono o en otra pantalla.</string>
+    <string name="present_tv_older_maps">La TV dibuja los mapas con un Orbit anterior, así que partes de este pueden verse distintas ahí.</string>
     <plurals name="present_browsers_watching">
         <item quantity="one">%d navegador</item>
         <item quantity="many">%d navegadores</item>

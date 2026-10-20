@@ -26,6 +26,7 @@ import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 class LocalServerTest {
     private val servers = mutableListOf<LocalServer>()
@@ -41,7 +42,7 @@ class LocalServerTest {
         limits: ServerLimits = ServerLimits(),
         timings: ServerTimings = ServerTimings(),
         handle: suspend (Request) -> Response = ::answer,
-    ): LocalServer = LocalServer({ _, _ -> bodyLimit }, spool, policy, limits, timings, handle).also {
+    ): LocalServer = LocalServer({ _, _ -> bodyLimit }, spool, policy, limits, timings, handle = handle).also {
         servers += it
         it.start(0)
     }
@@ -154,7 +155,8 @@ class LocalServerTest {
         val spooling = spooling()
         assertEquals("1000 bytes in memory", upload(spooling, "/upload", 1_000).inputStream.bufferedReader().readText())
         assertEquals("3000000 bytes in a file, 3000000 read", upload(spooling, "/upload", 3_000_000).inputStream.bufferedReader().readText())
-        assertEquals(emptyList<String>(), spool.list()!!.toList())
+        // The server lets the file go once it has written the answer, which can be a moment after the answer is read here.
+        assertTrue("${spool.list()!!.toList()} left", eventually { spool.list()!!.isEmpty() })
         // Too big is refused from its length alone, before anything's read.
         val answer = exchange(spooling.port, "POST /upload HTTP/1.1\r\nHost: 127.0.0.1:${spooling.port}\r\nContent-Length: 5000000\r\n\r\n")
         assertEquals(413, answer.status)
@@ -309,8 +311,10 @@ class LocalServerTest {
     @Test
     fun theRoomIsWiFiAHotspotACableOrUsbNeverMobileDataOrThisDevice() {
         val wifi = InetAddress.getByName("192.168.1.5")
+        val linkLocal = InetAddress.getByName("fe80::1")
         val laptop = InetAddress.getByName("192.168.1.20")
-        fun on(name: String?) = RoomNetworks { name }
+        // This device's own addresses are on the interface named; other devices' are on none of its.
+        fun on(name: String?) = RoomNetworks { address -> if (address == wifi || address == linkLocal) name else null }
 
         listOf("wlan0", "wlan1", "swlan0", "softap0", "ap0", "eth0", "rndis0", "ncm0", "usb0").forEach {
             assertTrue(it, on(it).admits(wifi, laptop))
@@ -326,9 +330,92 @@ class LocalServerTest {
         // Nor from outside the room, even on Wi-Fi.
         assertFalse(on("wlan0").admits(wifi, InetAddress.getByName("8.8.8.8")))
         assertFalse(on("wlan0").admits(wifi, InetAddress.getByName("100.64.0.7")))
-        assertTrue(on("wlan0").admits(InetAddress.getByName("fe80::1"), InetAddress.getByName("fe80::2")))
-        // A browser on the phone itself, at its own Wi-Fi address, is in the room like any other.
-        assertTrue(on("wlan0").admits(wifi, wifi))
+        assertTrue(on("wlan0").admits(linkLocal, InetAddress.getByName("fe80::2")))
+        // Another app on the phone itself, coming in through the Wi-Fi's own address, isn't in the room.
+        assertFalse(on("wlan0").admits(wifi, wifi))
+        assertFalse(on("wlan0").admits(wifi, linkLocal))
+        assertFalse(on("wlan0").admits(wifi, InetAddress.getByName("::ffff:192.168.1.5")))
+    }
+
+    @Test
+    fun itListensOnlyAtTheAddressesItsGiven() {
+        assumeTrue("Needs other loopback addresses to connect to", canBindFrom("127.0.0.2"))
+        val server = LocalServer({ _, _ -> 0 }, policy = anyone, handle = ::answer).also { servers += it }
+        server.start(0, listenOn = { listOf(InetAddress.getByName("127.0.0.1")) })
+        assertTrue(server.listening.value)
+        assertEquals(200, request(server.port, "/hello?name=here").status)
+        // The same port at another of this machine's addresses has no one listening.
+        assertTrue(runCatching { Socket().use { it.connect(InetSocketAddress("127.0.0.2", server.port), 2_000) } }.isFailure)
+    }
+
+    @Test
+    fun itFollowsItsAddressesAsTheDeviceJoinsAndLeavesNetworks() {
+        assumeTrue("Needs other loopback addresses to connect to", canBindFrom("127.0.0.2"))
+        val addresses = AtomicReference(listOf(InetAddress.getByName("127.0.0.1")))
+        val changes = mutableListOf<Boolean>()
+        val server = LocalServer({ _, _ -> 0 }, policy = anyone, timings = ServerTimings(addresses = 20), handle = ::answer).also { servers += it }
+        server.start(0, listenOn = { addresses.get() }) { listening -> synchronized(changes) { changes += listening } }
+        val port = server.port
+
+        // No network to listen on: nothing listens.
+        addresses.set(emptyList())
+        assertTrue(eventually { !server.listening.value })
+        assertTrue(runCatching { request(port, "/hello") }.isFailure)
+
+        // Another network: it listens there, on the port people were given.
+        addresses.set(listOf(InetAddress.getByName("127.0.0.2")))
+        assertTrue(eventually { server.listening.value })
+        assertEquals(port, server.port)
+
+        val answer = Socket().use { socket ->
+            socket.connect(InetSocketAddress("127.0.0.2", port), 2_000)
+            socket.getOutputStream().write("GET /hello?name=there HTTP/1.1\r\nHost: 127.0.0.2:$port\r\n\r\n".toByteArray())
+            parse(socket.getInputStream().readBytes())
+        }
+
+        assertEquals("hello there", answer.body)
+        assertEquals(listOf(false, true), synchronized(changes) { changes.toList() })
+        server.stop()
+        assertFalse(server.listening.value)
+    }
+
+    @Test
+    fun aRequestCanBeRefusedBeforeAnyOfItsBodyIsRead() {
+        val released = CountDownLatch(2)
+
+        val server = LocalServer(
+            { _, _ -> 10_000_000 },
+            policy = anyone,
+            admit = { head ->
+                if (head.path == "/refused") {
+                    Admission.Refuse(Response.text(403, "Not from ${head.from}, not ${head.length} bytes"))
+                } else {
+                    Admission.Read { released.countDown() }
+                }
+            },
+            handle = ::answer,
+        ).also {
+            servers += it
+            it.start(0)
+        }
+
+        // Only the head is sent: the answer comes without waiting for a body that never does.
+        val refused = connect(server.port).use { socket ->
+            socket.getOutputStream().write("POST /refused HTTP/1.1\r\nHost: 127.0.0.1:${server.port}\r\nContent-Length: 9000000\r\n\r\n".toByteArray())
+            parse(socket.getInputStream().readBytes())
+        }
+
+        assertEquals(403, refused.status)
+        assertEquals("Not from 127.0.0.1, not 9000000 bytes", refused.body)
+
+        // An admitted request lets go of what it held, answered or not.
+        assertEquals(200, request(server.port, "/upload", method = "POST", body = "abc").status)
+
+        connect(server.port).use { socket ->
+            socket.getOutputStream().write("POST /upload HTTP/1.1\r\nHost: 127.0.0.1:${server.port}\r\nContent-Length: 100\r\n\r\nshort".toByteArray())
+        }
+
+        assertTrue(released.await(5, TimeUnit.SECONDS))
     }
 
     @Test
@@ -412,7 +499,8 @@ class LocalServerTest {
             safety.forEach { (name, value) -> assertEquals(name, value, answer.header(name)) }
         }
 
-        assertNull(text.header("content-security-policy"))
+        // What isn't a page runs nothing, an SVG's script say, even opened on its own.
+        assertEquals(FILE_POLICY, text.header("content-security-policy"))
         val policy = page.header("content-security-policy")!!
 
         listOf("default-src 'none'", "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'").forEach {
@@ -451,6 +539,7 @@ class LocalServerTest {
         val whole = asked()
         assertEquals(200, whole.status)
         assertEquals("bytes", whole.header("accept-ranges"))
+        assertEquals(FILE_POLICY, whole.header("content-security-policy"))
         assertEquals("10000", whole.header("content-length"))
         assertEquals(CLIP, whole.body)
 
@@ -596,6 +685,71 @@ class LocalServerTest {
 
         assertTrue(cut)
         assertTrue((System.nanoTime() - started) / 1_000_000 < 3_000)
+    }
+
+    @Test
+    fun aFileMadeForOneAnswerGoesWholeAndIsDeletedOnceWritten() {
+        spool.mkdirs()
+        val made = File(spool, "made.zip").apply { writeText(CLIP) }
+
+        val server = server { _ ->
+            Response.FromFile("application/zip", made, mapOf("Content-Disposition" to "attachment; filename=\"made.zip\""), temporary = true)
+        }
+
+        // The next request makes the file again, so a part of this one is never offered, nor sent when asked for.
+        val answer = exchange(server.port, "GET /made HTTP/1.1\r\nHost: 127.0.0.1:${server.port}\r\nRange: bytes=0-9\r\n\r\n")
+        assertEquals(200, answer.status)
+        assertEquals(CLIP, answer.body)
+        assertEquals("attachment; filename=\"made.zip\"", answer.header("content-disposition"))
+        assertNull(answer.header("accept-ranges"))
+        assertTrue(eventually { !made.exists() })
+    }
+
+    @Test
+    fun aBodyThatDripsInIsCutOffThoughEachByteComesInTime() {
+        val server = server(timings = ServerTimings(body = 300, bodyPerMegabyte = 1_000, tick = 20))
+        val socket = connect(server.port).also { sockets += it }
+        val output = socket.getOutputStream()
+        output.write("POST /upload HTTP/1.1\r\nHost: 127.0.0.1:${server.port}\r\nContent-Length: 1000\r\n\r\n".toByteArray())
+        val started = System.nanoTime()
+
+        // A byte every tenth of a second never waits long enough for a read to give up, but the body as a whole does.
+        val cut = try {
+            repeat(50) {
+                output.write('X'.code)
+                output.flush()
+                Thread.sleep(100)
+            }
+
+            socket.getInputStream().read() < 0
+        } catch (closed: IOException) {
+            true
+        }
+
+        assertTrue(cut)
+        assertTrue((System.nanoTime() - started) / 1_000_000 < 3_000)
+    }
+
+    @Test
+    fun aBigBodyHasTimeForItsSize() {
+        // 300 ms, and a second for each megabyte: two megabytes coming in over a second arrive whole.
+        val server = server(bodyLimit = 4L * 1024 * 1024, spool = spool, timings = ServerTimings(body = 300, bodyPerMegabyte = 1_000, tick = 20)) { request ->
+            Response.text(200, "${request.bodyFile?.length()} bytes")
+        }
+
+        val socket = connect(server.port).also { sockets += it }
+        val output = socket.getOutputStream()
+        output.write("POST /upload HTTP/1.1\r\nHost: 127.0.0.1:${server.port}\r\nContent-Length: 2000000\r\n\r\n".toByteArray())
+
+        repeat(10) {
+            output.write(ByteArray(200_000))
+            output.flush()
+            Thread.sleep(100)
+        }
+
+        val answer = socket.getInputStream().bufferedReader().readText()
+        assertTrue(answer, answer.startsWith("HTTP/1.1 200 OK"))
+        assertTrue(answer, answer.endsWith("2000000 bytes"))
     }
 
     private companion object {

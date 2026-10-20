@@ -11,4 +11,7 @@
     <string name="main_maps_added">Maps added</string>
     <string name="main_no_maps_in_zip">There are no maps in that zip.</string>
     <string name="main_every_map_in_zip_already_here">Every map in that zip is here already.</string>
+
+    <!-- A map from another app (OPML, FreeMind, XMind), brought in: what it had that Orbit keeps another way, or couldn\'t keep. -->
+    <string name="main_import_notes_title">What changed on the way in</string>
 </resources>

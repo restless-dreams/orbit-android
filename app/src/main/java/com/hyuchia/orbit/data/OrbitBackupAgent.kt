@@ -74,7 +74,10 @@ internal fun backupFiles(files: File, quota: Long, history: Boolean): List<File>
 
     for (entry in File(files, "maps").listFiles().orEmpty().sortedBy { it.name }) {
         if (entry.isFile) {
-            chosen += entry
+            if (!unfinished(entry)) {
+                chosen += entry
+            }
+
             continue
         }
 
@@ -111,7 +114,10 @@ internal fun backupFiles(files: File, quota: Long, history: Boolean): List<File>
 
 /** The files in `directory` and the folders in it, but not ones a write left unfinished, in the order of their paths. */
 private fun filesIn(directory: File): List<File> =
-    directory.walkTopDown().filter { it.isFile && !it.name.endsWith(".partial") }.sortedBy { it.path }.toList()
+    directory.walkTopDown().filter { it.isFile && !unfinished(it) }.sortedBy { it.path }.toList()
+
+/** Whether a write left `file` unfinished ([writeAtomically] writes beside a file, then gives it its name). */
+private fun unfinished(file: File): Boolean = file.name.endsWith(".partial")
 
 private fun bySize(files: List<File>): List<File> = files.sortedWith(compareBy({ it.length() }, { it.path }))
 

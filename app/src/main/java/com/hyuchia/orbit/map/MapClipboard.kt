@@ -5,8 +5,9 @@ import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.ContentResolver
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
-import android.os.PersistableBundle
+import android.os.Bundle
 import android.text.Html
 import com.hyuchia.orbit.Logs
 
@@ -27,9 +28,10 @@ sealed interface Clip {
  * Android tells people when an app reads what they copied, so Orbit only
  * reads it when they paste; to decide whether to offer pasting, it looks at
  * the clip's description, which Android doesn't count as reading it.
- * Ideas copied in Orbit carry their orbit-md and their map in the
- * description's extras: pasted in Orbit they come back whole, while other
- * apps get a plain outline.
+ * Ideas copied in Orbit carry their orbit-md and their map in the clip's
+ * item, beside the plain outline other apps paste: pasted in Orbit they
+ * come back whole. Not in the description, which any app on screen could
+ * read without Android saying so.
  */
 class MapClipboard(context: Context) {
     private val manager = context.getSystemService(ClipboardManager::class.java)
@@ -62,11 +64,17 @@ class MapClipboard(context: Context) {
             return Clip.Picture(uri)
         }
 
-        val extras = clip.description.extras
-        val markdown = extras?.getString(EXTRA_MARKDOWN)
+        val copied = try {
+            // Orbit 0.2.0 put them in the description's extras.
+            val extras = item.intent?.extras ?: clip.description.extras?.let(::Bundle)
+            extras?.getString(EXTRA_MARKDOWN)?.let { markdown -> Clip.Ideas(markdown, extras.getString(EXTRA_MAP)) }
+        } catch (unreadable: RuntimeException) {
+            // Another app's clip can carry anything in its item: what Orbit can't read there, it leaves.
+            null
+        }
 
-        if (markdown != null) {
-            return Clip.Ideas(markdown, extras.getString(EXTRA_MAP))
+        if (copied != null) {
+            return copied
         }
 
         // Text as text: a file's address, or what a file holds, isn't an idea.
@@ -91,12 +99,8 @@ class MapClipboard(context: Context) {
      */
     fun copy(label: String, text: String, markdown: String, mapId: String): Boolean {
         val manager = manager ?: return false
-        val clip = ClipData.newPlainText(label, text)
-
-        clip.description.extras = PersistableBundle().apply {
-            putString(EXTRA_MARKDOWN, markdown)
-            putString(EXTRA_MAP, mapId)
-        }
+        val orbit = Intent().putExtra(EXTRA_MARKDOWN, markdown).putExtra(EXTRA_MAP, mapId)
+        val clip = ClipData(label, arrayOf(ClipDescription.MIMETYPE_TEXT_PLAIN), ClipData.Item(text, orbit, null))
 
         return try {
             manager.setPrimaryClip(clip)

@@ -9,4 +9,6 @@
     <string name="main_maps_added">Mapas agregados</string>
     <string name="main_no_maps_in_zip">No hay mapas en ese archivo zip.</string>
     <string name="main_every_map_in_zip_already_here">Todos los mapas de ese archivo zip ya están aquí.</string>
+
+    <string name="main_import_notes_title">Qué cambió al importar</string>
 </resources>

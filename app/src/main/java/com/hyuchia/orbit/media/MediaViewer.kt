@@ -94,6 +94,7 @@ import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.linkScheme
 import com.hyuchia.orbit.ui.shareFile
 import com.hyuchia.orbit.ui.shareLink
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.saket.telephoto.ExperimentalTelephotoApi
@@ -376,6 +377,7 @@ private fun Problem(message: String, onTap: () -> Unit) {
 @Composable
 private fun TopControls(item: GalleryItem, pager: PagerState, count: Int, source: Any?, onClose: () -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     CompositionLocalProvider(LocalContentColor provides Color.White) {
         Row(
@@ -412,7 +414,7 @@ private fun TopControls(item: GalleryItem, pager: PagerState, count: Int, source
                 }
 
                 Hint(shareLabel) {
-                    IconButton(onClick = { share(context, item, source) }) {
+                    IconButton(onClick = { share(context, scope, item, source) }) {
                         Icon(Icons.Outlined.Share, contentDescription = shareLabel)
                     }
                 }
@@ -456,10 +458,18 @@ private fun Caption(item: GalleryItem) {
 /** Whether a picture or video can be shared: a file in the map's folder that's on this phone, or a web address. */
 private fun shareable(source: Any?): Boolean = (source is File && source.isFile) || (source is String && linkScheme(source).let { it == "http" || it == "https" })
 
-/** Shares the file itself for one in the map's folder, and the address for one on the web. */
-private fun share(context: Context, item: GalleryItem, source: Any?) {
+/**
+ * Shares a file in the map's folder, a picture without what its file says
+ * beyond the picture, such as where it was taken ([sharePicture]); and the
+ * address of one on the web.
+ */
+private fun share(context: Context, scope: CoroutineScope, item: GalleryItem, source: Any?) {
     when (source) {
-        is File -> shareFile(context, FileProvider.getUriForFile(context, "${context.packageName}.files", source), mediaType(source.name), item.label)
+        is File -> if (item.kind == MediaKind.Picture) {
+            scope.launch { sharePicture(context, source, item.label) }
+        } else {
+            shareFile(context, FileProvider.getUriForFile(context, "${context.packageName}.files", source), mediaType(source.name), item.label)
+        }
         is String -> shareLink(context, source, item.label)
     }
 }

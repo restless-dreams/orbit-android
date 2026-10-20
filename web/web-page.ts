@@ -8,12 +8,18 @@
  * The app writes the map into the page as JSON (#orbit-map): its markdown,
  * the app's colors for maps without a style, the presentation's path, and
  * the app's words, in its language, which the page's `lang` names.
+ *
+ * Printed, the page is the map laid out for paper (web/print.ts). The app
+ * prints the same page through Android's print framework: then it holds
+ * only that layout, and says when its pictures are in.
  */
-import { createOrbitMap, parseOrbit } from '@restless-dreams/orbit';
+import { createOrbitMap, parseOrbit, renderPrintLayout } from '@restless-dreams/orbit';
 import type { OrbitNode } from '@restless-dreams/orbit';
 import { receive } from './audience';
 import { automaticRings, knownStyle, nodeTypeFor, nodeTypes, themeOption } from './look';
 import type { AppTheme } from './look';
+import { picturesLoaded, printOptions } from './print';
+import type { PrintRequest } from './print';
 import { pageWords, speak } from './words';
 import type { PageWords } from './words';
 
@@ -29,12 +35,24 @@ interface PageData {
 
   /** What the page says itself, in the app's language: the kinds of ideas, a goal ring's words, a list's made-up top idea. English without them. */
   words?: Partial<PageWords> | null;
+
+  /** Set when the app prints the map: what its picture shows. */
+  print?: PrintRequest | null;
+}
+
+declare global {
+  interface Window {
+    /** The app's channel to a page it prints (MapPrinter.kt): the page says when it's ready. */
+    orbitPrint?: { postMessage(message: string): void };
+  }
 }
 
 /** A swipe at least this long, in px, steps to the next idea or back. */
 const SWIPE = 60;
 /** The controls step aside after this long without the pointer moving, in ms. */
 const CONTROLS_LINGER = 2_500;
+/** The longest a shared page waits for a quiet moment to lay the map out for print, in ms. */
+const PRINT_LAYOUT_DELAY = 2_000;
 
 const readingOrder = (root: OrbitNode): string[] => {
   const ids: string[] = [];
@@ -53,133 +71,165 @@ speak(data.words);
 const page = document.body;
 const parsed = parseOrbit(data.markdown, { untitled: pageWords().untitledMap });
 const style = knownStyle(parsed.options.theme);
-const explore = createOrbitMap(document.getElementById('explore') as HTMLElement, parsed, {
-  theme: themeOption(data.theme, style),
-  nodeTypes: nodeTypes(),
-  nodeTypeFor: nodeTypeFor(() => automaticRings(parsed)),
-});
-const order = data.path?.length ? data.path : readingOrder(parsed.root);
-const count = document.querySelector<HTMLElement>('.page__count')!;
-const download = document.querySelector<HTMLAnchorElement>('.page__download');
+const printed = document.getElementById('print') as HTMLElement;
+let laidOut = false;
 
-if (data.download && download) {
-  download.href = data.download;
-  download.hidden = false;
-  page.classList.add('page--downloadable');
-}
-
-let index = 0;
-let presenting = false;
-let linger = 0;
-
-/** Presents from the idea being explored, or from the top. */
-const present = (): void => {
-  presenting = true;
-  index = Math.max(0, order.indexOf(explore.getFocusedNode()?.id ?? ''));
-  page.classList.add('page--presenting');
-  receive({ type: 'show', markdown: data.markdown, theme: data.theme, focus: order[index], captions: true });
-  step(0);
-  showControls();
-  document.documentElement.requestFullscreen?.().catch(() => undefined);
-};
-
-const stop = (): void => {
-  presenting = false;
-  receive({ type: 'end' });
-  page.classList.remove('page--presenting', 'page--controls');
-
-  if (document.fullscreenElement) {
-    document.exitFullscreen().catch(() => undefined);
-  }
-
-  // The map to explore picks up where the presentation was.
-  explore.flyTo(order[index]);
-};
-
-const step = (by: number): void => {
-  index = Math.min(order.length - 1, Math.max(0, index + by));
-  receive({ type: 'step', id: order[index], index, total: order.length });
-  count.textContent = `${index + 1} / ${order.length}`;
-};
-
-const showControls = (): void => {
-  page.classList.add('page--controls');
-  window.clearTimeout(linger);
-  linger = window.setTimeout(() => page.classList.remove('page--controls'), CONTROLS_LINGER);
-};
-
-document.querySelector('.page__present')?.addEventListener('click', present);
-document.querySelector('[data-close]')?.addEventListener('click', stop);
-
-document.querySelectorAll<HTMLElement>('[data-step]').forEach((button) => {
-  button.addEventListener('click', () => {
-    step(Number(button.dataset.step));
-    showControls();
-  });
-});
-
-document.addEventListener('keydown', (event) => {
-  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) {
+/** Lays the map out for paper, once: the page shows only that in print. */
+const layOutForPrint = (): void => {
+  if (laidOut) {
     return;
   }
 
-  if (!presenting) {
-    if (event.key === 'p' || event.key === 'P' || event.key === 'F5') {
-      event.preventDefault();
-      present();
+  laidOut = true;
+  renderPrintLayout(printed, parsed, printOptions(parsed, data.theme, style, data.print, document.documentElement.lang));
+};
+
+/** The page as people explore and present it. */
+const startExploring = (): void => {
+  const explore = createOrbitMap(document.getElementById('explore') as HTMLElement, parsed, {
+    theme: themeOption(data.theme, style),
+    nodeTypes: nodeTypes(),
+    nodeTypeFor: nodeTypeFor(() => automaticRings(parsed)),
+  });
+  const order = data.path?.length ? data.path : readingOrder(parsed.root);
+  const count = document.querySelector<HTMLElement>('.page__count')!;
+  const download = document.querySelector<HTMLAnchorElement>('.page__download');
+
+  if (data.download && download) {
+    download.href = data.download;
+    download.hidden = false;
+    page.classList.add('page--downloadable');
+  }
+
+  let index = 0;
+  let presenting = false;
+  let linger = 0;
+
+  /** Presents from the idea being explored, or from the top. */
+  const present = (): void => {
+    presenting = true;
+    index = Math.max(0, order.indexOf(explore.getFocusedNode()?.id ?? ''));
+    page.classList.add('page--presenting');
+    receive({ type: 'show', markdown: data.markdown, theme: data.theme, focus: order[index], captions: true });
+    step(0);
+    showControls();
+    document.documentElement.requestFullscreen?.().catch(() => undefined);
+  };
+
+  const stop = (): void => {
+    presenting = false;
+    receive({ type: 'end' });
+    page.classList.remove('page--presenting', 'page--controls');
+
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => undefined);
     }
 
-    return;
+    // The map to explore picks up where the presentation was.
+    explore.flyTo(order[index]);
+  };
+
+  const step = (by: number): void => {
+    index = Math.min(order.length - 1, Math.max(0, index + by));
+    receive({ type: 'step', id: order[index], index, total: order.length });
+    count.textContent = `${index + 1} / ${order.length}`;
+  };
+
+  const showControls = (): void => {
+    page.classList.add('page--controls');
+    window.clearTimeout(linger);
+    linger = window.setTimeout(() => page.classList.remove('page--controls'), CONTROLS_LINGER);
+  };
+
+  document.querySelector('.page__present')?.addEventListener('click', present);
+  document.querySelector('[data-close]')?.addEventListener('click', stop);
+
+  document.querySelectorAll<HTMLElement>('[data-step]').forEach((button) => {
+    button.addEventListener('click', () => {
+      step(Number(button.dataset.step));
+      showControls();
+    });
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) {
+      return;
+    }
+
+    if (!presenting) {
+      if (event.key === 'p' || event.key === 'P' || event.key === 'F5') {
+        event.preventDefault();
+        present();
+      }
+
+      return;
+    }
+
+    const forward = ['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'];
+    const back = ['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'];
+
+    if (forward.includes(event.key)) {
+      event.preventDefault();
+      step(1);
+    } else if (back.includes(event.key)) {
+      event.preventDefault();
+      step(-1);
+    } else if (event.key === 'Escape') {
+      stop();
+    }
+  });
+
+  // Leaving full screen with the browser's own Escape also ends the presentation.
+  document.addEventListener('fullscreenchange', () => {
+    if (presenting && !document.fullscreenElement && document.fullscreenEnabled) {
+      stop();
+    }
+  });
+
+  // While presenting, a swipe steps and a tap shows the controls; the pointer moving shows them too.
+  let start: { x: number; y: number } | null = null;
+
+  page.addEventListener('pointerdown', (event) => {
+    if (presenting && !(event.target as Element).closest('.page__controls')) {
+      start = { x: event.clientX, y: event.clientY };
+    }
+  });
+
+  page.addEventListener('pointerup', (event) => {
+    if (!presenting || !start) {
+      return;
+    }
+
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    start = null;
+
+    if (Math.abs(dx) >= SWIPE && Math.abs(dx) > Math.abs(dy)) {
+      step(dx < 0 ? 1 : -1);
+    } else if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
+      showControls();
+    }
+  });
+
+  page.addEventListener('pointermove', (event) => {
+    if (presenting && event.pointerType === 'mouse') {
+      showControls();
+    }
+  });
+};
+
+if (data.print) {
+  // The app is printing the map: the page is only its layout, and the app prints once the pictures are in.
+  layOutForPrint();
+  void picturesLoaded(printed).then(() => window.orbitPrint?.postMessage('ready'));
+} else {
+  startExploring();
+  // Printed from a browser, the page is the map laid out for paper: before it prints, or once it's quiet.
+  window.addEventListener('beforeprint', layOutForPrint);
+
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(layOutForPrint, { timeout: PRINT_LAYOUT_DELAY });
+  } else {
+    window.setTimeout(layOutForPrint, PRINT_LAYOUT_DELAY);
   }
-
-  const forward = ['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'];
-  const back = ['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'];
-
-  if (forward.includes(event.key)) {
-    event.preventDefault();
-    step(1);
-  } else if (back.includes(event.key)) {
-    event.preventDefault();
-    step(-1);
-  } else if (event.key === 'Escape') {
-    stop();
-  }
-});
-
-// Leaving full screen with the browser's own Escape also ends the presentation.
-document.addEventListener('fullscreenchange', () => {
-  if (presenting && !document.fullscreenElement && document.fullscreenEnabled) {
-    stop();
-  }
-});
-
-// While presenting, a swipe steps and a tap shows the controls; the pointer moving shows them too.
-let start: { x: number; y: number } | null = null;
-
-page.addEventListener('pointerdown', (event) => {
-  if (presenting && !(event.target as Element).closest('.page__controls')) {
-    start = { x: event.clientX, y: event.clientY };
-  }
-});
-
-page.addEventListener('pointerup', (event) => {
-  if (!presenting || !start) {
-    return;
-  }
-
-  const dx = event.clientX - start.x;
-  const dy = event.clientY - start.y;
-  start = null;
-
-  if (Math.abs(dx) >= SWIPE && Math.abs(dx) > Math.abs(dy)) {
-    step(dx < 0 ? 1 : -1);
-  } else if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
-    showControls();
-  }
-});
-
-page.addEventListener('pointermove', (event) => {
-  if (presenting && event.pointerType === 'mouse') {
-    showControls();
-  }
-});
+}

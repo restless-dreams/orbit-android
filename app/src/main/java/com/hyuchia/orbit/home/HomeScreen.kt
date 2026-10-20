@@ -103,10 +103,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hyuchia.orbit.AppContainer
+import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
 import com.hyuchia.orbit.data.ImportResult
 import com.hyuchia.orbit.data.MapSummary
+import com.hyuchia.orbit.data.OtherApps
 import com.hyuchia.orbit.data.SortOrder
 import com.hyuchia.orbit.nearby.SendSheet
 import com.hyuchia.orbit.page.SystemWebView
@@ -129,13 +131,20 @@ import com.hyuchia.orbit.widget.pinMapWidget
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.IOException
 
 /** Shorter than this, as a phone on its side is, the home's title and search share one slim bar, so the maps get the room. */
 private val ShortScreen = 480.dp
 private val BarSearchWidth = 360.dp
 
-/** What the file picker offers when importing: maps as markdown, YAML or a zip with their pictures. */
-val ImportTypes = arrayOf("text/markdown", "text/x-markdown", "text/plain", "application/yaml", "text/yaml", "application/x-yaml", "application/zip", "application/octet-stream")
+/**
+ * What the file picker offers when importing: maps as markdown, YAML or a zip with their pictures,
+ * other apps' maps, and the types files without a type of their own come as (OPML often says it's XML).
+ */
+val ImportTypes = arrayOf(
+    "text/markdown", "text/x-markdown", "text/plain", "application/yaml", "text/yaml", "application/x-yaml", "application/zip",
+    *OtherApps.TYPES.toTypedArray(), "text/xml", "application/xml", "application/octet-stream",
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -171,6 +180,14 @@ fun HomeScreen(
         }
     }
 
+    // A map that couldn't be made or duplicated says why.
+    LaunchedEffect(model) {
+        model.problems.collect { problem ->
+            snackbars.currentSnackbarData?.dismiss()
+            snackbars.showSnackbar(problem)
+        }
+    }
+
     var naming by rememberSaveable { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<MapSummary?>(null) }
     var tagging by remember { mutableStateOf<MapSummary?>(null) }
@@ -193,7 +210,17 @@ fun HomeScreen(
         onRename = { renaming = map },
         onTags = { tagging = map },
         onDuplicate = { model.duplicate(map.id) },
-        onShare = { scope.launch { shareMap(context, container, map) } },
+        onShare = {
+            scope.launch {
+                try {
+                    shareMap(context, container, map)
+                } catch (failed: IOException) {
+                    Logs.warn("OrbitHome", "Couldn't make a file of a map to share", failed)
+                    snackbars.currentSnackbarData?.dismiss()
+                    snackbars.showSnackbar(resources.getString(R.string.home_could_not_share_map))
+                }
+            }
+        },
         onSend = { sending = map },
         onDelete = {
             scope.launch {
@@ -355,7 +382,7 @@ fun HomeScreen(
             when {
                 state.loading -> items(4, key = { "placeholder-$it" }) { MapCardPlaceholder() }
                 results != null && results.isEmpty() -> item(key = "no-results", span = { GridItemSpan(maxLineSpan) }) {
-                    Message(stringResource(R.string.home_no_maps_match, query), stringResource(R.string.home_search_looks_in))
+                    Message(stringResource(R.string.home_no_maps_match, state.searched), stringResource(R.string.home_search_looks_in))
                 }
                 results != null -> items(results, key = { it.map.id }) { hit ->
                     MapCard(hit.map, actions(hit.map), snippet = hit.snippet, modifier = Modifier.animateItem())

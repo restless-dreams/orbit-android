@@ -69,6 +69,29 @@ class PresentationTest {
     }
 
     @Test
+    fun anIdeaThePathComesBackToSharesItsTimeAmongItsVisits() {
+        // The rehearsal spent 45 seconds on the intro, over its two visits.
+        val order = listOf("intro", "problem", "intro", "plan")
+        assertEquals(listOf(23, 60, 22, 20), stepSeconds(order, mapOf("intro" to 45, "problem" to 60, "plan" to 20)))
+        assertEquals(listOf(null, 60, null), stepSeconds(listOf("gone", "problem", "gone"), mapOf("problem" to 60)))
+
+        val back = Presentation(order = order, index = 3, startedAt = 0, stepStartedAt = 105_000, planned = mapOf("intro" to 45, "problem" to 60, "plan" to 20), firstIndex = 0)
+        assertEquals(20, back.plannedForStep)
+        // The first three steps took their 105 seconds: the intro counts once, not once a visit.
+        assertEquals(0, back.behind(105_000))
+        assertEquals(23, back.copy(index = 0, stepStartedAt = 0).plannedForStep)
+        assertEquals(22, back.copy(index = 2, stepStartedAt = 83_000).plannedForStep)
+    }
+
+    @Test
+    fun aRehearsalKeepsEachVisitsOwnTime() {
+        val rehearsal = Rehearsal.of(listOf("intro", "problem", "intro", "plan"), mapOf(0 to 30_400L, 1 to 59_600L, 2 to 9_000L))
+        assertEquals(listOf(Rehearsal.Step("intro", 30), Rehearsal.Step("problem", 60), Rehearsal.Step("intro", 9)), rehearsal.steps)
+        assertEquals(99, rehearsal.total)
+        assertEquals(mapOf("intro" to 39, "problem" to 60), rehearsal.seconds)
+    }
+
+    @Test
     fun timesReadLikeAClock() {
         assertEquals("0:42", clock(42))
         assertEquals("12:05", clock(725))

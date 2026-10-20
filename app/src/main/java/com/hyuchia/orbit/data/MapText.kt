@@ -32,6 +32,10 @@ data class MapOutline(
 private val HEADING = Regex("""^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$""")
 private val LIST_ITEM = Regex("""^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$""")
 private val FRONTMATTER_ENTRY = Regex("""^([A-Za-z][\w-]*):\s*(.*?)\s*$""")
+
+/** A YAML map's own list of nodes, and its format's version beside it, at the top of the document. */
+private val YAML_NODES = Regex("""^nodes\s*:""", RegexOption.MULTILINE)
+private val YAML_SCHEMA_VERSION = Regex("""^schemaVersion\s*:\s*["']?(\d+)["']?\s*$""", RegexOption.MULTILINE)
 private val ATTRIBUTE_COMMENT = Regex("""\s*<!--.*?-->""")
 private val INLINE_ATTRIBUTES = Regex("""<!--\s*orbit\b(.*?)-->""")
 /** A line of an attribute block, or one attribute of a line's comment: `target: 5`. */
@@ -254,6 +258,18 @@ object MapText {
         }
 
         return words.toString()
+    }
+
+    /**
+     * The version of the format `markdown` is written for: its `schemaVersion`,
+     * in the frontmatter or at the top of a YAML map, and 1 when it says none,
+     * as Orbit reads it.
+     */
+    fun formatVersion(markdown: String): Int {
+        val declared = frontmatter(markdown.lines()).values["schemaVersion"]
+            ?: YAML_SCHEMA_VERSION.find(markdown)?.takeIf { YAML_NODES.containsMatchIn(markdown) }?.groupValues?.get(1)
+
+        return declared?.trim()?.toIntOrNull()?.takeIf { it > 0 } ?: 1
     }
 
     /**

@@ -233,4 +233,13 @@ class ProgressTest {
         val savings = Goal.of(node("savings", plans))!!
         assertEquals(GoalNumbers.summary(savings, words, Locale.US), GoalNumbers.editorSummary(savings, hasIdeasUnder = true, under = progress.under(node("savings", plans)), words = words, locale = Locale.US))
     }
+
+    @Test
+    fun aMapOfAnyDepthCounts() {
+        // A hundred thousand to-dos, each under the one before: only the last one is a to-do the others count.
+        val chain = listOf(idea("top", null)) + (1..100_000).map { toDo("step-$it", if (it == 1) "top" else "step-${it - 1}", status = "done") }
+        val progress = MapProgress(chain)
+        assertEquals(Rollup(1, 1.0, 1, 0), progress.under(chain.first()))
+        assertEquals(Rollup(1, 1.0, 1, 0), progress.under(chain[50_000]))
+    }
 }

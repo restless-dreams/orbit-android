@@ -20,6 +20,11 @@
     <string name="nearby_send_to_an_address">Enviar a una dirección</string>
     <string name="nearby_send_to_an_address_explanation">En el otro dispositivo, la configuración de Orbit muestra su dirección en Dispositivos cercanos.</string>
     <string name="nearby_send">Enviar</string>
+    <string name="nearby_check_that_it_shows">Comprueba que muestre %1$s</string>
+    <string name="nearby_not_sent">No se envió</string>
+    <string name="nearby_check_the_code_title">¿%1$s muestra este código?</string>
+    <string name="nearby_check_the_code_explanation">Envía el mapa solo si los dos dispositivos muestran el mismo código. Si no, otro dispositivo de esta red Wi-Fi respondió en su lugar, y no recibe nada.</string>
+    <string name="nearby_yes_send">Sí, enviar</string>
 
     <!-- Por qué un mapa no llegó al otro dispositivo -->
     <string name="nearby_send_could_not_get_the_map_ready">No se pudo preparar el mapa para enviarlo. ¿Está lleno el almacenamiento de este dispositivo?</string>
@@ -30,6 +35,8 @@
     <string name="nearby_send_update_the_other_device">Actualiza Orbit en el otro dispositivo y vuelve a intentarlo.</string>
     <string name="nearby_send_could_not_open">No pudo abrir el mapa. Actualiza Orbit en ambos dispositivos y vuelve a intentarlo.</string>
     <string name="nearby_send_maps_already_waiting">Ya tiene mapas esperando respuesta. Vuelve a intentarlo cuando se respondan.</string>
+    <string name="nearby_send_update_this_device">Actualiza Orbit en este dispositivo y vuelve a intentarlo.</string>
+    <string name="nearby_send_no_room_there">No tiene espacio para el mapa.</string>
 
     <!-- Un mapa que llegó de otro dispositivo, o de un archivo de un mapa que ya está aquí -->
     <string name="nearby_arrival_newer_version_from">%2$s te envió una versión más reciente de “%1$s”</string>
@@ -53,6 +60,10 @@
     <string name="nearby_update">Actualizar</string>
     <string name="nearby_decline">Rechazar</string>
     <string name="nearby_keep_both">Conservar ambos</string>
+    <string name="nearby_incoming_title">%1$s quiere enviarte un mapa</string>
+    <string name="nearby_incoming_explanation">Comprueba que muestre el mismo código. El mapa llega en cuanto lo comprueben allá.</string>
+    <string name="nearby_older_sender_title">Actualiza Orbit en el otro dispositivo</string>
+    <string name="nearby_older_sender_text">Un dispositivo de esta red intentó enviarte un mapa con una versión anterior de Orbit, que envía los mapas antes de que los dos dispositivos comprueben sus códigos. Actualiza Orbit allá y vuelve a enviar el mapa.</string>
 
     <!-- Un mapa abierto en el navegador de una computadora -->
     <string name="nearby_connect_to_the_computer_wifi">Conecta este dispositivo a la misma red Wi-Fi que la computadora y luego vuelve aquí.</string>

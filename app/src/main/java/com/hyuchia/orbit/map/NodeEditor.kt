@@ -62,7 +62,6 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -116,10 +115,15 @@ val NodeKinds = listOf(
     NodeKind("goal", R.string.map_kind_goal, "🎯"),
 )
 
-/** Everything an idea can be, edited live: each change shows on the map behind as it's made. */
+/**
+ * Everything an idea can be, edited live: each change shows on the map
+ * behind as it's made. The fields start over each time the editor is
+ * `opened` on an idea (see [Panel.Editor]), but not when the idea's new
+ * text gives it a new id.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean, onPickIcon: (String) -> Unit, onPickColor: (String) -> Unit) {
+fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet: Boolean, onPickIcon: (String) -> Unit, onPickColor: (String) -> Unit) {
     val context = LocalContext.current
     var linking by remember { mutableStateOf(false) }
 
@@ -168,7 +172,7 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean, on
                 }
 
                 EditorField(
-                    key = node.id,
+                    key = "$opened",
                     value = node.text,
                     label = stringResource(R.string.map_text),
                     onCommit = { text ->
@@ -245,11 +249,11 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean, on
             }
 
             Section(stringResource(R.string.map_section_tags)) {
-                TagEditor(node, allTags(ui)) { tags -> set("tags", if (tags.isEmpty()) null else JsonArray(tags.map(::JsonPrimitive))) }
+                TagEditor(node, opened, allTags(ui)) { tags -> set("tags", if (tags.isEmpty()) null else JsonArray(tags.map(::JsonPrimitive))) }
             }
 
             Section(stringResource(R.string.map_section_note)) {
-                NoteEditor(node) { note -> set("note", note.ifBlank { null }?.let(::JsonPrimitive)) }
+                NoteEditor(node, opened) { note -> set("note", note.ifBlank { null }?.let(::JsonPrimitive)) }
             }
 
             Section(stringResource(R.string.map_section_link)) {
@@ -273,7 +277,7 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean, on
                     )
                 } else {
                     EditorField(
-                        key = node.id,
+                        key = "$opened",
                         value = node.link.orEmpty(),
                         label = stringResource(R.string.map_web_address),
                         placeholder = "https://",
@@ -304,13 +308,13 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean, on
                             .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                     )
                     EditorField(
-                        key = node.id + image.src,
+                        key = "$opened ${image.src}",
                         value = image.alt.orEmpty(),
                         label = stringResource(R.string.map_describe_the_picture),
                         onCommit = { alt -> set("image", media(image.copy(alt = alt.ifBlank { null }))) },
                     )
                     EditorField(
-                        key = node.id + image.src,
+                        key = "$opened ${image.src}",
                         value = image.caption.orEmpty(),
                         label = stringResource(R.string.map_caption),
                         onCommit = { caption -> set("image", media(image.copy(caption = caption.ifBlank { null }))) },
@@ -333,7 +337,7 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean, on
 
                     MediaProblemText(ui, node, video = false)
                     EditorField(
-                        key = node.id,
+                        key = "$opened",
                         value = "",
                         label = stringResource(R.string.map_or_a_picture_web_address),
                         placeholder = "https://",
@@ -363,7 +367,7 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean, on
                 key("address") {
                     if (!fromPhone) {
                         EditorField(
-                            key = node.id,
+                            key = "$opened",
                             value = video?.src.orEmpty(),
                             label = stringResource(if (video == null) R.string.map_or_a_video_address else R.string.map_video_address),
                             placeholder = "https://youtu.be/…",
@@ -377,7 +381,7 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean, on
 
                 if (video != null) {
                     EditorField(
-                        key = node.id + video.src,
+                        key = "$opened ${video.src}",
                         value = video.caption.orEmpty(),
                         label = stringResource(R.string.map_caption),
                         onCommit = { caption -> set("video", media(video.copy(caption = caption.ifBlank { null }))) },
@@ -394,7 +398,7 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean, on
 
             Section(stringResource(R.string.common_web_page)) {
                 EditorField(
-                    key = node.id,
+                    key = "$opened",
                     value = node.embed?.src.orEmpty(),
                     label = stringResource(R.string.map_page_to_show),
                     placeholder = "https://",
@@ -519,7 +523,9 @@ private fun Choice(label: String, selected: Boolean, icon: (@Composable () -> Un
 /**
  * A text field that saves a moment after typing stops, when the keyboard's
  * action is pressed, and when it leaves the screen. `key` starts it over
- * with the node's value when the node changes.
+ * with the value, and typing waiting to be saved then goes where it was
+ * typed. A value changed from outside the field (an undo, a change made
+ * elsewhere) shows in it, unless something typed waits to be saved.
  */
 @Composable
 fun EditorField(
@@ -536,7 +542,7 @@ fun EditorField(
 ) {
     var text by remember(key) { mutableStateOf(value) }
     var committed by remember(key) { mutableStateOf(value) }
-    val commit by rememberUpdatedState(onCommit)
+    val commit by remember(key) { mutableStateOf(onCommit) }.apply { this.value = onCommit }
 
     fun save() {
         if (text != committed) {
@@ -548,6 +554,13 @@ fun EditorField(
     LaunchedEffect(key, text) {
         delay(700)
         save()
+    }
+
+    LaunchedEffect(key, value) {
+        followedText(value, text, committed)?.let { followed ->
+            text = followed
+            committed = followed
+        }
     }
 
     DisposableEffect(key) {
@@ -573,8 +586,8 @@ fun EditorField(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TagEditor(node: MapNode, known: List<String>, onTags: (List<String>) -> Unit) {
-    var draft by remember(node.id) { mutableStateOf("") }
+private fun TagEditor(node: MapNode, opened: Int, known: List<String>, onTags: (List<String>) -> Unit) {
+    var draft by remember(opened) { mutableStateOf("") }
 
     fun add(tag: String) {
         val clean = tag.trim().removePrefix("#").trim()
@@ -618,13 +631,18 @@ private fun TagEditor(node: MapNode, known: List<String>, onTags: (List<String>)
     )
 }
 
-/** The note, in markdown, with buttons for the marks people forget and a preview of how it reads. */
+/**
+ * The note, in markdown, with buttons for the marks people forget and a
+ * preview of how it reads. It starts over each time the editor is `opened`,
+ * and shows a note changed from outside it, as [EditorField] does.
+ */
 @Composable
-private fun NoteEditor(node: MapNode, onNote: (String) -> Unit) {
-    var previewing by remember(node.id) { mutableStateOf(false) }
-    var field by remember(node.id) { mutableStateOf(TextFieldValue(node.note.orEmpty())) }
-    var committed by remember(node.id) { mutableStateOf(node.note.orEmpty()) }
-    val commit by rememberUpdatedState(onNote)
+private fun NoteEditor(node: MapNode, opened: Int, onNote: (String) -> Unit) {
+    val note = node.note.orEmpty()
+    var previewing by remember(opened) { mutableStateOf(false) }
+    var field by remember(opened) { mutableStateOf(TextFieldValue(note)) }
+    var committed by remember(opened) { mutableStateOf(note) }
+    val commit by remember(opened) { mutableStateOf(onNote) }.apply { this.value = onNote }
 
     fun save() {
         if (field.text != committed) {
@@ -633,12 +651,19 @@ private fun NoteEditor(node: MapNode, onNote: (String) -> Unit) {
         }
     }
 
-    LaunchedEffect(node.id, field.text) {
+    LaunchedEffect(opened, field.text) {
         delay(800)
         save()
     }
 
-    DisposableEffect(node.id) {
+    LaunchedEffect(opened, note) {
+        followedText(note, field.text, committed)?.let { followed ->
+            field = TextFieldValue(followed, TextRange(field.selection.start.coerceAtMost(followed.length)))
+            committed = followed
+        }
+    }
+
+    DisposableEffect(opened) {
         onDispose { save() }
     }
 
@@ -696,6 +721,19 @@ private fun NoteEditor(node: MapNode, onNote: (String) -> Unit) {
         )
     }
 }
+
+/**
+ * What a field editing `committed` (with `text` in it now) shows once the
+ * value it edits is `value`: the value, after a change from outside the
+ * field (an undo, a change made elsewhere), unless something typed waits to
+ * be saved; or null to stay as it is, as when the value is the field's own
+ * save, tidied (the spaces it ended with trimmed, say).
+ */
+internal fun followedText(value: String, text: String, committed: String): String? =
+    if (text == committed && tidy(value) != tidy(committed)) value else null
+
+/** The text without spaces or line breaks at its ends, and every run of them inside as one space. */
+private fun tidy(text: String): String = text.trim().replace(Regex("""\s+"""), " ")
 
 /** A list of the map's ideas to choose one from. */
 @Composable

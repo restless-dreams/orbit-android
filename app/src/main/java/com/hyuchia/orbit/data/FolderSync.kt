@@ -137,8 +137,10 @@ internal const val MISSING_CONFIRMATION = 10 * 60 * 1000L
  * none of the maps' files is there anymore, the folder was more likely
  * emptied or swapped than every file deleted, so the maps are written to it
  * again; so is a map open on a screen (`onScreen`), which mustn't vanish
- * while it's used. Files that couldn't be read, and maps whose text couldn't
- * be, are left for a later sync.
+ * while it's used. A map deleted here (`deleted`) takes its file with it,
+ * unless the file changed since; one deleted while the maps were kept in
+ * another folder waits until they're kept there again. Files that couldn't
+ * be read, and maps whose text couldn't be, are left for a later sync.
  */
 internal fun planSync(
     folder: String,
@@ -153,7 +155,12 @@ internal fun planSync(
     val claimed = files.filter { it.unreadable }.mapTo(mutableSetOf()) { it.name }
 
     for (record in deleted) {
-        val file = byName[record.file]?.takeIf { record.folder == folder }
+        // A map deleted while the maps were kept in another folder waits for that one: its file there still goes.
+        if (record.folder != folder) {
+            continue
+        }
+
+        val file = byName[record.file]
 
         if (file != null && file.unreadable) {
             continue

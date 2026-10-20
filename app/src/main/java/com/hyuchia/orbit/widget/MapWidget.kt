@@ -119,12 +119,14 @@ class MapWidget : GlanceAppWidget() {
         provideContent {
             val chosen = currentState(WidgetMapKey)
             val all by app.maps.maps.collectAsState()
+            // The wallpaper's colors, turned on or off while the widget shows, change its picture at once.
+            val dynamicColor = app.settings.settings.collectAsState(settings).value.dynamicColor
             val map = all?.let { shownMap(it, chosen) }
             val glanceContext = LocalContext.current
             val dark = homeScreenIsDark(glanceContext)
 
-            val picture by produceState(map?.let { decodedPicture(glanceContext, it, dark, settings.dynamicColor) }, map?.id, map?.contentKey, dark) {
-                value = map?.let { picture(glanceContext, it, dark, settings.dynamicColor) }
+            val picture by produceState(map?.let { decodedPicture(glanceContext, it, dark, dynamicColor) }, map?.id, map?.contentKey, dark, dynamicColor) {
+                value = map?.let { picture(glanceContext, it, dark, dynamicColor) }
             }
 
             GlanceTheme {

@@ -41,27 +41,30 @@ import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.ui.ListRow
+import com.hyuchia.orbit.ui.foldCase
+import com.hyuchia.orbit.ui.searchWords
 
 /** An idea that matches a search, and where it matched. */
-private data class Match(val node: MapNode, val path: String, val snippet: String?)
+internal data class Match(val node: MapNode, val path: String, val snippet: String?)
 
-private fun search(ui: MapUi, query: String): List<Match> {
-    val words = query.lowercase().split(Regex("""\s+""")).filter { it.isNotEmpty() }
+/** The ideas with every word of `query` in their text, tags or note, whatever the case; text matches first. */
+internal fun search(ui: MapUi, query: String): List<Match> {
+    val words = searchWords(query)
 
     if (words.isEmpty()) {
         return emptyList()
     }
 
     return ui.map?.nodes.orEmpty().mapNotNull { node ->
-        val title = "${node.text} ${node.tags.joinToString(" ") { "#$it" }}".lowercase()
+        val title = foldCase("${node.text} ${node.tags.joinToString(" ") { "#$it" }}")
         val note = node.note.orEmpty()
         val inTitle = words.all { it in title }
 
-        if (!inTitle && !words.all { it in title || it in note.lowercase() }) {
+        if (!inTitle && !words.all { it in title || it in foldCase(note) }) {
             return@mapNotNull null
         }
 
-        val snippet = if (inTitle) null else note.lineSequence().firstOrNull { line -> words.any { it in line.lowercase() } }?.trim()
+        val snippet = if (inTitle) null else note.lineSequence().firstOrNull { line -> words.any { it in foldCase(line) } }?.trim()
         Match(node, pathOf(ui, node), snippet)
     }.sortedBy { if (it.snippet == null) 0 else 1 }
 }
@@ -147,24 +150,35 @@ fun SearchPanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
 /** The text with the searched words in bold. */
 @Composable
 private fun highlight(text: String, query: String) = buildAnnotatedString {
-    val words = query.lowercase().split(Regex("""\s+""")).filter { it.isNotEmpty() }
-    val lower = text.lowercase()
     var index = 0
 
-    while (index < text.length) {
-        val next = words.mapNotNull { word -> lower.indexOf(word, index).takeIf { it >= 0 }?.let { it to word } }.minByOrNull { it.first }
-
-        if (next == null) {
-            append(text.substring(index))
-            break
-        }
-
-        append(text.substring(index, next.first))
+    for (found in wordRanges(text, searchWords(query))) {
+        append(text.substring(index, found.first))
 
         withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)) {
-            append(text.substring(next.first, next.first + next.second.length))
+            append(text.substring(found.first, found.last + 1))
         }
 
+        index = found.last + 1
+    }
+
+    append(text.substring(index))
+}
+
+/**
+ * Where the search's `words` (from [searchWords]) are in the text, first to
+ * last and without overlapping, as ranges of the text itself.
+ */
+internal fun wordRanges(text: String, words: List<String>): List<IntRange> {
+    val folded = foldCase(text)
+    val found = mutableListOf<IntRange>()
+    var index = 0
+
+    while (index < folded.length) {
+        val next = words.mapNotNull { word -> folded.indexOf(word, index).takeIf { it >= 0 }?.let { it to word } }.minByOrNull { it.first } ?: break
+        found.add(next.first until next.first + next.second.length)
         index = next.first + next.second.length
     }
+
+    return found
 }

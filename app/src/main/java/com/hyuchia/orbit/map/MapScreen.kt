@@ -161,7 +161,7 @@ import com.hyuchia.orbit.page.MapInsets
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.MapSettings
 import com.hyuchia.orbit.page.SystemWebView
-import com.hyuchia.orbit.present.CastButton
+import com.hyuchia.orbit.present.CastingButton
 import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.theme.OrbitPalette
 import com.hyuchia.orbit.theme.OrbitTheme
@@ -340,6 +340,13 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
         }
     }
 
+    // A presentation has the map and the microphone to itself: a talk still going ends as it starts, the idea being said left out.
+    LaunchedEffect(ui.presentation != null) {
+        if (ui.presentation != null) {
+            talk.cancel()
+        }
+    }
+
     LaunchedEffect(model) {
         model.effects.collect { effect ->
             when (effect) {
@@ -432,7 +439,7 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
     BackHandler(enabled = ui.editing) { model.stopEditing(save = true) }
     BackHandler(enabled = ui.source != null && !ui.editing) { model.closeSource() }
     BackHandler(enabled = ui.presentation != null) { model.stopPresentation() }
-    BackHandler(enabled = talk.active) { talk.stop() }
+    BackHandler(enabled = talk.active && ui.presentation == null) { talk.stop() }
     // Making a path, back flies up the map like always, and at its top keeps the path.
     BackHandler(enabled = ui.pathMaking && !canGoUp && !ui.editing && ui.panel == null) { model.finishPath() }
 
@@ -664,7 +671,7 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
 
                         if (ui.source != null && !wide) {
                             HorizontalDivider()
-                            SourceEditor(model, ui.source, Modifier.weight(0.58f).fillMaxWidth(), clearOfBars.calculateBottomPadding())
+                            SourceEditor(model, ui.source, ui.readOnly, Modifier.weight(0.58f).fillMaxWidth(), clearOfBars.calculateBottomPadding())
                         }
                     }
 
@@ -743,7 +750,7 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
 
                 if (sourceBeside) {
                     VerticalDivider()
-                    SourceEditor(model, ui.source, Modifier.width(SidePanelWidth + 80.dp).fillMaxHeight(), clearOfBars.calculateBottomPadding())
+                    SourceEditor(model, ui.source, ui.readOnly, Modifier.width(SidePanelWidth + 80.dp).fillMaxHeight(), clearOfBars.calculateBottomPadding())
                 } else if (wide && ui.panel.showsBeside()) {
                     VerticalDivider()
 
@@ -916,6 +923,7 @@ private fun MapOverlays(model: MapViewModel, ui: MapUi, act: (MapNode, NodeActio
                     y = menu.y,
                     parent = node.parentId?.let { ui.nodes[it] },
                     under = ui.progress.under(node),
+                    ideasUnder = remember(ui.map?.nodes, node.id) { ideasUnder(ui.map?.nodes.orEmpty(), node.id) },
                     mapColors = remember(ui.map?.nodes, node.color) { offeredCustomColors(ui.map?.nodes.orEmpty().map { it.color }, node.color) },
                     pasteable = remember(menu) { model.pasteable() },
                     onDismiss = { model.show(null) },
@@ -1141,7 +1149,8 @@ private fun MapTopBar(
                 IconButton(onClick = onRedo, enabled = ui.canRedo) { Icon(Icons.AutoMirrored.Outlined.Redo, contentDescription = redo) }
             }
 
-            CastButton(dark = background.luminance() < 0.5f)
+            // A TV the phone casts to, after a presentation: the way to stop it. Looking for TVs starts only with presenting.
+            CastingButton(dark = background.luminance() < 0.5f)
             // Presenting is what maps are for: a button of its own, with its name where there's room.
             val present = stringResource(R.string.common_present)
 

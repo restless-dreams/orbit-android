@@ -458,17 +458,34 @@ class MapRepository(
         return WriteResult.Written
     }
 
-    /** The map's earlier versions, the newest first. */
+    /**
+     * The map's earlier versions, the newest first. One that can't be read
+     * is left out: the history may be thinned out as it's listed, by a save
+     * or the folder maps are kept in.
+     */
     suspend fun versions(id: String): List<MapVersion> = withContext(Dispatchers.IO) {
         versionFiles(id).sortedByDescending { it.first }.mapNotNull { (time, file) ->
-            val outline = runCatching { MapText.outline(file.readTextSafely(), words) }.getOrNull() ?: return@mapNotNull null
-            MapVersion(time, outline.title, outline.ideas, original = file.name.endsWith(ORIGINAL_SUFFIX))
+            val text = try {
+                file.readTextSafely()
+            } catch (unreadable: IOException) {
+                return@mapNotNull null
+            }
+
+            val outline = runCatching { MapText.outline(text, words) }.getOrNull() ?: return@mapNotNull null
+            // The file another app wrote, kept as it came in, counts its own ideas.
+            MapVersion(time, outline.title, OtherApps.ideasIn(text) ?: outline.ideas, original = file.name.endsWith(ORIGINAL_SUFFIX))
         }
     }
 
-    /** The map's text as it was at `time`, if that version is kept. */
+    /** The map's text as it was at `time`, if that version is still kept and can be read. */
     suspend fun readVersion(id: String, time: Long): String? = withContext(Dispatchers.IO) {
-        versionFiles(id).firstOrNull { it.first == time }?.second?.readTextSafely()
+        val file = versionFiles(id).firstOrNull { it.first == time }?.second ?: return@withContext null
+
+        try {
+            file.readTextSafely()
+        } catch (unreadable: IOException) {
+            null
+        }
     }
 
     /**
@@ -554,6 +571,12 @@ class MapRepository(
         return WriteResult.Changed
     }
 
+    /**
+     * Why a map couldn't be added, in `words`: a newer version of Orbit
+     * keeps the maps, or the files couldn't be written (a full phone, say).
+     */
+    fun whyNotAdded(): String = words.string(if (canWrite.value) R.string.data_could_not_add_map else R.string.data_newer_version_keeps_maps)
+
     /** Creates a map with just its root, and returns its id. */
     suspend fun create(title: String, style: String? = null, tags: List<String> = emptyList()): String =
         add(MapTags.write(MapText.newMap(title, words, style), tags))
@@ -562,9 +585,17 @@ class MapRepository(
      * Creates a map from orbit-md text: a template, an import, something
      * shared, a file new in the folder maps are kept in. `original` is
      * someone's own file the map came from: it's kept as it came in, for
-     * good, in the map's history, whatever Orbit writes later.
+     * good, in the map's history, whatever Orbit writes later. `pictures`
+     * go in its media folder, by name; a name that isn't a picture's or a
+     * video's is left out.
      */
-    suspend fun add(markdown: String, pinned: Boolean = false, sync: SyncRecord? = null, original: String? = null): String =
+    suspend fun add(
+        markdown: String,
+        pinned: Boolean = false,
+        sync: SyncRecord? = null,
+        original: String? = null,
+        pictures: Map<String, ByteArray> = emptyMap(),
+    ): String =
         withContext(Dispatchers.IO) {
             mutex.withLock {
                 checkWritable()
@@ -572,6 +603,11 @@ class MapRepository(
 
                 val folder = settle(id) { staging ->
                     writeAtomically(File(staging, MAP_FILE), markdown)
+
+                    pictures.filterKeys(::isMediaName).forEach { (name, bytes) ->
+                        writeAtomically(fileInside(File(staging, MEDIA_DIRECTORY), name, words), bytes)
+                    }
+
                     writeMetadata(staging, MapMetadata(created = clock(), pinned = pinned, uuid = UUID.randomUUID().toString(), sync = sync))
                 }
 
@@ -609,7 +645,13 @@ class MapRepository(
                 return@withLock WriteResult.Missing
             }
 
-            val current = file.readTextSafely()
+            // A file that can't be read is never written over: what's in it can't be kept.
+            val current = try {
+                file.readTextSafely()
+            } catch (unreadable: IOException) {
+                return@withLock WriteResult.Refused
+            }
+
             writeLocked(id, MapText.retitle(current, title, words), base = current, checkpoint = Checkpoint.Interval)
         }
     }
@@ -1011,9 +1053,9 @@ class MapRepository(
     }
 
     /** Whether the map's text points at pictures or videos in its folder. */
-    fun hasPictures(id: String): Boolean {
+    suspend fun hasPictures(id: String): Boolean = withContext(Dispatchers.IO) {
         val folder = folder(id)
-        return mediaFiles(folder, runCatching { File(folder, MAP_FILE).readTextSafely() }.getOrDefault("")).isNotEmpty()
+        mediaFiles(folder, runCatching { File(folder, MAP_FILE).readTextSafely() }.getOrDefault("")).isNotEmpty()
     }
 
     /**

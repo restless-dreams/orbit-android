@@ -94,6 +94,41 @@ fun ArrivalDialog(from: String?, bundle: MapBundle, alreadyHere: Boolean, addres
     )
 }
 
+/**
+ * A map on its way from another device: this one shows the check code the
+ * sender shows too, so the person sending can compare them before the map
+ * goes. It comes once they do, as an offer to take ([ArrivalDialog]).
+ */
+@Composable
+fun IncomingDialog(incoming: Incoming, onDecline: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDecline,
+        icon = {
+            EscapeCloses(onDecline)
+            Icon(Icons.Outlined.Downloading, contentDescription = null)
+        },
+        title = { Text(stringResource(R.string.nearby_incoming_title, incoming.from)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    withStyledPart(stringResource(R.string.nearby_check_code, incoming.check), incoming.check, SpanStyle(fontWeight = FontWeight.SemiBold)),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(stringResource(R.string.nearby_incoming_explanation))
+                // Names are whatever the sender says: the address is where it really came from.
+                Text(
+                    stringResource(R.string.nearby_arrival_sent_from_address, incoming.address),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDecline) { Text(stringResource(R.string.nearby_decline)) }
+        },
+    )
+}
+
 /** `text` with the first `part` of it in `style`, such as a code set apart in a sentence. */
 internal fun withStyledPart(text: String, part: String, style: SpanStyle): AnnotatedString = buildAnnotatedString {
     append(text)

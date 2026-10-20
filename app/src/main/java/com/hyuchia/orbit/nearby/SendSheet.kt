@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Devices
+import androidx.compose.material.icons.outlined.Pin
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.TabletAndroid
 import androidx.compose.material3.AlertDialog
@@ -47,6 +48,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -61,6 +66,7 @@ import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.exportFile
 import com.hyuchia.orbit.ui.exportName
 import com.hyuchia.orbit.ui.shareFile
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -83,15 +89,19 @@ fun SendSheet(mapId: String, title: String, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     val devices = rememberNearbyDevices(host.selfId)
     val states = remember { mutableStateMapOf<String, SendState>() }
+    // What the person sending says about the codes, by device, while both show one: the map goes only once they match.
+    val checks = remember { mutableStateMapOf<String, Pair<String, CompletableDeferred<Boolean>>>() }
     // Devices reached by their address, for networks where they can't find each other.
     val typed = remember { mutableStateListOf<String>() }
     var typingAddress by remember { mutableStateOf(false) }
     var computer by remember { mutableStateOf(false) }
+    var sharingFailed by remember { mutableStateOf(false) }
 
     fun send(device: NearbyDevice) {
         val address = device.address
+        val state = states[address]
 
-        if (states[address] is SendState.Sending || states[address] is SendState.Waiting) {
+        if (state is SendState.Sending || state is SendState.Confirming || state is SendState.Waiting) {
             return
         }
 
@@ -110,8 +120,19 @@ fun SendSheet(mapId: String, title: String, onDismiss: () -> Unit) {
                 return@launch
             }
 
+            val confirm: suspend (String) -> Boolean = { check ->
+                val answer = CompletableDeferred<Boolean>()
+                checks[address] = device.name to answer
+
+                try {
+                    answer.await()
+                } finally {
+                    checks.remove(address)
+                }
+            }
+
             try {
-                sendMap(address, device.key, host.name, bundle) { state -> states[address] = state }
+                sendMap(address, device.key, device.version, host.name, bundle, confirm) { sent -> states[address] = sent }
             } finally {
                 bundle.delete()
             }
@@ -163,7 +184,7 @@ fun SendSheet(mapId: String, title: String, onDismiss: () -> Unit) {
                     leadingContent = { Icon(Icons.Outlined.TabletAndroid, contentDescription = null) },
                     trailingContent = {
                         when (states[device.address]) {
-                            is SendState.Sending, is SendState.Waiting -> LoadingIndicator(Modifier.size(28.dp))
+                            is SendState.Sending, is SendState.Confirming, is SendState.Waiting -> LoadingIndicator(Modifier.size(28.dp))
                             is SendState.Opened -> Icon(
                                 Icons.Outlined.CheckCircle,
                                 contentDescription = stringResource(R.string.nearby_opened),
@@ -185,12 +206,31 @@ fun SendSheet(mapId: String, title: String, onDismiss: () -> Unit) {
             SectionTitle(stringResource(R.string.nearby_other_ways))
             ListItem(
                 headlineContent = { Text(stringResource(R.string.nearby_share_as_a_file)) },
-                supportingContent = { Text(stringResource(R.string.nearby_share_as_a_file_description)) },
+                supportingContent = {
+                    if (sharingFailed) {
+                        Text(
+                            stringResource(R.string.nearby_send_could_not_get_the_map_ready),
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                        )
+                    } else {
+                        Text(stringResource(R.string.nearby_share_as_a_file_description))
+                    }
+                },
                 leadingContent = { Icon(Icons.Outlined.Share, contentDescription = null) },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 modifier = Modifier.clickable {
                     scope.launch {
-                        val uri = exportFile(context, exportName(context, title, "zip")) { container.maps.writeZip(mapId, it) }
+                        sharingFailed = false
+
+                        // The zip waits in the phone's storage for the app it goes to, and the phone may be out of room.
+                        val uri = try {
+                            exportFile(context, exportName(context, title, "zip")) { container.maps.writeZip(mapId, it) }
+                        } catch (failed: IOException) {
+                            sharingFailed = true
+                            return@launch
+                        }
+
                         shareFile(context, uri, "application/zip", title)
                     }
                 },
@@ -202,6 +242,16 @@ fun SendSheet(mapId: String, title: String, onDismiss: () -> Unit) {
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 modifier = Modifier.clickable { computer = true },
             )
+        }
+    }
+
+    // One device's code at a time: each waits for the person sending to compare it with what that device shows.
+    checks.entries.firstOrNull()?.let { (address, waiting) ->
+        val (name, answer) = waiting
+        val check = (states[address] as? SendState.Confirming)?.check
+
+        if (check != null) {
+            CheckCodeDialog(name, check) { matches -> answer.complete(matches) }
         }
     }
 
@@ -239,6 +289,12 @@ private fun SectionTitle(text: String) {
 private fun describe(state: SendState?): AnnotatedString? = when (state) {
     null -> null
     SendState.Sending -> AnnotatedString(stringResource(R.string.nearby_sending))
+    // Both devices show the code before anything of the map goes.
+    is SendState.Confirming -> withStyledPart(
+        stringResource(R.string.nearby_check_that_it_shows, state.check),
+        state.check,
+        SpanStyle(fontWeight = FontWeight.SemiBold),
+    )
     // The same code shows beside the map there: when it matches, the map reached the device in front of them.
     is SendState.Waiting -> withStyledPart(
         stringResource(R.string.nearby_other_device_should_show, state.check),
@@ -247,14 +303,54 @@ private fun describe(state: SendState?): AnnotatedString? = when (state) {
     )
     SendState.Opened -> AnnotatedString(stringResource(R.string.nearby_opened_there))
     SendState.Declined -> AnnotatedString(stringResource(R.string.nearby_not_taken))
+    SendState.Cancelled -> AnnotatedString(stringResource(R.string.nearby_not_sent))
     is SendState.Failed -> AnnotatedString(stringResource(state.reason))
 }
+
+/**
+ * Asks the person sending whether `device` shows the same code as this one,
+ * before anything of the map goes: when it doesn't, another device on the
+ * Wi-Fi answered in its place, and it gets nothing.
+ */
+@Composable
+private fun CheckCodeDialog(device: String, check: String, onAnswer: (matches: Boolean) -> Unit) {
+    AlertDialog(
+        onDismissRequest = { onAnswer(false) },
+        icon = {
+            EscapeCloses { onAnswer(false) }
+            Icon(Icons.Outlined.Pin, contentDescription = null)
+        },
+        title = { Text(stringResource(R.string.nearby_check_the_code_title, device)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    check,
+                    style = MaterialTheme.typography.displayMedium.copy(fontFeatureSettings = "tnum"),
+                    // Read out digit by digit, as people compare them.
+                    modifier = Modifier.semantics { contentDescription = check.toList().joinToString(" ") },
+                )
+                Text(stringResource(R.string.nearby_check_the_code_explanation), style = MaterialTheme.typography.bodyMedium)
+            }
+        },
+        confirmButton = { TextButton(onClick = { onAnswer(true) }) { Text(stringResource(R.string.nearby_yes_send)) } },
+        dismissButton = { TextButton(onClick = { onAnswer(false) }) { Text(stringResource(R.string.common_cancel)) } },
+    )
+}
+
+/** The address typed for another device, a host and its port, or null when it can't be one. */
+internal fun typedAddress(typed: String): String? {
+    val address = typed.trim()
+    val port = address.substringAfterLast(':').toIntOrNull()
+    return address.takeIf { TYPED_ADDRESS.matches(it) && port != null && port in PORTS }
+}
+
+private val TYPED_ADDRESS = Regex("[A-Za-z0-9.-]+:[0-9]{2,5}")
 
 /** For networks where devices can't find each other: the address the other device shows in its settings. */
 @Composable
 private fun AddressDialog(onSend: (String) -> Unit, onDismiss: () -> Unit) {
     var address by remember { mutableStateOf("") }
-    val valid = Regex("[A-Za-z0-9.-]+:[0-9]{2,5}").matches(address.trim())
+    val valid = typedAddress(address) != null
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = {
@@ -277,7 +373,7 @@ private fun AddressDialog(onSend: (String) -> Unit, onDismiss: () -> Unit) {
                 )
             }
         },
-        confirmButton = { TextButton(onClick = { onSend(address.trim()) }, enabled = valid) { Text(stringResource(R.string.nearby_send)) } },
+        confirmButton = { TextButton(onClick = { typedAddress(address)?.let(onSend) }, enabled = valid) { Text(stringResource(R.string.nearby_send)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) } },
     )
 }
@@ -300,7 +396,7 @@ private fun ComputerDialog(mapId: String, onDismiss: () -> Unit) {
     }
 
     DisposableEffect(shared) { onDispose { host.unshare(shared.code) } }
-    val address = remember(shared) { host.address()?.let { "http://$it/${shared.code}" } }
+    val address = rememberAddress(shared) { host.address()?.let { "http://$it/${shared.code}" } }
     val opened = remember { System.currentTimeMillis() }
     val lockedOut by host.lockedOut.collectAsState()
     AlertDialog(

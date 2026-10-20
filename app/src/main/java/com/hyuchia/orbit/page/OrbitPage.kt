@@ -21,6 +21,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import androidx.core.net.toUri
+import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebResourceErrorCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
@@ -37,6 +38,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -51,6 +53,21 @@ const val AUDIENCE_URL = "https://$PAGE_HOST/assets/map/audience.html"
 /** Where a map's pictures are served from: its folder, as `baseUrl` for Orbit. */
 fun mapBaseUrl(mapId: String): String = "https://$PAGE_HOST$MAPS_PATH$mapId/"
 
+/** The players the audience's page frames for a map's YouTube and Vimeo videos, as Orbit's media viewer embeds them. */
+private const val PLAYER_FRAMES = "https://www.youtube-nocookie.com https://player.vimeo.com"
+
+/**
+ * What the app's pages may load: their own scripts and nothing else to run,
+ * no plugins and no forms; their own styles; pictures, videos and fonts of
+ * their own or from the web; and YouTube's and Vimeo's players, framed.
+ * Whatever is at an `http` address is asked for over `https`: WebView would
+ * otherwise refuse a map's picture there, since nothing goes over the web
+ * in the clear.
+ */
+internal const val PAGE_POLICY = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' https: data: blob:; media-src 'self' https: blob:; font-src 'self' data:; connect-src 'self' https: data: blob:; " +
+    "frame-src $PLAYER_FRAMES; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests"
+
 /** A job the page couldn't do. */
 class PageException(message: String) : Exception(message)
 
@@ -59,9 +76,12 @@ class PageException(message: String) : Exception(message)
  * ahead of time by [PagePool], so a map draws as soon as it opens; the
  * context wrapper lets a page made before any screen move into one.
  *
- * The page says hello when its script runs; commands sent before then wait.
- * Everything here runs on the main thread. `pageUrl` is the map's page, or
- * the audience's ([AUDIENCE_URL]). Either speaks the app's language ([speak]).
+ * The page says hello when its script runs, on the `orbitNative` channel
+ * the app adds; commands go back to it on the same channel, as messages it
+ * reads as JSON, never as code to run. Commands sent before the hello wait
+ * ([WaitingCommands]). Everything here runs on the main thread. `pageUrl` is
+ * the map's page, or the audience's ([AUDIENCE_URL]). Either speaks the
+ * app's language ([speak]).
  */
 class OrbitPage internal constructor(private val application: Context, mapsDirectory: File, private val pageUrl: String = PAGE_URL) {
     /** The page's path: the only one of the app's own this view loads as a page. */
@@ -69,9 +89,29 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
 
     private val context = MutableContextWrapper(application)
     private var ready = false
-    private val waiting = mutableListOf<String>()
+    private val waiting = WaitingCommands()
     private var nextJob = 1
     private val jobs = mutableMapOf<Int, CompletableDeferred<JsonElement?>>()
+
+    /** Where commands go once the page said hello: back to its own frame, on the channel it said hello on. */
+    private var channel: JavaScriptReplyProxy? = null
+
+    /** The map the page draws, whose pictures it shows. */
+    private var showing: String? = null
+
+    /** The map whose pictures the audience's page shows, while it shows one. */
+    private var audienceMap: String? = null
+
+    /** The maps jobs are drawing pictures of, by job, while they do. */
+    private val jobMaps = mutableMapOf<Int, String>()
+
+    /**
+     * The maps whose pictures and videos the page may load: the one it shows,
+     * and the ones it's drawing pictures of. Read as files are asked for, off
+     * the main thread.
+     */
+    @Volatile
+    private var readableMaps: Set<String> = emptySet()
 
     /** Who hears the page's messages: the screen showing it. */
     var listener: ((MapMessage) -> Unit)? = null
@@ -112,17 +152,33 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
     }
 
     fun send(command: MapCommand) {
-        when (command) {
+        send(command, job = null)
+    }
+
+    /** Sends a command: `job` is its number, for a job's. */
+    private fun send(command: MapCommand, job: Int?) {
+        val kind = when (command) {
             is MapCommand.Load -> {
                 expectedMap = command.mapId
+                showing = command.mapId ?: mapIdOf(command.baseUrl)
                 // Read in the language the app speaks now: a map that's just a list gets its top idea named in it.
                 speak()
+                WaitingCommands.Kind.NewMap
             }
-            MapCommand.Unload -> expectedMap = null
-            else -> Unit
+            MapCommand.Unload -> {
+                expectedMap = null
+                showing = null
+                WaitingCommands.Kind.NewMap
+            }
+            else -> if (job != null) WaitingCommands.Kind.Job else WaitingCommands.Kind.Map
         }
 
-        sendEncoded(protocolJson.encodeToString(MapCommand.serializer(), command))
+        updateReadableMaps()
+        sendEncoded(protocolJson.encodeToString(MapCommand.serializer(), command), kind, job)
+    }
+
+    private fun updateReadableMaps() {
+        readableMaps = setOfNotNull(showing, audienceMap) + jobMaps.values
     }
 
     /**
@@ -141,24 +197,47 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
         }
 
         spoken = words
-        sendEncoded(protocolJson.encodeToString(LanguageCommand.serializer(), LanguageCommand(words)))
+        sendEncoded(protocolJson.encodeToString(LanguageCommand.serializer(), LanguageCommand(words)), WaitingCommands.Kind.Words)
     }
 
     fun send(command: AudienceCommand) {
-        sendEncoded(protocolJson.encodeToString(AudienceCommand.serializer(), command))
+        val kind = when (command) {
+            is AudienceCommand.Show -> {
+                audienceMap = mapIdOf(command.baseUrl)
+                WaitingCommands.Kind.NewMap
+            }
+            AudienceCommand.End -> {
+                audienceMap = null
+                WaitingCommands.Kind.NewMap
+            }
+            else -> WaitingCommands.Kind.Map
+        }
+
+        updateReadableMaps()
+        sendEncoded(protocolJson.encodeToString(AudienceCommand.serializer(), command), kind)
     }
 
-    private fun sendEncoded(encoded: String) {
-        if (!isAlive || !drawsMaps) {
+    /** Sends a command now, or once the page says hello. A page that didn't load never will, so nothing waits for it. */
+    private fun sendEncoded(encoded: String, kind: WaitingCommands.Kind, job: Int? = null) {
+        if (!isAlive || !drawsMaps || loadFailed) {
             return
         }
 
-        if (!ready) {
-            waiting += encoded
+        val channel = channel
+
+        if (!ready || channel == null) {
+            waiting.add(encoded, kind, job)
             return
         }
 
-        webView.evaluateJavascript("window.orbitApp.receive($encoded)", null)
+        post(channel, encoded)
+    }
+
+    /** Sends a command on the page's channel, which exists only where WebView has message listeners: the page loads nowhere else. */
+    private fun post(channel: JavaScriptReplyProxy, encoded: String) {
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            channel.postMessage(encoded)
+        }
     }
 
     /** Sends a job and waits for its answer. */
@@ -180,15 +259,26 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
         jobs[job] = result
         // Pictures, conversions and ideas caught on the go name what they make up, and say what went wrong, in the app's language.
         speak()
-        send(command(job))
+        val sent = command(job)
+
+        // A picture of a map loads that map's pictures, and only while it's being drawn.
+        (sent as? MapCommand.Snapshot)?.baseUrl?.let(::mapIdOf)?.let { jobMaps[job] = it }
 
         // An answer that never comes (a message lost, a page stuck) is given up on, rather than waited for forever.
         val value = try {
+            send(sent, job)
             withTimeout(REQUEST_TIMEOUT) { result.await() }
         } catch (late: TimeoutCancellationException) {
-            jobs.remove(job)
             Logs.warn(TAG, "The page didn't answer job $job in $REQUEST_TIMEOUT")
             throw PageException(application.getString(R.string.page_did_not_answer))
+        } finally {
+            // Answered, given up on, or no longer wanted by whoever asked: a job left behind would keep the page busy for good.
+            jobs.remove(job)
+            waiting.forget(job)
+
+            if (jobMaps.remove(job) != null) {
+                updateReadableMaps()
+            }
         }
 
         return protocolJson.decodeFromJsonElement(answer, value ?: throw PageException(application.getString(R.string.page_sent_nothing_back)))
@@ -224,7 +314,7 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
 
     fun destroy() {
         detach()
-        failJobs(application.getString(R.string.page_closed))
+        abandon(application.getString(R.string.page_closed))
         destroyView()
         isAlive = false
         listener = null
@@ -292,18 +382,18 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
         focusWaiter = null
     }
 
-    private fun receive(data: String) {
+    private fun receive(data: String, replyProxy: JavaScriptReplyProxy) {
         val element = try {
             protocolJson.parseToJsonElement(data).jsonObject
         } catch (error: IllegalArgumentException) {
-            Logs.warn(TAG, "Unreadable message from the page", error)
+            unreadable(null, error)
             return
         }
 
         val message = try {
             protocolJson.decodeFromJsonElement(MapMessage.serializer(), element)
         } catch (error: IllegalArgumentException) {
-            Logs.warn(TAG, "Unreadable message from the page", error)
+            unreadable(element, error)
             return
         }
 
@@ -316,8 +406,9 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
 
         when (message) {
             MapMessage.Hello -> {
+                channel = replyProxy
                 ready = true
-                waiting.toList().also { waiting.clear() }.forEach { webView.evaluateJavascript("window.orbitApp.receive($it)", null) }
+                waiting.take().forEach { post(replyProxy, it) }
             }
             is MapMessage.Result -> {
                 val job = jobs.remove(message.job) ?: return
@@ -338,9 +429,22 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
         listener?.invoke(message)
     }
 
-    private fun failJobs(reason: String) {
+    /**
+     * A message the app can't read, which means it and its pages disagree on
+     * what they say (ProtocolTest checks they don't): a save in it would be
+     * lost, so it's an error in every build. Release builds log its kind
+     * alone, since the rest can be a map's text.
+     */
+    private fun unreadable(element: JsonObject?, error: IllegalArgumentException) {
+        Logs.error(TAG, "The page sent a ${messageKind(element)} message the app can't read")
+        Logs.warn(TAG, "Unreadable message from the page", error)
+    }
+
+    /** The page will do nothing more: every job fails with `reason`, and nothing waits for a hello that won't come. */
+    private fun abandon(reason: String) {
         jobs.values.forEach { it.completeExceptionally(PageException(reason)) }
         jobs.clear()
+        waiting.clear()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -350,9 +454,8 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(application))
             // The app's font, for the map: res/font/google_sans_flex.ttf is /res/font/google_sans_flex.ttf.
             .addPathHandler("/res/", WebViewAssetLoader.ResourcesPathHandler(application))
-            .addPathHandler(MAPS_PATH, WebViewAssetLoader.InternalStoragePathHandler(application, mapsDirectory))
             .build()
-        val parts = MapFileParts(mapsDirectory)
+        val files = MapFiles(mapsDirectory)
 
         return WebView(context).apply {
             // The page is transparent: Compose paints the background, so there is never a white flash.
@@ -385,14 +488,14 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
             settings.setNeedInitialFocus(false)
             // Pages work while no screen shows them: thumbnails are drawn off screen.
             setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
-            webViewClient = PageClient(assets, parts)
+            webViewClient = PageClient(assets, files)
             webChromeClient = QuietChrome(players = pageUrl == AUDIENCE_URL)
 
             if (drawsMaps && WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
                 // Only the page itself talks to the app: a frame inside it, even one of the app's own files, doesn't.
-                WebViewCompat.addWebMessageListener(this, "orbitNative", setOf("https://$PAGE_HOST")) { _, message, _, isMainFrame, _ ->
+                WebViewCompat.addWebMessageListener(this, "orbitNative", setOf("https://$PAGE_HOST")) { _, message, _, isMainFrame, replyProxy ->
                     if (isMainFrame) {
-                        message.data?.let(::receive)
+                        message.data?.let { receive(it, replyProxy) }
                     }
                 }
 
@@ -440,13 +543,24 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
     }
 
     /**
-     * Serves the page and maps' pictures and videos, a video the parts it
-     * asks for, sends other links out, and survives the page's process stopping.
+     * Serves the page, with its content policy, and the pictures and videos
+     * of the maps it draws, a video the parts it asks for; sends other links
+     * out, and survives the page's process stopping.
      */
-    private inner class PageClient(private val assets: WebViewAssetLoader, private val parts: MapFileParts) : WebViewClientCompat() {
+    private inner class PageClient(private val assets: WebViewAssetLoader, private val files: MapFiles) : WebViewClientCompat() {
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-            val range = request.requestHeaders?.entries?.firstOrNull { it.key.equals("Range", ignoreCase = true) }?.value
-            return range?.let { parts.answer(request.url, it) } ?: assets.shouldInterceptRequest(request.url)
+            val url = request.url
+
+            if (url.host == PAGE_HOST && url.path.orEmpty().startsWith(MAPS_PATH)) {
+                val range = request.requestHeaders?.entries?.firstOrNull { it.key.equals("Range", ignoreCase = true) }?.value
+                return files.answer(url, range) { it in readableMaps }
+            }
+
+            val response = assets.shouldInterceptRequest(url) ?: return null
+            // The page itself comes with what it may load; nothing of the app's is ever read as another type than its own.
+            val policy = if (request.isForMainFrame && url.path == pagePath) mapOf("Content-Security-Policy" to PAGE_POLICY) else emptyMap()
+            response.responseHeaders = response.responseHeaders.orEmpty() + policy + ("X-Content-Type-Options" to "nosniff")
+            return response
         }
 
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -479,7 +593,8 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
             Logs.warn(TAG, "The page's process stopped (crashed: ${detail.didCrash()})")
             isAlive = false
             ready = false
-            failJobs(application.getString(R.string.page_stopped))
+            channel = null
+            abandon(application.getString(R.string.page_stopped))
             stopWaitingForFocus()
             (view.parent as? ViewGroup)?.removeView(view)
             destroyView()
@@ -493,7 +608,7 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
                 val code = if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_RESOURCE_ERROR_GET_CODE)) error.errorCode else null
                 Logs.warn(TAG, "The page didn't load (error $code)")
                 loadFailed = true
-                failJobs(application.getString(R.string.page_did_not_load))
+                abandon(application.getString(R.string.page_did_not_load))
             }
         }
     }
@@ -506,8 +621,15 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
     }
 }
 
+/** A message's kind (`saved`, say), or `unknown` for anything that isn't one of the protocol's words, so a log never holds a map's text. */
+internal fun messageKind(element: JsonObject?): String =
+    (element?.get("type") as? JsonPrimitive)?.contentOrNull?.takeIf { it.matches(MESSAGE_KIND) } ?: "unknown"
+
+/** What the protocol's kinds of messages look like: a word or two, run together. */
+private val MESSAGE_KIND = Regex("[A-Za-z]{1,32}")
+
 /** The activity a context belongs to, through the wrappers around it. */
-private tailrec fun Context.findActivity(): Activity? = when (this) {
+internal tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null

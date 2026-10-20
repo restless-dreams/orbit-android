@@ -7,6 +7,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -19,15 +23,19 @@ import androidx.compose.material3.adaptive.navigation3.rememberListDetailSceneSt
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavKey
@@ -43,12 +51,14 @@ import com.hyuchia.orbit.home.NewMapScreen
 import com.hyuchia.orbit.map.MapScreen
 import com.hyuchia.orbit.nearby.Arrival
 import com.hyuchia.orbit.nearby.ArrivalDialog
+import com.hyuchia.orbit.nearby.IncomingDialog
 import com.hyuchia.orbit.settings.AboutScreen
 import com.hyuchia.orbit.settings.LicensesScreen
 import com.hyuchia.orbit.settings.PrivacyScreen
 import com.hyuchia.orbit.settings.SettingsScreen
 import com.hyuchia.orbit.settings.TrashScreen
 import com.hyuchia.orbit.ui.EscapeCloses
+import com.hyuchia.orbit.ui.orbitViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -81,6 +91,19 @@ data object PrivacyKey : NavKey
 @Serializable
 data object LicensesKey : NavKey
 
+/**
+ * What came in and waits for an answer or a look: why a file couldn't be
+ * opened, what a zip or another app's map brought, a map that's here
+ * already. Kept while the window is made again for a new language or font
+ * size, as `remember` isn't, so the question never goes unanswered.
+ */
+class Arrivals : ViewModel() {
+    var problem by mutableStateOf<String?>(null)
+    var many by mutableStateOf<ImportResult.ImportedMany?>(null)
+    var notes by mutableStateOf<List<String>?>(null)
+    var alreadyHere by mutableStateOf<ImportResult.AlreadyHere?>(null)
+}
+
 /** What shortcuts and other apps ask Orbit to do. */
 sealed interface AppRequest {
     data class OpenMap(val id: String) : AppRequest
@@ -104,9 +127,13 @@ fun OrbitApp(requests: Flow<AppRequest>) {
     val container = context.container
     val scope = rememberCoroutineScope()
     val backStack = rememberNavBackStack(HomeKey)
-    var importProblem by remember { mutableStateOf<String?>(null) }
+    val arrivals = orbitViewModel { Arrivals() }
+    var importProblem by arrivals::problem
     // What a zip of maps brought in.
-    var importedMany by remember { mutableStateOf<ImportResult.ImportedMany?>(null) }
+    var importedMany by arrivals::many
+
+    // What a map from another app had that Orbit keeps another way, or couldn't keep, said once it's open.
+    var importNotes by arrivals::notes
     // A map with a panel beside it, its text or a presentation open takes the whole window: the list steps aside.
     var mapWantsRoom by remember { mutableStateOf(false) }
     val adaptiveInfo = currentWindowAdaptiveInfo()
@@ -158,11 +185,14 @@ fun OrbitApp(requests: Flow<AppRequest>) {
     }
 
     // A file of a map that's already here waits for an answer: update it, or keep both.
-    var alreadyHere by remember { mutableStateOf<ImportResult.AlreadyHere?>(null) }
+    var alreadyHere by arrivals::alreadyHere
 
     fun imported(result: ImportResult) {
         when (result) {
-            is ImportResult.Imported -> openMap(result.id)
+            is ImportResult.Imported -> {
+                openMap(result.id)
+                importNotes = result.notes.ifEmpty { null }
+            }
             is ImportResult.ImportedMany -> importedMany = result
             is ImportResult.AlreadyHere -> alreadyHere = result
             is ImportResult.Failed -> importProblem = result.reason
@@ -247,6 +277,27 @@ fun OrbitApp(requests: Flow<AppRequest>) {
 
     // Maps from nearby devices, one at a time, and a file of a map that's already here.
     val offers by container.nearby.offers.collectAsStateWithLifecycle()
+    val incoming by container.nearby.incoming.collectAsStateWithLifecycle()
+    val olderSender by container.nearby.olderSender.collectAsStateWithLifecycle()
+    var olderSenderSeen by rememberSaveable { mutableLongStateOf(olderSender) }
+
+    // Before a map comes, the code it'll come with: the person sending compares it with theirs.
+    incoming.firstOrNull()?.takeIf { offers.isEmpty() }?.let { coming ->
+        IncomingDialog(coming) { container.nearby.decline(coming) }
+    }
+
+    // An Orbit too old to check codes before sending tried to send a map, which this one doesn't take: the phone says why.
+    if (olderSender > olderSenderSeen) {
+        AlertDialog(
+            onDismissRequest = { olderSenderSeen = olderSender },
+            title = {
+                EscapeCloses { olderSenderSeen = olderSender }
+                Text(stringResource(R.string.nearby_older_sender_title))
+            },
+            text = { Text(stringResource(R.string.nearby_older_sender_text)) },
+            confirmButton = { TextButton(onClick = { olderSenderSeen = olderSender }) { Text(stringResource(R.string.main_ok)) } },
+        )
+    }
 
     offers.firstOrNull()?.let { offer ->
         ArrivalDialog(offer.from, offer.bundle, alreadyHere = offer.existing != null, address = offer.address, check = offer.check) { answer ->
@@ -290,17 +341,33 @@ fun OrbitApp(requests: Flow<AppRequest>) {
                 Text(stringResource(if (result.added == 0) R.string.main_nothing_new else R.string.main_maps_added))
             },
             text = {
-                Text(
-                    when {
-                        result.added == 0 && result.alreadyHere == 0 -> stringResource(R.string.main_no_maps_in_zip)
-                        result.added == 0 -> stringResource(R.string.main_every_map_in_zip_already_here)
-                        result.alreadyHere == 0 -> pluralStringResource(R.plurals.common_added_maps, result.added, result.added)
-                        result.alreadyHere == 1 -> pluralStringResource(R.plurals.common_added_maps_with_one_already_here, result.added, result.added)
-                        else -> pluralStringResource(R.plurals.common_added_maps_with_several_already_here, result.added, result.added, result.alreadyHere)
-                    },
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        when {
+                            result.added == 0 && result.alreadyHere == 0 -> stringResource(R.string.main_no_maps_in_zip)
+                            result.added == 0 -> stringResource(R.string.main_every_map_in_zip_already_here)
+                            result.alreadyHere == 0 -> pluralStringResource(R.plurals.common_added_maps, result.added, result.added)
+                            result.alreadyHere == 1 -> pluralStringResource(R.plurals.common_added_maps_with_one_already_here, result.added, result.added)
+                            else -> pluralStringResource(R.plurals.common_added_maps_with_several_already_here, result.added, result.added, result.alreadyHere)
+                        },
+                    )
+
+                    ImportNotes(result.notes)
+                }
             },
             confirmButton = { TextButton(onClick = { importedMany = null }) { Text(stringResource(R.string.main_ok)) } },
+        )
+    }
+
+    importNotes?.let { notes ->
+        AlertDialog(
+            onDismissRequest = { importNotes = null },
+            title = {
+                EscapeCloses { importNotes = null }
+                Text(stringResource(R.string.main_import_notes_title))
+            },
+            text = { ImportNotes(notes) },
+            confirmButton = { TextButton(onClick = { importNotes = null }) { Text(stringResource(R.string.main_ok)) } },
         )
     }
 
@@ -314,5 +381,13 @@ fun OrbitApp(requests: Flow<AppRequest>) {
             text = { Text(reason) },
             confirmButton = { TextButton(onClick = { importProblem = null }) { Text(stringResource(R.string.main_ok)) } },
         )
+    }
+}
+
+/** What maps from another app had that Orbit keeps another way, or couldn't keep: a line each. */
+@Composable
+private fun ImportNotes(notes: List<String>) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
+        notes.forEach { note -> Text("• $note") }
     }
 }

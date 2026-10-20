@@ -1,5 +1,6 @@
 package com.hyuchia.orbit.nearby
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
@@ -22,9 +23,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.net.InetAddress
 import java.net.URLEncoder
 import java.security.KeyPair
 import java.util.UUID
@@ -34,8 +35,12 @@ import java.util.concurrent.ConcurrentHashMap
 private const val PORT = 8766
 /** How long an offer waits for an answer before it's dropped. */
 private const val OFFER_LIFETIME_MILLISECONDS = 10 * 60 * 1000L
-/** How long an offer that arrived waits for the sender's half of its check code, which the sender sends at once. */
+/** How long an offer's hello waits for the sender's half of its check code, which the sender sends at once. */
 private const val ARRIVING_LIFETIME_MILLISECONDS = 60 * 1000L
+/** How long a device that showed its check code waits for the map, while the person sending checks the codes. */
+const val CONFIRMING_LIFETIME_MILLISECONDS = 3 * 60 * 1000L
+/** Room a map has to leave on this device, besides itself, for it to be taken: nothing fills the storage to the brim. */
+private const val SPARE_SPACE = 32L * 1024 * 1024
 /** Sender keys remembered this launch, so an offer copied off the network can't be sent here again. */
 private const val SENDER_KEYS_REMEMBERED = 1_000
 /** Offers one device may have waiting here at once. */
@@ -46,7 +51,7 @@ private const val OFFERS_WAITING = 3
 const val SENDER_NAME_LENGTH = 40
 /** The longest name an advertisement carries: a DNS label, in bytes. */
 private const val SERVICE_NAME_BYTES = 63
-/** The most any request but a map's sends: a shared map's join form, with a name and a PIN, or a sender's half of a check code. */
+/** The most any request but a map's sends: an offer's hello, a shared map's join form, with a name and a PIN, or a sender's half of a check code. */
 private const val FORM_LIMIT = 4L * 1024
 /** Shares that ended, kept so their browsers hear it ended rather than that the code is wrong. */
 private const val ENDED_SHARES = 16
@@ -61,9 +66,12 @@ const val SERVICE_TYPE = "_orbit._tcp."
 const val SERVICE_ID = "id"
 /** The advertisement's attribute with the key maps sent to this launch of Orbit are sealed to. */
 const val SERVICE_KEY = "key"
+/** The advertisement's attribute with the version of offers this launch of Orbit takes, [OFFER_VERSION]. Orbit 0.2.0 and earlier have none. */
+const val SERVICE_VERSION = "version"
 
-/** What the advertisement carries besides the name: this launch's id, and its key for offers. */
-internal fun serviceAttributes(selfId: String, key: DeviceKey): Map<String, String> = mapOf(SERVICE_ID to selfId, SERVICE_KEY to key.text)
+/** What the advertisement carries besides the name: this launch's id, its key for offers, and the version they're made with. */
+internal fun serviceAttributes(selfId: String, key: DeviceKey): Map<String, String> =
+    mapOf(SERVICE_ID to selfId, SERVICE_KEY to key.text, SERVICE_VERSION to OFFER_VERSION.toString())
 
 /**
  * A map another device offered, waiting for an answer here: what it is
@@ -75,7 +83,18 @@ internal fun serviceAttributes(selfId: String, key: DeviceKey): Map<String, Stri
  */
 class Offer(val id: String, val from: String, val address: String, val bundle: MapBundle, val existing: String?, internal val file: File, val check: String)
 
-enum class OfferState { Waiting, Opened, Declined }
+/**
+ * A map on its way from another device, which says it's `from` and is at
+ * `address`: both devices show `check`, and the map comes once the person
+ * sending sees the codes match. It's an [Offer] once it arrives.
+ */
+class Incoming internal constructor(val id: String, val from: String, val address: String, val check: String, internal val session: OfferSession) {
+    /** Whether the map is arriving now: only one upload at a time. */
+    internal var uploading = false
+}
+
+/** Where an offer is, as `GET /offer/<id>` says: its code shown and the map on its way, the map waiting for an answer, or answered. */
+enum class OfferState { Confirming, Waiting, Opened, Declined }
 
 /** A map shown to computers' browsers at a code, and who may open it. */
 class SharedMap internal constructor(val code: String, internal val mapId: String, internal val theme: AppTheme, val joining: Joining)
@@ -166,8 +185,10 @@ class NearbyHost internal constructor(
     private val scope: CoroutineScope,
     policy: ConnectionPolicy,
     private val words: Words,
+    private val listenOn: () -> List<InetAddress>?,
 ) {
-    constructor(context: Context, maps: MapRepository, scope: CoroutineScope) : this(context, maps, scope, RoomNetworks(), ResourceWords(context))
+    constructor(context: Context, maps: MapRepository, scope: CoroutineScope) :
+        this(context, maps, scope, RoomNetworks(), ResourceWords(context), ::roomAddresses)
 
     /** This launch of Orbit, so it doesn't list itself among nearby devices: new each launch, so it can't follow the device around. */
     val selfId: String = UUID.randomUUID().toString()
@@ -191,15 +212,21 @@ class NearbyHost internal constructor(
     val key: DeviceKey by lazy { DeviceKey.of(keys) }
 
     private val offersFolder = File(context.cacheDir, "offers")
-    // Only a map sent here is big: a shared map's join form and a sender's half of a check code are a few lines.
+
+    /** The zips of shared maps on their way to browsers. */
+    private val sharedFolder = File(context.cacheDir, "shared-maps")
+
+    // Only a map sent here is big: an offer's hello, a shared map's join form and a sender's half of a check code are a few lines.
     private val server = LocalServer(
-        bodyLimit = { method, path -> if (method == "POST" && path == "/offer") OFFER_LIMIT else FORM_LIMIT },
+        bodyLimit = { method, path -> if (method == "POST" && isMapUpload(path)) OFFER_LIMIT else FORM_LIMIT },
         spool = offersFolder,
         policy = policy,
+        admit = ::admit,
     ) { answer(it) }
     private val guard = CodeGuard()
     private val waiting = MutableStateFlow<List<Offer>>(emptyList())
-    private val listeningNow = MutableStateFlow(false)
+    private val announced = MutableStateFlow<List<Incoming>>(emptyList())
+    private val olderSenders = MutableStateFlow(0L)
     private val states = ConcurrentHashMap<String, OfferState>()
     private val arriving = ConcurrentHashMap<String, Arriving>()
 
@@ -214,31 +241,35 @@ class NearbyHost internal constructor(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Joining>?): Boolean = size > ENDED_SHARES
     }
     private var advertisement: NsdManager.RegistrationListener? = null
+    private var advertisedPort = 0
     private var onScreen = false
     private var accepting = false
 
     /** Maps offered here, oldest first, waiting for an answer. */
     val offers: StateFlow<List<Offer>> = waiting.asStateFlow()
 
+    /** Maps on their way here, oldest first: both devices show their codes, and the maps come once the people sending check them. */
+    val incoming: StateFlow<List<Incoming>> = announced.asStateFlow()
+
+    /** When a device with an Orbit too old to check codes first last tried to send a map here, or 0: for the phone to say so. */
+    val olderSender: StateFlow<Long> = olderSenders.asStateFlow()
+
     /** When a device was last kept from guessing a share's code, or 0: for the phone to say so. */
     val lockedOut: StateFlow<Long> = guard.lockedOut
 
     /** Whether other devices can reach this one now, at [address]. */
-    val listening: StateFlow<Boolean> = listeningNow.asStateFlow()
+    val listening: StateFlow<Boolean> = server.listening
 
     /**
-     * An offer that opened whole, until the sender's half of its check code
-     * arrives: only then is it shown, with the code. It holds a place under
-     * the limits until then, and to the end of its time when the half is
-     * wrong, so no one can try offer after offer for a code that matches.
+     * An offer's hello, opened whole, until the sender's half of its check
+     * code arrives: only then do both devices show the code. It holds a
+     * place under the limits until then, and to the end of its time when the
+     * half is wrong, so no one can try hello after hello for a code that matches.
      */
     private class Arriving(
         val id: String,
         val from: String,
         val address: String,
-        val bundle: MapBundle,
-        val existing: String?,
-        val file: File,
         val session: OfferSession,
         val commitment: ByteArray,
         val receiverNonce: ByteArray,
@@ -249,8 +280,9 @@ class NearbyHost internal constructor(
 
     init {
         scope.launch(Dispatchers.IO) {
-            // Offers that waited when Orbit last stopped, and the lasting id earlier versions kept.
+            // Offers that waited when Orbit last stopped, shared maps it was sending, and the lasting id earlier versions kept.
             offersFolder.listFiles().orEmpty().forEach { it.delete() }
+            sharedFolder.listFiles().orEmpty().forEach { it.delete() }
             File(context.filesDir, "nearby-id").delete()
         }
     }
@@ -279,23 +311,26 @@ class NearbyHost internal constructor(
         refresh()
     }
 
-    /** Listens while there's something to listen for, and advertises while offers are welcome. */
+    /**
+     * Listens while there's something to listen for, on the room's networks
+     * alone, and advertises while offers are welcome and it's listening.
+     */
+    @Synchronized
     private fun refresh() {
         val listening = onScreen && (accepting || shares.isNotEmpty())
 
         if (listening) {
-            server.start(PORT)
+            // Joining or leaving a network starts the server again at its new addresses, or stops it: the advertisement follows.
+            server.start(PORT, listenOn) { scope.launch { refresh() } }
         } else {
             server.stop()
         }
 
-        if (listening && accepting) {
+        if (listening && accepting && server.isRunning) {
             advertise()
         } else {
             unadvertise()
         }
-
-        listeningNow.value = server.isRunning
     }
 
     /** Where other devices reach this one, such as 192.168.1.5:8766, while it's listening on a network they can reach. */
@@ -324,6 +359,22 @@ class NearbyHost internal constructor(
 
     fun decline(offer: Offer) {
         settle(offer, OfferState.Declined)
+    }
+
+    /**
+     * Room left where offers are kept. They're written as they arrive, with
+     * nothing set aside first, so only what's free now counts: not caches
+     * the system could clear if room were asked for.
+     */
+    @SuppressLint("UsableSpace")
+    private fun roomForOffers(): Long = context.cacheDir.usableSpace
+
+    /** Refuses a map on its way here: the sender hears it was declined, and sends nothing. */
+    fun decline(incoming: Incoming) {
+        synchronized(opening) {
+            states[incoming.id] = OfferState.Declined
+            announced.update { list -> list.filterNot { it.id == incoming.id } }
+        }
     }
 
     /**
@@ -364,12 +415,70 @@ class NearbyHost internal constructor(
         offer.file.delete()
     }
 
-    private suspend fun answer(request: Request): Response = when {
-        request.method == "GET" && request.path == "/key" -> key()
-        request.method == "POST" && request.path == "/offer" -> offer(request)
-        request.method == "POST" && request.path.startsWith("/offer/") -> reveal(request.path.removePrefix("/offer/"), request)
-        request.method == "GET" && request.path.startsWith("/offer/") -> offerState(request.path.removePrefix("/offer/"))
-        else -> shared(request)
+    private suspend fun answer(request: Request): Response {
+        val parts = offerPath(request.path)
+
+        return when {
+            request.method == "GET" && request.path == "/key" -> key()
+            request.method == "POST" && request.path == "/offer" -> hello(request)
+            parts == null -> shared(request)
+            request.method == "POST" && parts.second == null -> reveal(parts.first, request)
+            request.method == "POST" && parts.second == "map" -> map(parts.first, request)
+            request.method == "POST" && parts.second == "cancel" -> cancel(parts.first, request)
+            request.method == "GET" && parts.second == null -> offerState(parts.first)
+            else -> Response.notFound()
+        }
+    }
+
+    /**
+     * Refuses at once, before reading any of it, an offer this device
+     * wouldn't take: one from an Orbit too old to check codes first, any
+     * while it takes no maps, and a map no device here is waiting for, or
+     * with no room for it.
+     */
+    private fun admit(head: RequestHead): Admission {
+        if (head.method != "POST") {
+            return Admission.Read()
+        }
+
+        if (head.path == "/offer") {
+            val version = head.headers[VERSION_HEADER.lowercase()]?.toIntOrNull()
+
+            if (version != OFFER_VERSION && accepting) {
+                // Orbit 0.2.0 and earlier send the map before the codes are checked: never read, and the phone says why.
+                if (version == null || version < OFFER_VERSION) {
+                    olderSenders.value = System.currentTimeMillis()
+                }
+
+                return Admission.Refuse(Response.text(400, "Update Orbit on the other device: maps sent here are checked first."))
+            }
+
+            return if (accepting) Admission.Read() else Admission.Refuse(Response.text(403, "This device isn't taking maps"))
+        }
+
+        val parts = offerPath(head.path)
+
+        if (parts == null || parts.second != "map") {
+            return Admission.Read()
+        }
+
+        if (!accepting) {
+            return Admission.Refuse(Response.text(403, "This device isn't taking maps"))
+        }
+
+        return synchronized(opening) {
+            val incoming = announced.value.firstOrNull { it.id == parts.first && it.address == head.from }
+
+            when {
+                incoming == null -> Admission.Refuse(Response.notFound())
+                incoming.uploading -> Admission.Refuse(Response.text(409, "The map is on its way already"))
+                roomForOffers() < head.length + SPARE_SPACE -> Admission.Refuse(Response.text(507, "There's no room for the map here"))
+                else -> {
+                    incoming.uploading = true
+                    Admission.Read { synchronized(opening) { incoming.uploading = false } }
+                }
+            }
+        }
     }
 
     /** The key maps sent here are sealed to, for senders without it: an address typed in, or an advertisement out of date. */
@@ -382,65 +491,134 @@ class NearbyHost internal constructor(
     }
 
     /**
-     * A map sealed to this launch's key: opened into the offers folder, it
-     * waits for the sender's half of the check code before it's shown.
-     * Anything not sealed, or that fails to open, is refused.
+     * An offer's hello, sealed to this launch's key: who the sender says it
+     * is, and its commitment to its half of the check code. It waits for
+     * that half before both devices show the code. Anything not sealed, or
+     * that fails to open, is refused.
      */
-    private suspend fun offer(request: Request): Response {
+    private suspend fun hello(request: Request): Response {
         if (!accepting) {
             return Response.text(403, "This device isn't taking maps")
         }
 
-        val sealed = request.headers[VERSION_HEADER.lowercase()] == OFFER_VERSION.toString()
-        val senderKey = (if (sealed) DeviceKey.read(request.headers[KEY_HEADER.lowercase()]) else null)
-            ?: return Response.text(400, "Update Orbit on the other device: maps sent here have to be encrypted.")
+        val senderKey = DeviceKey.read(request.headers[KEY_HEADER.lowercase()])
+            ?: return Response.text(400, "Update Orbit on the other device: maps sent here are checked first.")
         hold(request.from, senderKey)?.let { return it }
         val id = UUID.randomUUID().toString()
-        val file = File(offersFolder, "$id.zip")
         var arrival: Arriving? = null
 
         try {
-            arrival = open(request, senderKey, id, file)
+            arrival = open(request, senderKey, id)
         } catch (unreadable: UnreadableOfferException) {
             // Refused below.
         } finally {
             arrived(request.from, senderKey, arrival)
-
-            if (arrival == null) {
-                file.delete()
-            }
         }
 
-        val opened = arrival ?: return Response.text(400, "The map didn't arrive intact. Send it again.")
+        val opened = arrival ?: return Response.text(400, "The offer didn't arrive intact. Send it again.")
 
         scope.launch {
             delay(ARRIVING_LIFETIME_MILLISECONDS)
-            synchronized(opening) { arriving.remove(id) }?.file?.delete()
+            synchronized(opening) { arriving.remove(id) }
         }
 
         return json(offerJson.encodeToString(OfferAnswer.serializer(), OfferAnswer(id, base64Url(opened.receiverNonce))))
     }
 
-    /** Opens an offer into `file`. Throws [UnreadableOfferException] when it doesn't open whole, or what's sealed in it isn't a map. */
-    private suspend fun open(request: Request, senderKey: DeviceKey, id: String, file: File): Arriving {
+    /** Opens an offer's hello. Throws [UnreadableOfferException] when it doesn't open whole, or has anything after the commitment. */
+    private suspend fun open(request: Request, senderKey: DeviceKey, id: String): Arriving {
         val session = OfferSession.forReceiver(keys, senderKey)
 
         val head = withContext(Dispatchers.IO) {
-            offersFolder.mkdirs()
-
-            // Read to its end, so the whole offer is checked before anything in it is used.
-            session.open(request.bodyStream(), OFFER_LIMIT).use { opened ->
+            // Read to its end, so the whole hello is checked before anything in it is used.
+            session.open(request.bodyStream(), FORM_LIMIT).use { opened ->
                 val head = OfferHead.read(opened)
-                file.outputStream().use { opened.copyTo(it) }
+
+                if (opened.read() >= 0) {
+                    throw UnreadableOfferException("The hello goes on after its commitment")
+                }
+
                 head
             }
         }
 
-        // Only what the dialog shows is read now: the pictures stay in the file until the map is taken in.
-        val bundle = runCatching { file.inputStream().use { maps.readBundle(it, withPictures = false) } }.getOrNull()
-            ?: throw UnreadableOfferException("There's no map in the offer")
         val from = senderName(head.from) ?: words.string(R.string.nearby_a_nearby_device)
-        return Arriving(id, from, request.from, bundle, bundle.uuid?.let(maps::findByIdentity), file, session, head.commitment, randomBytes(CHECK_NONCE_BYTES))
+        return Arriving(id, from, request.from, session, head.commitment, randomBytes(CHECK_NONCE_BYTES))
+    }
+
+    /**
+     * The map, sealed in the offer's session once the person sending saw
+     * the codes match: opened into the offers folder, it waits for an answer
+     * here. One that fails to open, or isn't a map, is refused, and the
+     * offer with it.
+     */
+    private suspend fun map(id: String, request: Request): Response {
+        val incoming = synchronized(opening) { announced.value.firstOrNull { it.id == id && it.address == request.from } } ?: return Response.notFound()
+        val file = File(offersFolder, "$id.zip")
+
+        val bundle = try {
+            withContext(Dispatchers.IO) {
+                offersFolder.mkdirs()
+
+                // Read to its end, so the whole map is checked before anything in it is used.
+                incoming.session.openMap(request.bodyStream(), OFFER_LIMIT).use { opened ->
+                    file.outputStream().use { opened.copyTo(it) }
+                }
+
+                // Only what the dialog shows is read now: the pictures stay in the file until the map is taken in.
+                runCatching { file.inputStream().use { maps.readBundle(it, withPictures = false) } }.getOrNull()
+            }
+        } catch (unreadable: UnreadableOfferException) {
+            null
+        }
+
+        val offer = synchronized(opening) {
+            val still = announced.value.any { it.id == id }
+            announced.update { list -> list.filterNot { it.id == id } }
+
+            if (bundle == null || !still) {
+                file.delete()
+                states[id] = OfferState.Declined
+                return if (still) Response.text(400, "The map didn't arrive intact. Send it again.") else Response.notFound()
+            }
+
+            Offer(id, incoming.from, incoming.address, bundle, bundle.uuid?.let(maps::findByIdentity), file, incoming.check).also { offer ->
+                states[id] = OfferState.Waiting
+                waiting.update { it + offer }
+            }
+        }
+
+        scope.launch {
+            delay(OFFER_LIFETIME_MILLISECONDS)
+
+            if (states[offer.id] == OfferState.Waiting) {
+                settle(offer, OfferState.Declined)
+            }
+        }
+
+        return json(offerJson.encodeToString(StateAnswer.serializer(), StateAnswer(OfferState.Waiting.name.lowercase())))
+    }
+
+    /**
+     * The person sending saw the codes didn't match, or changed their mind,
+     * before the map went: the offer goes, and its place with it. A hello
+     * whose half didn't match keeps its place to the end of its time.
+     */
+    private fun cancel(id: String, request: Request): Response {
+        synchronized(opening) {
+            val hello = arriving[id]?.takeIf { it.address == request.from && !it.refused }
+            val incoming = announced.value.firstOrNull { it.id == id && it.address == request.from }
+
+            if (hello == null && incoming == null) {
+                return Response.notFound()
+            }
+
+            hello?.let { arriving.remove(it.id) }
+            states[id] = OfferState.Declined
+            announced.update { list -> list.filterNot { it.id == id } }
+        }
+
+        return json(offerJson.encodeToString(StateAnswer.serializer(), StateAnswer(OfferState.Declined.name.lowercase())))
     }
 
     /**
@@ -449,7 +627,7 @@ class NearbyHost internal constructor(
      * answer refusing it.
      */
     private fun hold(address: String, senderKey: DeviceKey): Response? = synchronized(opening) {
-        val places = waiting.value.map { it.address } + arriving.values.map { it.address } + opening
+        val places = waiting.value.map { it.address } + announced.value.map { it.address } + arriving.values.map { it.address } + opening
 
         when {
             senderKey.text in usedKeys -> Response.text(400, "That map was sent here already.")
@@ -482,50 +660,53 @@ class NearbyHost internal constructor(
     }
 
     /**
-     * The sender's half of an arriving offer's check code: when it's the half
-     * the sender committed to, the offer is shown, with the code.
+     * The sender's half of an offer's check code: when it's the half the
+     * sender committed to, this device shows the code, and waits for the map
+     * while the person sending checks it.
      */
     private fun reveal(id: String, request: Request): Response {
         val reveal = runCatching { offerJson.decodeFromString(Reveal.serializer(), request.body.decodeToString()) }.getOrNull()
         val senderNonce = fromBase64Url(reveal?.nonce)?.takeIf { it.size == CHECK_NONCE_BYTES }
 
-        val offer = synchronized(opening) {
+        val incoming = synchronized(opening) {
             val arrival = arriving[id]?.takeIf { it.address == request.from && !it.refused } ?: return Response.notFound()
 
             if (senderNonce == null || !arrival.session.isCommitted(arrival.commitment, senderNonce)) {
                 // Orbit never sends a wrong half, but someone trying for a code that matches the sender's would. Freeing
-                // the place now would let them try again at once, so it stays taken until the offer's time is up.
+                // the place now would let them try again at once, so it stays taken until the hello's time is up.
                 arrival.refused = true
-                arrival.file.delete()
                 states[id] = OfferState.Declined
-                return Response.text(400, "That isn't the check code the map was sent with")
+                return Response.text(400, "That isn't the check code the offer was made with")
             }
 
             arriving.remove(id)
             val check = arrival.session.checkCode(arrival.receiverNonce, senderNonce)
 
-            Offer(id, arrival.from, arrival.address, arrival.bundle, arrival.existing, arrival.file, check).also { offer ->
-                states[offer.id] = OfferState.Waiting
-                waiting.update { it + offer }
+            Incoming(id, arrival.from, arrival.address, check, arrival.session).also { incoming ->
+                states[id] = OfferState.Confirming
+                announced.update { it + incoming }
             }
         }
 
         scope.launch {
-            delay(OFFER_LIFETIME_MILLISECONDS)
+            delay(CONFIRMING_LIFETIME_MILLISECONDS)
 
-            if (states[offer.id] == OfferState.Waiting) {
-                settle(offer, OfferState.Declined)
+            synchronized(opening) {
+                if (states[incoming.id] == OfferState.Confirming && !incoming.uploading) {
+                    states[incoming.id] = OfferState.Declined
+                    announced.update { list -> list.filterNot { it.id == incoming.id } }
+                }
             }
         }
 
-        return json(offerJson.encodeToString(StateAnswer.serializer(), StateAnswer("waiting")))
+        return json(offerJson.encodeToString(StateAnswer.serializer(), StateAnswer(OfferState.Confirming.name.lowercase())))
     }
 
     private fun json(text: String): Response = Response.Bytes(200, "application/json", text.toByteArray())
 
     private fun offerState(id: String): Response {
         val state = states[id] ?: return Response.notFound()
-        return Response.Bytes(200, "application/json", """{"state":"${state.name.lowercase()}"}""".toByteArray())
+        return json(offerJson.encodeToString(StateAnswer.serializer(), StateAnswer(state.name.lowercase())))
     }
 
     /**
@@ -586,12 +767,27 @@ class NearbyHost internal constructor(
                 Response.page(200, page, mapOf("Referrer-Policy" to "strict-origin"))
             }
             "map.zip" -> {
-                val bundle = ByteArrayOutputStream().also { maps.writeZip(share.mapId, it) }.toByteArray()
+                // Made in a file and sent from there, as each browser asks: a map with its videos is more than memory can spare.
+                sharedFolder.mkdirs()
+                val bundle = File.createTempFile("map", ".zip", sharedFolder)
+
+                try {
+                    bundle.outputStream().use { maps.writeZip(share.mapId, it) }
+                } catch (failure: IOException) {
+                    bundle.delete()
+                    throw failure
+                }
+
                 val name = title.replace(Regex("[^\\p{L}\\p{N} _-]"), "").trim().ifEmpty { words.string(R.string.nearby_map_without_a_title) }
                 // The plain name for older browsers, in ASCII alone (Map, when none is left), and the name as written for the rest.
                 val plain = name.filter { it.code < 128 }.trim().ifEmpty { "Map" }
                 val written = URLEncoder.encode("$name.zip", "UTF-8").replace("+", "%20")
-                Response.Bytes(200, "application/zip", bundle, mapOf("Content-Disposition" to "attachment; filename=\"$plain.zip\"; filename*=UTF-8''$written"))
+                Response.FromFile(
+                    "application/zip",
+                    bundle,
+                    mapOf("Content-Disposition" to "attachment; filename=\"$plain.zip\"; filename*=UTF-8''$written"),
+                    temporary = true,
+                )
             }
             else -> Response.notFound()
         }
@@ -602,8 +798,15 @@ class NearbyHost internal constructor(
 
     private fun advertise() {
         if (advertisement != null) {
-            return
+            if (advertisedPort == server.port) {
+                return
+            }
+
+            // The server started again on another port, as its network changed: the advertisement says where it is now.
+            unadvertise()
         }
+
+        advertisedPort = server.port
 
         // By name, where unit tests' stand-in context can say there's no such service.
         val manager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager ?: return
@@ -643,6 +846,25 @@ class NearbyHost internal constructor(
     private fun asset(name: String): String = context.assets.open("map/$name").bufferedReader().use { it.readText() }
 
     private companion object {
+        /** An offer's id and what's after it, from `/offer/<id>` or `/offer/<id>/<what>`, or null for any other path. */
+        fun offerPath(path: String): Pair<String, String?>? {
+            if (!path.startsWith("/offer/")) {
+                return null
+            }
+
+            val parts = path.removePrefix("/offer/").split('/')
+
+            return when {
+                !isOfferId(parts[0]) -> null
+                parts.size == 1 -> parts[0] to null
+                parts.size == 2 && parts[1].isNotEmpty() -> parts[0] to parts[1]
+                else -> null
+            }
+        }
+
+        /** Whether a request uploads a map: the only one that's big. */
+        fun isMapUpload(path: String): Boolean = offerPath(path)?.second == "map"
+
         fun deviceName(context: Context): String =
             Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME)?.takeIf { it.isNotBlank() } ?: Build.MODEL
     }

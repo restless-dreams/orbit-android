@@ -62,7 +62,7 @@ private data class SheetSpace(val sheet: Float, val height: Float, val top: Floa
 @Composable
 fun MapPanels(model: MapViewModel, ui: MapUi, sheet: Boolean, onPickIcon: (String) -> Unit, onPickColor: (String) -> Unit) {
     when (val panel = ui.panel) {
-        is Panel.Editor -> ui.nodes[panel.id]?.let { node -> NodeEditor(model, ui, node, sheet, onPickIcon, onPickColor) }
+        is Panel.Editor -> ui.nodes[panel.id]?.let { node -> NodeEditor(model, ui, node, panel.opened, sheet, onPickIcon, onPickColor) }
         is Panel.Details -> ui.nodes[panel.id]?.let { node -> DetailsPanel(model, ui, node, sheet) }
         Panel.Outline -> OutlinePanel(model, ui, sheet)
         Panel.Search -> SearchPanel(model, ui, sheet)

@@ -3,14 +3,17 @@ package com.hyuchia.orbit.nearby
 import androidx.annotation.StringRes
 import com.hyuchia.orbit.R
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
-import java.io.SequenceInputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 
@@ -22,10 +25,15 @@ private const val CONNECT_MILLISECONDS = 5_000
 private const val READ_MILLISECONDS = 60_000
 /** The most of an answer a sender reads: answers are a line of JSON. */
 private const val ANSWER_BYTES_LIMIT = 64 * 1024
+/** The ports a device can listen on. */
+internal val PORTS = 1..65_535
 
 /** Where a map on its way to another device is. */
 sealed interface SendState {
     data object Sending : SendState
+
+    /** Both devices show `check`: the map goes once the person sending sees the other device show it too. */
+    data class Confirming(val check: String) : SendState
 
     /** The other device has the map, and asks whether to take it with `check` beside it, the code this one shows. */
     data class Waiting(val check: String) : SendState
@@ -33,55 +41,153 @@ sealed interface SendState {
     data object Opened : SendState
     data object Declined : SendState
 
+    /** The person sending saw the codes didn't match, or changed their mind: nothing of the map went. */
+    data object Cancelled : SendState
+
     /** Why the map didn't go, to show the sender. */
     data class Failed(@StringRes val reason: Int) : SendState
 }
 
 /**
  * Offers the map bundled in `bundle` to the device at `address` (host:port),
- * as `from`, sealed to the device's key: `key` from its advertisement, or
- * asked of it when there's none. Follows its answer: [onState] hears each
- * step, ending with opened, declined or failed.
+ * as `from`. First the two devices agree an offer and show the same check
+ * code, sealed to the device's key: `key` from its advertisement, with the
+ * offers' `version` it takes, or both asked of it when there's none. The map
+ * goes only once `confirm` says the person sending saw the other device
+ * show the code too, so a device answering in its place on the Wi-Fi gets
+ * nothing of it. Follows the answer: [onState] hears each step, ending with
+ * opened, declined, cancelled or failed.
  */
-suspend fun sendMap(address: String, key: String?, from: String, bundle: File, onState: (SendState) -> Unit) {
+suspend fun sendMap(
+    address: String,
+    key: String?,
+    version: Int?,
+    from: String,
+    bundle: File,
+    confirm: suspend (check: String) -> Boolean,
+    onState: (SendState) -> Unit,
+) {
     val name = senderName(from).orEmpty()
 
-    if (sealedLength(OfferHead(name, ByteArray(COMMITMENT_BYTES)).bytes().size + bundle.length()) > OFFER_LIMIT) {
+    if (sealedLength(bundle.length()) > OFFER_LIMIT) {
         onState(SendState.Failed(R.string.nearby_send_too_big))
         return
     }
 
     onState(SendState.Sending)
+    // The offer the device knows of, as soon as it does: sending that stops before the map goes says so there.
+    var offered: String? = null
+    var sent = false
 
-    val offered = try {
-        withContext(Dispatchers.IO) { deliver(address, key, name, bundle) }
-    } catch (refused: Refusal) {
-        onState(SendState.Failed(refused.reason))
-        return
-    } catch (failure: IOException) {
-        onState(SendState.Failed(R.string.nearby_send_could_not_reach))
-        return
-    }
+    try {
+        val agreed = try {
+            withContext(Dispatchers.IO) { agree(address, key, version, name) { id -> offered = id } }
+        } catch (refused: Refusal) {
+            onState(SendState.Failed(refused.reason))
+            return
+        } catch (failure: IOException) {
+            onState(SendState.Failed(R.string.nearby_send_could_not_reach))
+            return
+        }
 
-    onState(SendState.Waiting(offered.check))
-    var waited = 0L
+        onState(SendState.Confirming(agreed.check))
 
-    while (waited < ANSWER_WAIT_MILLISECONDS) {
-        delay(CHECK_MILLISECONDS)
-        waited += CHECK_MILLISECONDS
-        val state = runCatching { withContext(Dispatchers.IO) { state(address, offered.id) } }.getOrNull()
+        when (checked(address, agreed, confirm)) {
+            Checked.Cancelled -> {
+                onState(SendState.Cancelled)
+                return
+            }
+            Checked.Declined -> {
+                onState(SendState.Declined)
+                return
+            }
+            Checked.Matched -> Unit
+        }
 
-        when (state) {
-            "opened" -> return onState(SendState.Opened)
-            "declined" -> return onState(SendState.Declined)
+        val delivered = try {
+            withContext(Dispatchers.IO) { deliver(address, agreed, bundle) }
+        } catch (refused: Refusal) {
+            onState(SendState.Failed(refused.reason))
+            return
+        } catch (failure: IOException) {
+            // The other device may have hung up as it declined, while the map was on its way.
+            val state = runCatching { withContext(Dispatchers.IO) { state(address, agreed.id) } }.getOrNull()
+            onState(if (state == "declined") SendState.Declined else SendState.Failed(R.string.nearby_send_could_not_reach))
+            return
+        }
+
+        sent = true
+
+        if (!delivered) {
+            onState(SendState.Declined)
+            return
+        }
+
+        onState(SendState.Waiting(agreed.check))
+        var waited = 0L
+
+        while (waited < ANSWER_WAIT_MILLISECONDS) {
+            delay(CHECK_MILLISECONDS)
+            waited += CHECK_MILLISECONDS
+            val state = runCatching { withContext(Dispatchers.IO) { state(address, agreed.id) } }.getOrNull()
+
+            when (state) {
+                "opened" -> return onState(SendState.Opened)
+                "declined" -> return onState(SendState.Declined)
+            }
+        }
+
+        onState(SendState.Failed(R.string.nearby_send_no_answer))
+    } finally {
+        val id = offered
+
+        if (!sent && id != null) {
+            // Sending stopped before the map went, the sheet closed say: the other device stops waiting for it.
+            withContext(NonCancellable + Dispatchers.IO) { runCatching { cancelOffer(address, id) } }
         }
     }
-
-    onState(SendState.Failed(R.string.nearby_send_no_answer))
 }
 
-/** A map the other device has, and the check code both show. */
-private class Offered(val id: String, val check: String)
+/** What came of checking the codes. */
+private enum class Checked { Matched, Cancelled, Declined }
+
+/**
+ * Whether the person sending says the codes match, or not, while the other
+ * device keeps waiting for the map: it may decline, or stop waiting, first.
+ */
+private suspend fun checked(address: String, agreed: Agreed, confirm: suspend (String) -> Boolean): Checked = coroutineScope {
+    val answer = async { confirm(agreed.check) }
+    val gone = async { stoppedWaiting(address, agreed.id) }
+
+    select {
+        answer.onAwait { matched ->
+            gone.cancel()
+            if (matched) Checked.Matched else Checked.Cancelled
+        }
+
+        gone.onAwait {
+            answer.cancel()
+            Checked.Declined
+        }
+    }
+}
+
+/** Returns once the device declined the offer, or stopped waiting for its map. */
+private suspend fun stoppedWaiting(address: String, id: String) {
+    var waited = 0L
+
+    while (waited < CONFIRMING_LIFETIME_MILLISECONDS) {
+        delay(CHECK_MILLISECONDS)
+        waited += CHECK_MILLISECONDS
+
+        if (runCatching { withContext(Dispatchers.IO) { state(address, id) } }.getOrNull() == "declined") {
+            return
+        }
+    }
+}
+
+/** An offer both devices agreed, its session, and the check code both show. */
+private class Agreed(val id: String, val session: OfferSession, val check: String)
 
 /** Why the other device didn't take the map, to show the sender. */
 private open class Refusal(@StringRes val reason: Int) : Exception()
@@ -90,16 +196,20 @@ private open class Refusal(@StringRes val reason: Int) : Exception()
 private class NotOpened : Refusal(R.string.nearby_send_could_not_open)
 
 /**
- * Seals the map to the device's key and offers it. An advertised key can be
- * out of date when Orbit started again there since it was found, so when
- * the device can't open the map, its own word on its key settles it.
+ * Agrees an offer with the device: sealed to its key, with this side's
+ * commitment to its half of the check code; then, with the device's half in
+ * hand, sends its own, and both show the code. An advertised key can be out
+ * of date when Orbit started again there since it was found, so when the
+ * device can't open the offer, its own word on its key settles it. A device
+ * whose advertisement has no version is asked for it with its key.
  */
-private fun deliver(address: String, advertised: String?, from: String, bundle: File): Offered {
-    val advertisedKey = DeviceKey.read(advertised)
+private fun agree(address: String, advertised: String?, version: Int?, from: String, onOffered: (String) -> Unit): Agreed {
+    val advertisedKey = DeviceKey.read(advertised)?.takeIf { version != null }
+    version?.let(::checkVersion)
     val key = advertisedKey ?: askKey(address)
 
     return try {
-        offer(address, key, from, bundle)
+        greet(address, key, from, onOffered)
     } catch (notOpened: NotOpened) {
         val current = if (advertisedKey != null) askKey(address) else throw notOpened
 
@@ -107,11 +217,19 @@ private fun deliver(address: String, advertised: String?, from: String, bundle: 
             throw notOpened
         }
 
-        offer(address, current, from, bundle)
+        greet(address, current, from, onOffered)
     }
 }
 
-/** The key the device at `address` takes maps sealed to, asked of it. */
+/** Refuses to offer anything to a device whose offers are another version than this one's: the older side has to update. */
+private fun checkVersion(version: Int) {
+    when {
+        version < OFFER_VERSION -> throw Refusal(R.string.nearby_send_update_the_other_device)
+        version > OFFER_VERSION -> throw Refusal(R.string.nearby_send_update_this_device)
+    }
+}
+
+/** The key the device at `address` takes maps sealed to, asked of it, with the version of offers it takes. */
 private fun askKey(address: String): DeviceKey {
     val (status, body) = exchange(address, "GET", "/key")
 
@@ -120,29 +238,31 @@ private fun askKey(address: String): DeviceKey {
     }
 
     // An Orbit too old to seal maps answers with something else, or nothing.
-    val answer = if (status == 200) runCatching { offerJson.decodeFromString(KeyAnswer.serializer(), body) }.getOrNull() else null
-    return answer?.takeIf { it.version == OFFER_VERSION }?.let { DeviceKey.read(it.key) } ?: throw Refusal(R.string.nearby_send_update_the_other_device)
+    val answer = (if (status == 200) runCatching { offerJson.decodeFromString(KeyAnswer.serializer(), body) }.getOrNull() else null)
+        ?: throw Refusal(R.string.nearby_send_update_the_other_device)
+    checkVersion(answer.version)
+    return DeviceKey.read(answer.key) ?: throw Refusal(R.string.nearby_send_update_the_other_device)
 }
 
 /**
- * Offers the map sealed to `key`, with this side's commitment to its half
- * of the check code; then, with the receiver's half in hand, sends its own.
+ * Says hello to the device with this side's name and its commitment to its
+ * half of the check code, sealed to `key`; then, with the device's half in
+ * hand, reveals its own. Both devices then show the code. `onOffered` hears
+ * the offer's id as soon as the device gives it.
  */
-private fun offer(address: String, key: DeviceKey, from: String, bundle: File): Offered {
+private fun greet(address: String, key: DeviceKey, from: String, onOffered: (String) -> Unit): Agreed {
     val session = OfferSession.forSender(key)
     val senderNonce = randomBytes(CHECK_NONCE_BYTES)
-    val head = OfferHead(from, session.commitment(senderNonce)).bytes()
-    val length = head.size + bundle.length()
+    val hello = OfferHead(from, session.commitment(senderNonce)).bytes()
     val headers = mapOf("Content-Type" to "application/octet-stream", VERSION_HEADER to OFFER_VERSION.toString(), KEY_HEADER to session.senderKey.text)
 
-    val (status, body) = exchange(address, "POST", "/offer", headers, sealedLength(length)) { output ->
-        SequenceInputStream(head.inputStream(), bundle.inputStream()).use { session.seal(it, length, output) }
+    val (status, body) = exchange(address, "POST", "/offer", headers, sealedLength(hello.size.toLong())) { output ->
+        session.seal(hello.inputStream(), hello.size.toLong(), output)
     }
 
     when (status) {
         200 -> Unit
         400 -> throw NotOpened()
-        413 -> throw Refusal(R.string.nearby_send_too_big)
         429 -> throw Refusal(R.string.nearby_send_maps_already_waiting)
         else -> throw Refusal(R.string.nearby_send_not_taking_maps)
     }
@@ -154,6 +274,7 @@ private fun offer(address: String, key: DeviceKey, from: String, bundle: File): 
         throw Refusal(R.string.nearby_send_update_the_other_device)
     }
 
+    onOffered(answer.id)
     val reveal = offerJson.encodeToString(Reveal.serializer(), Reveal(base64Url(senderNonce))).toByteArray()
     val (revealed, _) = exchange(address, "POST", "/offer/${answer.id}", mapOf("Content-Type" to "application/json"), reveal.size.toLong()) { it.write(reveal) }
 
@@ -161,7 +282,34 @@ private fun offer(address: String, key: DeviceKey, from: String, bundle: File): 
         throw Refusal(R.string.nearby_send_could_not_open)
     }
 
-    return Offered(answer.id, session.checkCode(receiverNonce, senderNonce))
+    return Agreed(answer.id, session, session.checkCode(receiverNonce, senderNonce))
+}
+
+/**
+ * Sends the map, sealed in the agreed offer's session. True once the device
+ * has it, false when it declined, or stopped waiting for it, first.
+ */
+private fun deliver(address: String, agreed: Agreed, bundle: File): Boolean {
+    val length = bundle.length()
+    val headers = mapOf("Content-Type" to "application/octet-stream")
+
+    val (status, _) = exchange(address, "POST", "/offer/${agreed.id}/map", headers, sealedLength(length)) { output ->
+        bundle.inputStream().use { agreed.session.sealMap(it, length, output) }
+    }
+
+    return when (status) {
+        200 -> true
+        404, 409 -> false
+        413 -> throw Refusal(R.string.nearby_send_too_big)
+        507 -> throw Refusal(R.string.nearby_send_no_room_there)
+        400 -> throw Refusal(R.string.nearby_send_could_not_open)
+        else -> throw Refusal(R.string.nearby_send_not_taking_maps)
+    }
+}
+
+/** Tells the device the map won't come, so it stops showing the code. */
+private fun cancelOffer(address: String, id: String) {
+    exchange(address, "POST", "/offer/$id/cancel")
 }
 
 private fun state(address: String, id: String): String? {
@@ -185,7 +333,7 @@ private fun exchange(
     body: ((OutputStream) -> Unit)? = null,
 ): Pair<Int, String> {
     val host = address.substringBeforeLast(':')
-    val port = address.substringAfterLast(':').toIntOrNull() ?: throw IOException("No port in $address")
+    val port = address.substringAfterLast(':').toIntOrNull()?.takeIf { it in PORTS } ?: throw IOException("No port in $address")
 
     Socket().use { socket ->
         socket.connect(InetSocketAddress(host, port), CONNECT_MILLISECONDS)

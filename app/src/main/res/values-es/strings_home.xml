@@ -8,6 +8,7 @@
     </plurals>
     <string name="home_deleted_map">Se eliminó “%1$s”</string>
     <string name="home_add_widget_from_list">Agrega el widget de Orbit desde la lista de widgets de tu pantalla de inicio</string>
+    <string name="home_could_not_share_map">Orbit no pudo crear un archivo de ese mapa para compartirlo. ¿Está lleno el almacenamiento de este dispositivo?</string>
     <string name="home_pinned_maps">Fijados</string>
     <string name="home_everything_else">Todo lo demás</string>
     <string name="home_clear_the_search">Borrar la búsqueda</string>
@@ -96,7 +97,7 @@
     <string name="home_start_a_map">Empezar un mapa</string>
     <string name="home_templates_drawn_live">Orbit dibuja las plantillas en vivo, cada una con su estilo</string>
     <string name="home_blank_map_description">Solo un título y espacio para ideas</string>
-    <string name="home_open_a_file_description">Markdown, YAML o un archivo zip con imágenes</string>
+    <string name="home_open_a_file_description">Markdown, YAML, un archivo zip con imágenes, OPML, FreeMind o XMind</string>
     <string name="home_start_a_map_from_template">Empezar un mapa con esta plantilla</string>
 
     <string name="home_crash_title">Orbit se cerró inesperadamente la última vez</string>

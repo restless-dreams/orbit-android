@@ -8,6 +8,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.serializer
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
 
 /** Thumbnails are drawn at this size in CSS pixels, twice over for sharp screens. */
@@ -63,7 +64,7 @@ class MapPictures(private val pool: PagePool, cache: File, private val orbit: St
             // A map that's gone, or whose file can't be read, has no thumbnail.
             val text = try {
                 markdown()
-            } catch (unreadable: java.io.IOException) {
+            } catch (unreadable: IOException) {
                 return@withLock null
             }
 
@@ -84,14 +85,9 @@ class MapPictures(private val pool: PagePool, cache: File, private val orbit: St
                 return@withLock null
             }
 
-            withContext(Dispatchers.IO) {
-                thumbnails.mkdirs()
-                thumbnails.listFiles { old -> old.name.startsWith("$id~") }?.forEach { it.delete() }
-                // Whole or not at all: a picture cut short by the app stopping would be shown as it is.
-                writeAtomically(file, bytes)
-            }
-
-            file
+            // One that can't be kept (on a full phone, say) is no thumbnail this time: the card shows its glyph.
+            val kept = withContext(Dispatchers.IO) { keepThumbnail(thumbnails, id, file, bytes) }
+            file.takeIf { kept }
         }
     }
 
@@ -137,6 +133,20 @@ class MapPictures(private val pool: PagePool, cache: File, private val orbit: St
         val looks = style ?: digest("${theme.dark}${theme.tokens.toSortedMap()}")
         return File(thumbnails, "$id~$contentKey~${digest("$orbit~$looks")}.webp")
     }
+}
+
+/**
+ * Keeps a map's new thumbnail as `file` in `thumbnails`, in place of its
+ * older ones. False when it couldn't be written: the cache may be full.
+ */
+internal fun keepThumbnail(thumbnails: File, id: String, file: File, bytes: ByteArray): Boolean = try {
+    thumbnails.mkdirs()
+    thumbnails.listFiles { old -> old.name.startsWith("$id~") }?.forEach { it.delete() }
+    // Whole or not at all: a picture cut short by the app stopping would be shown as it is.
+    writeAtomically(file, bytes)
+    true
+} catch (unwritable: IOException) {
+    false
 }
 
 private fun digest(text: String): String =

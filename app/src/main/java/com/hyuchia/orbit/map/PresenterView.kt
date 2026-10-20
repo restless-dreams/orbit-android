@@ -58,6 +58,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -161,6 +162,7 @@ fun PresenterView(
 private fun PresenterBar(model: MapViewModel, presentation: Presentation, screen: Audience?, browsers: BrowserPresenting?, dark: Boolean, onBrowsers: () -> Unit) {
     val words = rememberWords()
     val watching = browsers?.watching?.collectAsState()?.value
+    val notice = screen?.notice?.collectAsState()?.value
     val where = listOfNotNull(
         stringResource(R.string.present_rehearsing).takeIf { presentation.rehearsing },
         screen?.let { audience -> audience.name?.let { stringResource(R.string.present_on_screen, it) } ?: stringResource(R.string.present_on_the_tv) },
@@ -207,6 +209,15 @@ private fun PresenterBar(model: MapViewModel, presentation: Presentation, screen
             IconButton(onClick = model::stopPresentation) {
                 Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.common_stop_presenting))
             }
+        }
+
+        notice?.let {
+            Text(
+                stringResource(it.message),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 4.dp),
+            )
         }
     }
 }
@@ -474,6 +485,9 @@ private fun StageButton(icon: ImageVector, text: String, onClick: () -> Unit) {
 /** The idea in focus with its whole note, what comes next, and the buttons to step. */
 @Composable
 private fun ColumnScope.Notes(model: MapViewModel, node: MapNode?, next: MapNode?, presentation: Presentation, seconds: Int) {
+    // The swipes outlive this composition: they step at the pace set now, not the one when they began.
+    val pace by rememberUpdatedState(seconds)
+
     Box(
         Modifier
             .weight(1f)
@@ -481,7 +495,7 @@ private fun ColumnScope.Notes(model: MapViewModel, node: MapNode?, next: MapNode
             .presentationGestures(
                 rightToLeft = LocalLayoutDirection.current == LayoutDirection.Rtl,
                 onTap = {},
-                onStep = { by -> model.step(by, seconds) },
+                onStep = { by -> model.step(by, pace) },
             ),
     ) {
         AnimatedContent(

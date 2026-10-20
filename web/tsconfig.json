@@ -12,5 +12,5 @@
       "@restless-dreams/orbit": ["../../orbit/dist/index.d.ts"]
     }
   },
-  "include": ["bridge.ts", "second-screen.ts", "cast-receiver.ts", "web-page.ts", "browser-audience.ts"]
+  "include": ["bridge.ts", "second-screen.ts", "cast-receiver.ts", "web-page.ts", "browser-audience.ts", "protocol-examples.ts"]
 }

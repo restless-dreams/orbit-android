@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -93,11 +94,14 @@ fun SourceTopBar(model: MapViewModel, source: SourceState, background: Color) {
 /**
  * The map as text, colored by what Orbit reads in it: headings, items,
  * checkboxes, hashtags, attributes and frontmatter. The map above redraws a
- * moment after typing stops, and what Orbit noticed shows below.
+ * moment after typing stops, and what Orbit noticed shows below. On a map
+ * that's only shown (`readOnly`, see [canEditText]) the text can only be
+ * read, and a line over it says why.
  */
 @Composable
-fun SourceEditor(model: MapViewModel, source: SourceState, modifier: Modifier = Modifier, navigationBar: Dp = 0.dp) {
+fun SourceEditor(model: MapViewModel, source: SourceState, readOnly: ReadOnly?, modifier: Modifier = Modifier, navigationBar: Dp = 0.dp) {
     val colors = MaterialTheme.colorScheme
+    val editable = canEditText(readOnly)
     var field by remember { mutableStateOf(TextFieldValue(source.text)) }
 
     if (field.text != source.text) {
@@ -109,6 +113,10 @@ fun SourceEditor(model: MapViewModel, source: SourceState, modifier: Modifier = 
     val scroll = rememberScrollState()
 
     Column(modifier.background(colors.surfaceContainerLow)) {
+        if (!editable && readOnly != null) {
+            ReadOnlyLine(readOnly)
+        }
+
         Box(
             Modifier
                 .weight(1f)
@@ -125,6 +133,7 @@ fun SourceEditor(model: MapViewModel, source: SourceState, modifier: Modifier = 
                         model.editSource(value.text)
                     }
                 },
+                readOnly = !editable,
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace, color = colors.onSurface, fontSize = 14.sp, lineHeight = 21.sp),
                 cursorBrush = SolidColor(colors.primary),
                 visualTransformation = highlight,
@@ -142,6 +151,28 @@ fun SourceEditor(model: MapViewModel, source: SourceState, modifier: Modifier = 
         // The screen's insets are used up by the map's screen, which knows the navigation bar's height:
         // the editor ends above the bar, or above the keyboard, which the bar's height is already taken from.
         Box(Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(bottom = navigationBar).imePadding())
+    }
+}
+
+/** Why the text can only be read, in the words of the note over a map that's only shown. */
+@Composable
+private fun ReadOnlyLine(readOnly: ReadOnly) {
+    val (title, body) = when (readOnly) {
+        ReadOnly.Newer -> R.string.map_read_only_newer_title to R.string.map_read_only_newer_body
+        ReadOnly.Deleted -> R.string.map_read_only_deleted_title to R.string.map_read_only_deleted_body
+        ReadOnly.Storage -> R.string.map_read_only_storage_title to R.string.map_read_only_storage_body
+        ReadOnly.Unreadable -> return
+    }
+
+    Surface(color = MaterialTheme.colorScheme.tertiaryContainer, contentColor = MaterialTheme.colorScheme.onTertiaryContainer) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+            Icon(Icons.Outlined.Lock, contentDescription = null, modifier = Modifier.padding(top = 2.dp).size(18.dp))
+
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(stringResource(title), style = MaterialTheme.typography.labelLarge)
+                Text(stringResource(body), style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }
 

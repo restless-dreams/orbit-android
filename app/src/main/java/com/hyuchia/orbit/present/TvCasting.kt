@@ -40,6 +40,10 @@ interface TvCasting {
     /** The way onto a TV, as [CastButton] describes it. */
     @Composable
     fun Button(dark: Boolean, modifier: Modifier, screenCast: Boolean)
+
+    /** The TV the phone is casting to, while it is, as [CastingButton] describes it. */
+    @Composable
+    fun CastingButton(dark: Boolean, modifier: Modifier)
 }
 
 /**
@@ -52,6 +56,16 @@ interface TvCasting {
 @Composable
 fun CastButton(dark: Boolean, modifier: Modifier = Modifier, screenCast: Boolean = false) {
     tvCasting.Button(dark, modifier, screenCast)
+}
+
+/**
+ * The TV the phone is casting to, while it is: Google's Cast button, to
+ * stop or change it. Nothing otherwise, and it never starts Google Cast nor
+ * looks for TVs: only presenting does, with [CastButton].
+ */
+@Composable
+fun CastingButton(dark: Boolean, modifier: Modifier = Modifier) {
+    tvCasting.CastingButton(dark, modifier)
 }
 
 /** Opens Android's screen casting, where the phone's screen goes onto a TV; nothing on phones without it. */

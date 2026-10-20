@@ -35,7 +35,7 @@ class BrowserPresentingTest {
 
     /** A presentation in browsers, served over the loopback from the app's own pages, that anyone can join: in English, or in `words`. */
     private fun present(words: Words = english): BrowserPresenting =
-        BrowserPresenting(::asset, words, mapFolder, scope, JoiningOptions(askNames = false), preferredPort = 0, policy = anyone, clock = { now }).also {
+        BrowserPresenting(::asset, words, mapFolder, scope, JoiningOptions(askNames = false), preferredPort = 0, policy = anyone, listenOn = { null }, clock = { now }).also {
             rooms += it
             it.start()
         }

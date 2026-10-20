@@ -39,6 +39,7 @@ import com.hyuchia.orbit.nearby.BrowserPresenting
 import com.hyuchia.orbit.nearby.JoiningControls
 import com.hyuchia.orbit.nearby.JoiningOptions
 import com.hyuchia.orbit.nearby.LockoutNote
+import com.hyuchia.orbit.nearby.rememberAddress
 import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.ui.EscapeCloses
 import kotlinx.coroutines.launch
@@ -82,7 +83,7 @@ fun rememberBrowserPresenting(on: Boolean, mapFolder: File, onAudience: (Audienc
  */
 @Composable
 fun BrowserAddressDialog(presenting: BrowserPresenting, onStop: () -> Unit, onDismiss: () -> Unit) {
-    val address = remember(presenting) { presenting.address() }
+    val address = rememberAddress(presenting) { presenting.address() }
     val lockedOut by presenting.lockedOut.collectAsState()
     val container = LocalContext.current.container
     AlertDialog(

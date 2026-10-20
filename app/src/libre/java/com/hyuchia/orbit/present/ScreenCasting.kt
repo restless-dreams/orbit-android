@@ -16,4 +16,7 @@ private object ScreenCasting : TvCasting {
             ScreenCastButton(modifier)
         }
     }
+
+    @Composable
+    override fun CastingButton(dark: Boolean, modifier: Modifier) = Unit
 }

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
@@ -92,7 +93,8 @@ fun ColorChoices(
     val gap = max(0.dp, size + 10.dp - target)
     val currentColor = parseCssColor(current)
 
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(gap)) {
+    // One choice, for screen readers too: the swatches are its options.
+    Column(modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(gap)) {
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(gap),
             verticalArrangement = Arrangement.spacedBy(gap),

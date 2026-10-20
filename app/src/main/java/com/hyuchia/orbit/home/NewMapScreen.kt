@@ -30,13 +30,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -54,7 +58,6 @@ import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
 import com.hyuchia.orbit.data.ImportResult
 import com.hyuchia.orbit.data.MapTemplate
-import com.hyuchia.orbit.data.MapTags
 import com.hyuchia.orbit.data.MapTemplates
 import com.hyuchia.orbit.data.MapText
 import com.hyuchia.orbit.data.readTemplate
@@ -70,6 +73,7 @@ fun NewMapScreen(onCreated: (String) -> Unit, onImported: (ImportResult) -> Unit
     val container = context.container
     val model = orbitViewModel { HomeViewModel(it) }
     val scope = rememberCoroutineScope()
+    val snackbars = remember { SnackbarHostState() }
     var naming by rememberSaveable { mutableStateOf(false) }
 
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -80,16 +84,24 @@ fun NewMapScreen(onCreated: (String) -> Unit, onImported: (ImportResult) -> Unit
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
+    // A map that couldn't be made says why.
+    LaunchedEffect(model) {
+        model.problems.collect { problem ->
+            snackbars.currentSnackbarData?.dismiss()
+            snackbars.showSnackbar(problem)
+        }
+    }
+
     fun start(template: MapTemplate) {
         scope.launch {
-            val markdown = context.readTemplate(template)
             // A map made while Home shows one tag's maps takes the tag.
-            onCreated(container.maps.add(MapTags.write(markdown, listOfNotNull(container.shownTag.value))))
+            model.start(context.readTemplate(template), onCreated)
         }
     }
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        snackbarHost = { SnackbarHost(snackbars) },
         topBar = {
             MediumFlexibleTopAppBar(
                 title = { Text(stringResource(R.string.home_start_a_map)) },

@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -89,7 +90,7 @@ fun StylePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
             val isSelected = { style: MapStyle -> style.name == ui.map?.style || (style.name == null && ui.map?.style == null) }
 
             if (sheet) {
-                LazyRow(contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyRow(contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.selectableGroup()) {
                     items(MapStyles, key = { it.name ?: "app" }) { style ->
                         StyleTile(model, ui, style, selected = isSelected(style)) { set("theme", style.name?.let(::JsonPrimitive)) }
                     }
@@ -100,7 +101,7 @@ fun StylePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
                     maxItemsInEachRow = 2,
                     horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).selectableGroup(),
                 ) {
                     MapStyles.forEach { style ->
                         StyleTile(model, ui, style, selected = isSelected(style)) { set("theme", style.name?.let(::JsonPrimitive)) }
@@ -108,7 +109,7 @@ fun StylePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
                 }
             }
 
-            Column(Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.padding(horizontal = 24.dp).selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.map_colors), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
 
                 MapPalettes.forEach { palette ->
