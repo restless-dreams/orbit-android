@@ -117,7 +117,8 @@ class CastOptionsProvider : OptionsProvider {
 
 /** A TV Google Cast is connected to, which presentations reach in the language of `context`, the app's screen. */
 private class CastTv(private val session: CastSession, private val context: Context) : Tv {
-    override fun audience(mapFolder: File, scope: CoroutineScope): Audience = CastAudience(session, mapFolder, scope, pageWords(context))
+    override fun audience(mapFolder: File, scope: CoroutineScope, asTheyAre: () -> Set<String>): Audience =
+        CastAudience(session, mapFolder, scope, pageWords(context), asTheyAre)
 }
 
 /** What an audience on a TV needs of the Cast session to it: the TV's name, and the app's channel both ways. */
@@ -165,6 +166,11 @@ private class SessionChannel(private val session: CastSession) : TvChannel {
  * the receiver is left out, and the presenter hears when the TV's Orbit is
  * older than the map. Then the TV hears the app's language and `words`, so
  * the presentation speaks the phone's language.
+ *
+ * A presentation's end goes to the TV at once, never in line behind what's
+ * still on its way: a command sent before it, waiting or being made ready,
+ * such as a map whose pictures are being shrunk as a private map locks,
+ * never reaches the TV. The TV stays connected, for the next presentation.
  */
 class CastAudience internal constructor(
     private val channel: TvChannel,
@@ -172,14 +178,23 @@ class CastAudience internal constructor(
     words: PageWords,
     private val withPictures: (String) -> String,
 ) : Audience {
-    constructor(session: CastSession, mapFolder: File, scope: CoroutineScope, words: PageWords) :
-        this(SessionChannel(session), scope, words, { markdown -> inlinePictures(markdown, mapFolder, TV_PICTURE_SIDE) })
+    constructor(session: CastSession, mapFolder: File, scope: CoroutineScope, words: PageWords, asTheyAre: () -> Set<String>) :
+        this(SessionChannel(session), scope, words, { markdown -> inlinePictures(markdown, mapFolder, TV_PICTURE_SIDE, asTheyAre()) })
 
     override val name: String? = channel.name
 
     override val playsMapVideos: Boolean = false
 
-    private val queue = Channel<AudienceCommand>(Channel.UNLIMITED)
+    override val carriesPictures: Boolean = true
+
+    /** A command on its way, and how many presentations had ended on the TV as it was sent. */
+    private class Sent(val command: AudienceCommand, val ended: Int)
+
+    private val queue = Channel<Sent>(Channel.UNLIMITED)
+
+    /** How many presentations have ended on the TV: a command sent before the latest end goes no further. */
+    @Volatile
+    private var ended = 0
 
     private val watch = ReceiverWatch()
 
@@ -193,12 +208,18 @@ class CastAudience internal constructor(
 
     init {
         channel.listen { message -> watch.heard(message)?.let { report -> mediaListener?.invoke(report) } }
+        // Before anything of a presentation, an end that goes at once included.
+        deliver(protocolJson.encodeToString(SenderHello.serializer(), SenderHello(AUDIENCE_PROTOCOL, BuildConfig.VERSION_NAME)))
+        deliver(protocolJson.encodeToString(LanguageCommand.serializer(), LanguageCommand(words)))
 
         delivery = scope.launch {
-            deliver(protocolJson.encodeToString(SenderHello.serializer(), SenderHello(AUDIENCE_PROTOCOL, BuildConfig.VERSION_NAME)))
-            deliver(protocolJson.encodeToString(LanguageCommand.serializer(), LanguageCommand(words)))
+            for (sent in queue) {
+                val command = sent.command
 
-            for (command in queue) {
+                if (sent.ended != ended) {
+                    continue
+                }
+
                 if (!watch.follows(command)) {
                     Logs.note(TAG, "The TV's receiver speaks protocol ${watch.known.protocol}: a command from ${command.protocol} is left out")
                     continue
@@ -211,6 +232,11 @@ class CastAudience internal constructor(
                     command
                 }
 
+                // The presentation ended while the map was made ready for the TV: it goes no further.
+                if (sent.ended != ended) {
+                    continue
+                }
+
                 deliver(protocolJson.encodeToString(AudienceCommand.serializer(), sendable))
             }
         }
@@ -221,8 +247,14 @@ class CastAudience internal constructor(
         }
     }
 
+    /** Sends a command on its way to the TV, from the main thread, where presenting sends every command; the end goes at once. */
     override fun send(command: AudienceCommand) {
-        queue.trySend(command)
+        if (command == AudienceCommand.End) {
+            end()
+            return
+        }
+
+        queue.trySend(Sent(command, ended))
     }
 
     override fun listen(listener: (MapMessage.MediaState) -> Unit) {
@@ -231,12 +263,17 @@ class CastAudience internal constructor(
 
     /** The TV stays connected, back on its waiting screen, ready for the next presentation. */
     override fun close() {
-        // The screen's work ends with the presentation, so the end can't wait in line behind what's still on its
-        // way, such as a map whose pictures are being shrunk: that's dropped, and the TV hears the end now.
+        // The screen's work ends with the presentation: what's still on its way is dropped, and the TV hears the end now.
         delivery.cancel()
         queue.close()
-        deliver(protocolJson.encodeToString(AudienceCommand.serializer(), AudienceCommand.End))
+        end()
         channel.listen(null)
+    }
+
+    /** The presentation ends on the TV now: what was sent before, still waiting or being made ready, never goes. */
+    private fun end() {
+        ended += 1
+        deliver(protocolJson.encodeToString(AudienceCommand.serializer(), AudienceCommand.End))
     }
 
     private fun deliver(json: String) {

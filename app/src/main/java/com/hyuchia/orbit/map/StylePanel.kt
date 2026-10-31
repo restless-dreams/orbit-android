@@ -1,11 +1,9 @@
 package com.hyuchia.orbit.map
 
 import android.graphics.BitmapFactory
-import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,9 +29,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderState
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -56,18 +51,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.page.PictureRequest
-import com.hyuchia.orbit.theme.MapPalette
+import com.hyuchia.orbit.page.ViewMode
 import com.hyuchia.orbit.theme.MapPalettes
 import com.hyuchia.orbit.theme.MapStyle
 import com.hyuchia.orbit.theme.MapStyles
 import com.hyuchia.orbit.theme.hex
+import com.hyuchia.orbit.ui.OrbitSlider
 import com.hyuchia.orbit.ui.ToggleRow
-import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
+import kotlin.math.roundToInt
 
 /**
  * How the map looks and opens: Orbit's styles, each previewed with this very
@@ -142,17 +138,17 @@ fun StylePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
             Column(Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.map_layout), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                 Text(stringResource(R.string.map_opens_in), style = MaterialTheme.typography.bodyMedium)
-                val opensInOverview = options?.viewMode == "all"
+                val opensInOverview = options?.view == ViewMode.OVERVIEW
 
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     SegmentedButton(
                         selected = !opensInOverview,
-                        onClick = { set("viewMode", null) },
+                        onClick = { set("view", null) },
                         shape = SegmentedButtonDefaults.itemShape(0, 2),
                     ) { Text(stringResource(R.string.map_focus)) }
                     SegmentedButton(
                         selected = opensInOverview,
-                        onClick = { set("viewMode", JsonPrimitive("all")) },
+                        onClick = { set("view", JsonPrimitive(ViewMode.OVERVIEW)) },
                         shape = SegmentedButtonDefaults.itemShape(1, 2),
                     ) { Text(stringResource(R.string.map_overview)) }
                 }
@@ -166,20 +162,26 @@ fun StylePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
                     set("progressRings", if (on) null else JsonPrimitive(false))
                 }
 
-                val drifting = options?.orbitAnimation == true
+                val drifting = options?.animation == true
 
                 Setting(stringResource(R.string.map_drift), stringResource(R.string.map_drift_description), drifting) { on ->
-                    set("orbitAnimation", if (on) JsonPrimitive(true) else null)
+                    set("animation", if (on) JsonPrimitive(true) else null)
                 }
 
                 if (drifting) {
-                    val speed = remember(options.orbitSpeed) { SliderState(value = (options.orbitSpeed ?: 90.0).toFloat(), trackRange = 20f..180f) }
-                    val seconds = speed.value.roundToInt()
-                    Text(pluralStringResource(R.plurals.map_one_turn_every, seconds, seconds), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Slider(
-                        state = speed,
-                        onValueChange = { speed.value = it },
-                        onValueChangeFinished = { set("orbitSpeed", JsonPrimitive(speed.value.roundToInt())) },
+                    var speed by remember(options.speed) { mutableFloatStateOf((options.speed ?: 90.0).toFloat()) }
+                    val seconds = speed.roundToInt()
+                    val turn = pluralStringResource(R.plurals.map_one_turn_every, seconds, seconds)
+                    Text(turn, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // Orbit's own slider: Material's throws in a panel beside the map on a tablet (see OrbitSlider). A tick each 10 seconds.
+                    OrbitSlider(
+                        value = speed,
+                        onValueChange = { speed = it },
+                        valueRange = 20f..180f,
+                        onValueChangeFinished = { set("speed", JsonPrimitive(speed.roundToInt())) },
+                        label = stringResource(R.string.map_drift),
+                        valueDescription = turn,
+                        ticks = 16,
                     )
                 }
 

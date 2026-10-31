@@ -2,6 +2,7 @@ package com.hyuchia.orbit.nearby
 
 import com.hyuchia.orbit.FileWords
 import com.hyuchia.orbit.Words
+import com.hyuchia.orbit.data.OutgoingCopies
 import com.hyuchia.orbit.media.MediaKind
 import com.hyuchia.orbit.page.AppTheme
 import com.hyuchia.orbit.page.AudienceCommand
@@ -20,6 +21,9 @@ import java.io.File
 import java.net.Socket
 import java.nio.file.Files
 import java.util.Locale
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class BrowserPresentingTest {
     /** What a phone in English shows. */
@@ -71,8 +75,16 @@ class BrowserPresentingTest {
         return lines
     }
 
+    /** Shows a map that points at the files the tests ask for: a picture, videos of each kind, and files of other kinds, as links. */
     private fun showMap(room: BrowserPresenting) {
-        room.audience.send(AudienceCommand.Show("# Lisbon\n## Tram\n", AppTheme(dark = false, tokens = emptyMap()), focus = "lisbon"))
+        val markdown = """
+            # Lisbon
+            ## Tram
+            <!-- orbit video: media/clip.mp4 -->
+            ![The beach](media/beach.jpg)
+            Cut as [one](media/clip.m4v), [two](media/clip.webm) and [three](media/clip.mov), with [notes](media/notes.txt), [a page](media/page.html) and [one lost](media/missing.mp4).
+        """.trimIndent()
+        room.audience.send(AudienceCommand.Show(markdown, AppTheme(dark = false, tokens = emptyMap()), focus = "lisbon"))
         room.audience.send(AudienceCommand.Step("tram", 1, 2))
     }
 
@@ -154,6 +166,61 @@ class BrowserPresentingTest {
     }
 
     @Test
+    fun theRoomGetsVideosWithoutWhereTheyWereFilmedStillInTheirParts() {
+        val place = "+38.7139-009.1394/"
+        val media = File(mapFolder, "media").apply { mkdirs() }
+        File("src/test/resources/outgoing/located.mp4").copyTo(File(media, "clip.mp4"))
+        File(mapFolder, "map.md").writeText("# Map")
+        val copies = OutgoingCopies(Files.createTempDirectory("orbit-outgoing").toFile())
+        val room = BrowserPresenting(::asset, english, mapFolder, scope, JoiningOptions(askNames = false), preferredPort = 0, policy = anyone, listenOn = { null }, clock = { now }, outgoing = copies::of)
+        rooms += room
+        room.start()
+        showMap(room)
+
+        val browser = Browser(room.port)
+        browser.get("/${room.code}/")
+        val whole = browser.get("/${room.code}/media/clip.mp4")
+        assertEquals(200, whole.status)
+        assertFalse(whole.body.contains(place))
+        assertTrue(File(media, "clip.mp4").readText(Charsets.ISO_8859_1).contains(place))
+
+        // The same size, so a browser playing it in parts finds each where it asks.
+        val part = browser.get("/${room.code}/media/clip.mp4", headers = mapOf("Range" to "bytes=100-199"))
+        assertEquals(206, part.status)
+        assertEquals("bytes 100-199/${File(media, "clip.mp4").length()}", part.header("content-range"))
+    }
+
+    @Test
+    fun aPictureStillBeingMadeReadyAsThePresentationEndsNeverGoes() {
+        val media = File(mapFolder, "media").apply { mkdirs() }
+        File(media, "beach.jpg").writeBytes(ByteArray(64))
+        File(mapFolder, "map.md").writeText("# Map")
+        val copying = CountDownLatch(1)
+        val ended = CountDownLatch(1)
+
+        // Its copy without what its file says takes a while, as a big video's does.
+        val outgoing = { file: File ->
+            copying.countDown()
+            ended.await(5, TimeUnit.SECONDS)
+            file
+        }
+
+        val room = BrowserPresenting(::asset, english, mapFolder, scope, JoiningOptions(askNames = false), preferredPort = 0, policy = anyone, listenOn = { null }, clock = { now }, outgoing = outgoing)
+        rooms += room
+        room.start()
+        showMap(room)
+        val browser = Browser(room.port)
+        browser.get("/${room.code}/")
+        val asked = CompletableFuture.supplyAsync { browser.get("/${room.code}/media/beach.jpg") }
+
+        // The map is private, and locks as its picture is made ready: the presentation ends.
+        assertTrue(copying.await(5, TimeUnit.SECONDS))
+        room.audience.send(AudienceCommand.End)
+        ended.countDown()
+        assertEquals(404, asked.get(5, TimeUnit.SECONDS).status)
+    }
+
+    @Test
     fun picturesAndVideosGoToThoseWhoJoinedVideosInTheirParts() {
         val media = File(mapFolder, "media").apply { mkdirs() }
         val clip = "0123456789".repeat(1_000)
@@ -161,6 +228,7 @@ class BrowserPresentingTest {
         File(media, "beach.jpg").writeBytes(ByteArray(64))
         File(mapFolder, "map.md").writeText("# Map")
         val room = present()
+        showMap(room)
         val path = "/${room.code}/media"
 
         // Not without joining.
@@ -184,6 +252,110 @@ class BrowserPresentingTest {
 
         // Nothing but pictures and videos, and nothing outside the map's media folder.
         listOf("notes.txt", "page.html", "missing.mp4", "..%2Fmap.md", "%2E%2E", ".hidden.mp4").forEach { name ->
+            assertEquals(name, 404, browser.get("$path/$name").status)
+        }
+    }
+
+    @Test
+    fun theRoomGetsOnlyTheFilesTheMapPointsAt() {
+        val media = File(mapFolder, "media").apply { mkdirs() }
+        val shown = listOf("beach.jpg", "trail-poster.jpg", "trail.mp4", "tram.mp4", "tram.jpg", "lake.jpg", "lake-motion.mp4", "boat.jpg", "fado.jpg")
+        // What the map's folder keeps for its earlier versions: a picture taken off it, one that came in a zip, and Orbit's own.
+        val kept = listOf("photo.jpg", "IMG_1234.jpg", "picture-mf2k1x.jpg", "video-mf2k1x.mp4")
+        (shown + kept).forEach { File(media, it).writeBytes(ByteArray(64)) }
+        File(mapFolder, "map.md").writeText("# Map")
+        val room = present()
+        val markdown = """
+            # Lisbon
+            ## Beach
+            ![The beach](media/beach.jpg)
+            ## Trail
+            [![Its poster](media/trail-poster.jpg)](media/trail.mp4)
+            ## Tram
+            <!-- orbit video: { src: media/tram.mp4, thumbnail: media/tram.jpg } -->
+            ## Lake
+            <!-- orbit
+            image:
+              src: media/lake.jpg
+              motion: { src: media/lake-motion.mp4, still: 1.5 }
+            -->
+            Seen from ![the boat](media/boat.jpg).
+            ## Fado <!-- orbit image: ./media/fado.jpg -->
+        """.trimIndent()
+        room.audience.send(AudienceCommand.Show(markdown, AppTheme(dark = false, tokens = emptyMap()), focus = "lisbon"))
+
+        val browser = Browser(room.port)
+        browser.get("/${room.code}/")
+        val path = "/${room.code}/media"
+
+        // Its pictures, a video with its poster, another with its thumbnail, a live photo's motion, a picture in a note.
+        shown.forEach { name -> assertEquals(name, 200, browser.get("$path/$name").status) }
+        kept.forEach { name -> assertEquals(name, 404, browser.get("$path/$name").status) }
+
+        // A picture taken off the map as it's shown goes no more; one put on it, from its folder, goes.
+        room.audience.send(AudienceCommand.Show(markdown.replace("media/beach.jpg", "media/photo.jpg"), AppTheme(dark = false, tokens = emptyMap()), focus = "lisbon"))
+        assertEquals(404, browser.get("$path/beach.jpg").status)
+        assertEquals(200, browser.get("$path/photo.jpg").status)
+
+        // A YAML map's files, as Orbit reads them there.
+        room.audience.send(AudienceCommand.Show("title: Lisbon\nnodes:\n  - text: Lisbon\n    image: media/IMG_1234.jpg\n", AppTheme(dark = false, tokens = emptyMap())))
+        assertEquals(200, browser.get("$path/IMG_1234.jpg").status)
+        assertEquals(404, browser.get("$path/photo.jpg").status)
+    }
+
+    @Test
+    fun theMapsSoundsStayOnThePresentersPhoneThoughAVoiceMemoIsAnMp4() {
+        val media = File(mapFolder, "media").apply { mkdirs() }
+        listOf("memo-1.mp4", "sound-2.mp4", "talk.mp4", "clip.mp4", "song.mp3").forEach { File(media, it).writeText("0123456789".repeat(100)) }
+        File(mapFolder, "map.md").writeText("# Map")
+        val room = present()
+        // Each of them pointed at, so it's as a sound that each stays: even an `.mp4` Orbit named a sound, shown as a video.
+        val markdown = """
+            # Lisbon
+            ## Fado
+            <!-- orbit audio: media/memo-1.mp4 -->
+            ## The talk
+            <!-- orbit
+            sound:
+              src: media/talk.mp4
+              caption: Before the tram
+            -->
+            ## Tram
+            <!-- orbit video: media/clip.mp4 -->
+            ## Songs
+            <!-- orbit video: media/sound-2.mp4 -->
+            [The song](media/song.mp3)
+        """.trimIndent()
+        room.audience.send(AudienceCommand.Show(markdown, AppTheme(dark = false, tokens = emptyMap()), focus = "lisbon"))
+
+        val browser = Browser(room.port)
+        browser.get("/${room.code}/")
+        val path = "/${room.code}/media"
+
+        // The map's sounds play from the presenter's phone: a voice memo, an `.mp4` Orbit named a sound, or one the map plays as one.
+        listOf("memo-1.mp4", "sound-2.mp4", "talk.mp4", "song.mp3").forEach { name ->
+            assertEquals(name, 404, browser.get("$path/$name").status)
+        }
+
+        assertEquals(200, browser.get("$path/clip.mp4").status)
+    }
+
+    @Test
+    fun onceThePresentationEndedNoneOfTheMapsPicturesOrVideosGo() {
+        val media = File(mapFolder, "media").apply { mkdirs() }
+        listOf("clip.mp4", "beach.jpg").forEach { File(media, it).writeText("0123456789".repeat(100)) }
+        File(mapFolder, "map.md").writeText("# Map")
+        val room = present()
+        showMap(room)
+        val browser = Browser(room.port)
+        browser.get("/${room.code}/")
+        val path = "/${room.code}/media"
+        assertEquals(200, browser.get("$path/beach.jpg").status)
+
+        // As when a private map locks with the phone's screen off: the room hears the end before Orbit stops listening.
+        room.audience.send(AudienceCommand.End)
+
+        listOf("clip.mp4", "beach.jpg").forEach { name ->
             assertEquals(name, 404, browser.get("$path/$name").status)
         }
     }

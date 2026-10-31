@@ -3,7 +3,7 @@
 <resources>
     <string name="data_template_brainstorm_title">Lluvia de ideas</string>
     <string name="data_template_brainstorm_description">Un tema en el centro y espacio para cada idea</string>
-    <string name="data_template_project_plan_title">Plan de proyecto</string>
+    <string name="data_template_project_plan_title">Plan del proyecto</string>
     <string name="data_template_project_plan_description">Hitos y tareas, con anillos que se llenan a medida que se completan</string>
     <string name="data_template_study_notes_title">Notas de estudio</string>
     <string name="data_template_study_notes_description">Ideas clave, preguntas y fuentes sobre un tema</string>
@@ -39,6 +39,8 @@
     <string name="data_yaml_unreadable_at_line">Orbit no pudo leer todo ese YAML, así que no hizo un mapa con él: %1$s (línea %2$d)</string>
     <string name="data_newer_version_keeps_maps">Una versión más reciente de Orbit guarda estos mapas: actualiza Orbit para cambiarlos.</string>
     <string name="data_could_not_add_map">Orbit no pudo agregar el mapa. ¿Está lleno el almacenamiento de este dispositivo?</string>
+    <string name="data_could_not_change_map">Orbit no pudo cambiar el mapa.</string>
+    <string name="data_could_not_save_change">Orbit no pudo guardar ese cambio. ¿Está lleno el almacenamiento de este dispositivo?</string>
 
     <!-- Archivos zip que Orbit no acepta -->
     <string name="data_zip_too_many_files">Ese archivo zip tiene demasiados archivos para ser mapas.</string>
@@ -46,15 +48,25 @@
     <string name="data_zip_points_outside">Ese archivo zip tiene un archivo que apunta fuera de él.</string>
     <string name="data_zip_file_too_big">Ese archivo zip tiene un archivo demasiado grande para formar parte de un mapa.</string>
     <string name="data_no_room_for_zip_maps">No hay espacio en este dispositivo para los mapas de ese archivo zip.</string>
+    <plurals name="data_zip_files_filled_in">
+        <item quantity="one">Llegó un archivo que le faltaba a un mapa de aquí: una imagen, un video, un audio o una versión.</item>
+        <item quantity="many">Llegaron %1$d archivos que les faltaban a mapas de aquí: imágenes, videos, audios o versiones.</item>
+        <item quantity="other">Llegaron %1$d archivos que les faltaban a mapas de aquí: imágenes, videos, audios o versiones.</item>
+    </plurals>
+    <plurals name="data_zip_folders_without_maps">
+        <item quantity="one">Una carpeta de ese archivo zip no tenía ningún mapa, así que se dejó fuera.</item>
+        <item quantity="many">%1$d carpetas de ese archivo zip no tenían ningún mapa, así que se dejaron fuera.</item>
+        <item quantity="other">%1$d carpetas de ese archivo zip no tenían ningún mapa, así que se dejaron fuera.</item>
+    </plurals>
 
     <!-- Imágenes y videos que un mapa no admite -->
     <string name="data_video_too_big">Ese video pesa %1$s, y un mapa admite videos de hasta %2$s para poder enviarse a tus otros dispositivos. Recórtalo en tu galería o agrégalo como enlace de YouTube o Vimeo.</string>
     <string name="data_video_past_limit">Ese video pesa más de %1$s, y un mapa admite videos de hasta ese tamaño para poder enviarse a tus otros dispositivos. Recórtalo en tu galería o agrégalo como enlace de YouTube o Vimeo.</string>
-    <string name="data_video_past_map_room">Las imágenes y los videos de este mapa ya suman %1$s. Con este video pasarían de los %2$s que un mapa puede llevar cuando se comparte o se respalda. Elige uno más corto o agrégalo como enlace de YouTube o Vimeo.</string>
-    <string name="data_picture_past_map_room">Las imágenes y los videos de este mapa suman %1$s, todo lo que un mapa puede llevar cuando se comparte o se respalda. Quita uno para hacer espacio o agrega esta imagen como dirección web.</string>
+    <string name="data_video_past_map_room">Las imágenes, los videos y los audios de este mapa ya suman %1$s. Con este video pasarían de los %2$s que un mapa puede llevar cuando se comparte o se respalda. Elige uno más corto o agrégalo como enlace de YouTube o Vimeo.</string>
+    <string name="data_picture_past_map_room">Las imágenes, los videos y los audios de este mapa suman %1$s, todo lo que un mapa puede llevar cuando se comparte o se respalda. Quita uno para hacer espacio o agrega esta imagen como dirección web.</string>
     <string name="data_video_kind_refused">Orbit guarda los videos como archivos MP4, WebM o QuickTime, y este es de tipo %1$s.</string>
     <string name="data_video_kind_unknown">Orbit guarda los videos como archivos MP4, WebM o QuickTime, y este es de un tipo que no conoce.</string>
-    <string name="data_no_room_for_video">No hay espacio en este teléfono para ese video.</string>
+    <string name="data_no_room_for_video">No hay espacio en este dispositivo para ese video.</string>
     <string name="data_more_than_a_map_keeps">Eso es más de lo que admite un mapa.</string>
     <string name="data_megabytes">%1$s MB</string>
 
@@ -139,5 +151,13 @@
         <item quantity="one">%1$d nota ahora es texto sin formato, sin negritas, cursivas ni listas.</item>
         <item quantity="many">%1$d notas ahora son texto sin formato, sin negritas, cursivas ni listas.</item>
         <item quantity="other">%1$d notas ahora son texto sin formato, sin negritas, cursivas ni listas.</item>
+    </plurals>
+    <!-- Un zip que una versión más reciente de Orbit hizo de un modo que esta leería mal: no entra nada de él. -->
+    <string name="data_zip_from_newer_orbit">Ese archivo zip viene de una versión más reciente de Orbit. Actualiza Orbit para abrirlo.</string>
+    <!-- Archivos de un zip de tipos que esta versión no conoce, de un Orbit más reciente por ejemplo, que no entraron con sus mapas. -->
+    <plurals name="data_zip_files_left_out">
+        <item quantity="one">Ese archivo zip tenía un archivo de un tipo que esta versión de Orbit no conoce, así que se dejó fuera. Actualiza Orbit para traerlo.</item>
+        <item quantity="many">Ese archivo zip tenía %1$d archivos de tipos que esta versión de Orbit no conoce, así que se dejaron fuera. Actualiza Orbit para traerlos.</item>
+        <item quantity="other">Ese archivo zip tenía %1$d archivos de tipos que esta versión de Orbit no conoce, así que se dejaron fuera. Actualiza Orbit para traerlos.</item>
     </plurals>
 </resources>

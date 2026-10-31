@@ -10,7 +10,7 @@ A dónde, cuándo y quiénes van.
 - [ ] Una excursión de un día
 
 ## 🍽️ Comida
-- Un platillo local para probar
+- Un plato típico para probar
 - Un mercado
 
 ## 🏨 Hospedaje

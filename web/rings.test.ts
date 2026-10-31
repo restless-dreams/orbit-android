@@ -1,7 +1,7 @@
-import { describe, expect, test } from 'bun:test';
-import { parseOrbit, serializeOrbitMarkdown, serializeOrbitYAML } from '@restless-dreams/orbit';
+import { describe, expect, spyOn, test } from 'bun:test';
+import { createOrbitMap, parseOrbit, serializeOrbitMarkdown, serializeOrbitYAML } from '@restless-dreams/orbit';
 import type { OrbitNode } from '@restless-dreams/orbit';
-import { aboutAppSettings, automaticRings, automaticType, nodeTypeFor, progressOf, progressRing, withAutomaticRings } from './look';
+import { aboutAppSettings, automaticRings, automaticType, drawsProgress, nodeTypeFor, nodeTypes, progressOf, progressRing, withAutomaticRings } from './look';
 
 const WEEKEND = `# Weekend
 
@@ -207,5 +207,61 @@ author: someone
     const off = serializeOrbitYAML(withAutomaticRings(yaml, false));
     expect(off).toContain('progressRings: false');
     expect(automaticRings(parseOrbit(off))).toBe(false);
+  });
+});
+
+describe('drawsProgress', () => {
+  test('an idea drawn as Progress by itself gets its ring, as one written as Progress does, and one for a newer Progress doesn\'t', () => {
+    const map = parseOrbit('# Goals\n## Savings <!-- orbit type: goal, target: 300, current: 120 -->\n## Launch <!-- orbit type: progress -->\n- [ ] Plan\n## Later <!-- orbit type: progress@2 -->\n- [ ] One\n');
+    const [, launch, later] = map.root.children;
+    // The goal right under it makes the center a Progress idea by itself, with no kind of its own.
+    expect(automaticType(map.root)).toBe('progress');
+    expect(drawsProgress(map.root)).toBe(true);
+    expect(drawsProgress(launch)).toBe(true);
+    expect(drawsProgress(later)).toBe(false);
+  });
+});
+
+describe('rings on the map', () => {
+  // Nothing here names a type: the center has goals with targets right under it, and Launch has to-dos.
+  const GOALS = `# Goals
+## Savings <!-- orbit type: goal, target: 300, current: 120 -->
+## Reading <!-- orbit type: goal, target: 12, current: 9 -->
+## Launch
+- [x] Plan
+- [ ] Build
+- [ ] Ship
+`;
+
+  /** What the map shows of idea `id`: the type it's drawn as, what its ring says, and where its name is. */
+  const shown = (host: HTMLElement, id: string): { type: string | null; ring: string | null; name: string | null; onPill: boolean } => {
+    const content = host.querySelector(`.orbit-node-content[data-orbit-for="${id}"]`);
+    const label = host.querySelector(`.orbit-label[data-orbit-for="${id}"]`);
+
+    return {
+      type: host.querySelector(`[data-orbit-node-id="${id}"]`)?.getAttribute('data-orbit-type') ?? null,
+      ring: content?.querySelector('svg') ? content.textContent : null,
+      name: label?.querySelector('.orbit-label__text')?.textContent ?? null,
+      onPill: label?.classList.contains('orbit-label--outside') ?? false,
+    };
+  };
+
+  test('an idea that is a Progress by itself shows its ring, with how far along it is, and its name on a pill by it', () => {
+    // happy-dom lays nothing out, and a map with no size draws nothing: this one is a phone's.
+    const measuring = spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 412, 700));
+    const host = document.body.appendChild(document.createElement('div'));
+    let map: ReturnType<typeof createOrbitMap> | null = null;
+
+    try {
+      // As the pages draw a map: with the app's kinds of ideas, and rings by themselves.
+      map = createOrbitMap(host, parseOrbit(GOALS), { nodeTypes: nodeTypes(), nodeTypeFor: nodeTypeFor(() => true), transitionDuration: 0 });
+      // The ring fills the planet, so Orbit puts the name on a pill by it, as it does by a picture.
+      expect(shown(host, 'goals')).toEqual({ type: 'progress', ring: '43%', name: 'Goals', onPill: true });
+      expect(shown(host, 'launch')).toEqual({ type: 'progress', ring: '33%', name: 'Launch', onPill: true });
+    } finally {
+      map?.destroy();
+      host.remove();
+      measuring.mockRestore();
+    }
   });
 });

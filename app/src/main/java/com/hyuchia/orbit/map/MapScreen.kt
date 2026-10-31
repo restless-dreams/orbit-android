@@ -1,15 +1,17 @@
 package com.hyuchia.orbit.map
 
 import android.app.Activity
+import android.content.Context
+import android.content.Intent
 import android.os.Build
+import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewConfiguration
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
-import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
@@ -60,6 +62,7 @@ import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.automirrored.outlined.Redo
 import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.outlined.CenterFocusStrong
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Delete
@@ -67,21 +70,27 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.IosShare
 import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Route
+import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.SdCardAlert
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Slideshow
 import androidx.compose.material.icons.outlined.Timer
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -92,22 +101,18 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import com.hyuchia.orbit.data.TRASH_DAYS
-import androidx.core.net.toUri
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Card
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
@@ -131,85 +136,90 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionOnScreen
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.hyuchia.orbit.MapStart
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
-import com.hyuchia.orbit.home.TitleDialog
-import com.hyuchia.orbit.home.tagCounts
+import com.hyuchia.orbit.data.ImportResult
+import com.hyuchia.orbit.data.LockedCover
 import com.hyuchia.orbit.media.MediaKind
-import com.hyuchia.orbit.media.MediaViewer
-import com.hyuchia.orbit.media.VideoScreen
-import com.hyuchia.orbit.nearby.SendSheet
+import com.hyuchia.orbit.media.SoundBar
 import com.hyuchia.orbit.page.MapInsets
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.MapSettings
 import com.hyuchia.orbit.page.SystemWebView
 import com.hyuchia.orbit.present.CastingButton
+import com.hyuchia.orbit.privacy.CoverMenuItem
+import com.hyuchia.orbit.privacy.KeyboardsDontLearn
+import com.hyuchia.orbit.privacy.LocalMapLocked
+import com.hyuchia.orbit.privacy.PrivateMapGate
+import com.hyuchia.orbit.privacy.PrivateMenuItem
+import com.hyuchia.orbit.privacy.WhenPrivateMapsLock
+import com.hyuchia.orbit.privacy.rememberMakePrivate
+import com.hyuchia.orbit.study.StudyMode
 import com.hyuchia.orbit.theme.LocalAppSettings
-import com.hyuchia.orbit.theme.OrbitPalette
 import com.hyuchia.orbit.theme.OrbitTheme
 import com.hyuchia.orbit.theme.appIsDark
 import com.hyuchia.orbit.theme.mapStyle
 import com.hyuchia.orbit.theme.mapTheme
 import com.hyuchia.orbit.theme.parseCssColor
-import com.hyuchia.orbit.ui.ColorPickerDialog
-import com.hyuchia.orbit.ui.EmojiPickerSheet
-import com.hyuchia.orbit.ui.offeredCustomColors
-import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.KeyboardShortcuts
 import com.hyuchia.orbit.ui.LocalShortcuts
 import com.hyuchia.orbit.ui.OldWebViewNotice
+import com.hyuchia.orbit.ui.OrbitSnackbarHost
 import com.hyuchia.orbit.ui.ShortcutListKeys
 import com.hyuchia.orbit.ui.ShortcutPriority
 import com.hyuchia.orbit.ui.hasHardwareKeyboard
 import com.hyuchia.orbit.ui.offerShortcut
+import com.hyuchia.orbit.ui.offeredCustomColors
 import com.hyuchia.orbit.ui.openLink
 import com.hyuchia.orbit.ui.orbitViewModel
+import com.hyuchia.orbit.ui.showsMenuKeys
 import com.hyuchia.orbit.ui.withdrawShortcut
-import com.hyuchia.orbit.ui.TagsSheet
-import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonPrimitive
-import java.math.BigDecimal
 
-/** Panels show beside the map on screens at least this wide. */
-private val SidePanelWidth = 380.dp
-private val WideScreen = 840.dp
-/** Under this width the toolbar leaves out Style and layout, which moves into the map's menu, so the idea's buttons fit. */
-private val RoomForStyle = 400.dp
-/** A button in the toolbar takes this much of its width. */
-private val ToolbarButtonWidth = 48.dp
-/** Shorter than this, as a phone on its side is, the map's tools stand in a rail at its side and the idea's buttons join the top bar. */
-private val ShortScreen = 480.dp
-/** On a screen wider than tall, panels go beside the map whenever it keeps at least this much width. */
-private val MinimumMapWidth = 360.dp
+/** Between the small player for a sound and the toolbar under it, or the map beside it. */
+private val SoundBarGap = 10.dp
+/** On a short screen the small player stands beside the map, at most this wide: the map keeps its height. */
+private val SoundBarBesideWidth = 340.dp
 /** The toolbar floats this far above the bottom edge. */
 private val ToolbarMargin = 16.dp
 /** A floating toolbar with a + is this tall, or as a rail this wide, whatever it holds: room for the + at its largest. */
 private val ToolbarSize = 80.dp
 /** The breadcrumbs' row, which floats over the map's top edge: as tall as a chip's touch target. */
 private val BreadcrumbsHeight = 48.dp
-/** From this width the top bar's Present button says its name. */
-private val LabeledPresentWidth = 600.dp
+/** A device this wide or more either way (dp) is a tablet, and one narrower a phone. */
+private const val TABLET_SMALLEST_WIDTH = 600
 /** The map keeps this much room clear above the toolbar or a sheet. */
 private val Clearance = 8.dp
 /** Between the talk's panel and the toolbar under it, or the map above or beside it. */
@@ -224,15 +234,77 @@ private const val MostSheetRoom = 0.6f
 /**
  * A map, with the screen around it in the map's own style. `onWantsRoom`
  * hears whether it wants the whole window, beside the list on a tablet: for
- * a panel beside the map, its text, or a presentation. `present` starts
- * presenting the map from the top as soon as it's drawn.
+ * a panel beside the map, its text, a presentation or studying. `present`
+ * starts presenting the map from the top as soon as it's drawn, and `study`
+ * studying it. `start` is a presentation or study session a map's card
+ * asks of the map once it's open already: it starts from whatever the map
+ * is doing, and `onStarted` hears it did. `onImported` shows the maps that
+ * map files dropped on it bring, as "Open a file" would.
  */
 @Composable
-fun MapScreen(id: String, onClose: () -> Unit, onWantsRoom: (Boolean) -> Unit = {}, present: Boolean = false) {
-    val model = orbitViewModel(key = "map-$id") { MapViewModel(it, id) }
+fun MapScreen(
+    id: String,
+    onClose: () -> Unit,
+    onWantsRoom: (Boolean) -> Unit = {},
+    besideList: Boolean = false,
+    present: Boolean = false,
+    study: Boolean = false,
+    start: MapStart? = null,
+    onStarted: () -> Unit = {},
+    onImported: (ImportResult) -> Unit = {},
+) {
+    val summaries by LocalContext.current.container.maps.maps.collectAsStateWithLifecycle()
+    val isPrivate = summaries?.firstOrNull { it.id == id }?.metadata?.isPrivate == true
+
+    // Beside the list, Back closes the map once nothing on it is left to close, its lock too: first, so it goes last.
+    val closeScale = remember { Animatable(1f) }
+    BesideListBackHandler(besideList, closeScale, onClose)
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                scaleX = closeScale.value
+                scaleY = closeScale.value
+            },
+    ) {
+        // A private map stays behind its lock while private maps are locked, and what's typed into it stays out of
+        // keyboards' learning.
+        PrivateMapGate(id, onBack = onClose) {
+            KeyboardsDontLearn(enabled = isPrivate) {
+                UnlockedMapScreen(id, onClose, onWantsRoom, present, study, start, onStarted, onImported)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UnlockedMapScreen(
+    id: String,
+    onClose: () -> Unit,
+    onWantsRoom: (Boolean) -> Unit,
+    present: Boolean,
+    study: Boolean,
+    start: MapStart?,
+    onStarted: () -> Unit,
+    onImported: (ImportResult) -> Unit,
+) {
+    val model = orbitViewModel(key = "map-$id") { MapViewModel(id, it.maps, it.settings, it) }
     val ui by model.ui.collectAsStateWithLifecycle()
     var presented by rememberSaveable { mutableStateOf(false) }
+    var studied by rememberSaveable { mutableStateOf(false) }
     val presentSeconds = LocalAppSettings.current.presentationSeconds
+
+    LaunchedEffect(model) {
+        model.drops.openedMaps.collect { onImported(it) }
+    }
+
+    LaunchedEffect(start, ui.ready) {
+        if (start != null && ui.ready) {
+            onStarted()
+            model.startFromCard(start.study, presentSeconds)
+        }
+    }
 
     LaunchedEffect(present, ui.ready) {
         if (present && ui.ready && !presented) {
@@ -241,7 +313,14 @@ fun MapScreen(id: String, onClose: () -> Unit, onWantsRoom: (Boolean) -> Unit = 
         }
     }
 
-    val wantsRoom = ui.panel.showsBeside() || ui.source != null || ui.presentation != null
+    LaunchedEffect(study, ui.ready) {
+        if (study && ui.ready && !studied) {
+            studied = true
+            model.startStudy(fromTop = true)
+        }
+    }
+
+    val wantsRoom = ui.panel.showsBeside() || ui.source != null || ui.presentation != null || ui.study != null
     LaunchedEffect(wantsRoom) { onWantsRoom(wantsRoom) }
     DisposableEffect(Unit) { onDispose { onWantsRoom(false) } }
     // Maps without a style of their own take the app's colors, from the app's theme.
@@ -251,9 +330,12 @@ fun MapScreen(id: String, onClose: () -> Unit, onWantsRoom: (Boolean) -> Unit = 
     LaunchedEffect(theme, settings) { model.configure(theme, settings) }
     val context = LocalContext.current
     val title = ui.map?.title?.takeIf { it.isNotBlank() } ?: ui.map?.let { model.summary()?.title }
+    val summaries by context.container.maps.maps.collectAsStateWithLifecycle()
+    val isPrivate = summaries?.firstOrNull { it.id == id }?.metadata?.isPrivate == true
 
-    LaunchedEffect(title) {
-        if (title != null) {
+    // A private map stays out of the launcher's shortcuts.
+    LaunchedEffect(title, isPrivate) {
+        if (title != null && !isPrivate) {
             offerShortcut(context, id, title)
         }
     }
@@ -302,11 +384,8 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
     val scope = rememberCoroutineScope()
     val colors = MaterialTheme.colorScheme
     val snackbars = remember { SnackbarHostState() }
-    var pickingIcon by remember { mutableStateOf<String?>(null) }
-    var pickingColor by remember { mutableStateOf<String?>(null) }
-    // The goal an amount is being added to, taken off or paid, from its long-press menu.
-    var changingGoal by rememberSaveable { mutableStateOf<String?>(null) }
-    var goalChange by rememberSaveable { mutableStateOf<GoalChange?>(null) }
+    // Pickers, a goal's amount, and the map's own dialogs and sheets, over the map.
+    val dialogs = rememberMapDialogs()
     // The toolbar's room is known before it first shows, so the map opens already fitted around it,
     // and kept while presenting or typing hides it, so the map doesn't move to fill its place and back.
     val toolbarSize = with(LocalDensity.current) { ToolbarSize.roundToPx() }
@@ -321,13 +400,43 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
     val onSheetRest = remember { { top: Float? -> sheetTop = top } }
     var mapBottom by remember { mutableFloatStateOf(0f) }
     var mapHeight by remember { mutableFloatStateOf(0f) }
-    var renamingMap by rememberSaveable { mutableStateOf(false) }
-    var taggingMap by rememberSaveable { mutableStateOf(false) }
     // The note over a map that can only be looked at, in pixels: the map makes room for it.
     var readOnlyBannerHeight by remember { mutableIntStateOf(0) }
-    var deletingMap by rememberSaveable { mutableStateOf(false) }
-    var sending by rememberSaveable { mutableStateOf(false) }
     val app = LocalAppSettings.current
+    val mapSummaries by context.container.maps.maps.collectAsStateWithLifecycle()
+    val isPrivate = mapSummaries?.firstOrNull { it.id == model.id }?.metadata?.isPrivate == true
+    val cover = mapSummaries?.firstOrNull { it.id == model.id }?.metadata?.cover
+
+    // As a private map locks, its send sheet goes, and with it what was shown to computers, as Home's does.
+    WhenPrivateMapsLock {
+        if (isPrivate) {
+            dialogs.sending = false
+        }
+    }
+
+    val makePrivate = rememberMakePrivate { message ->
+        scope.launch {
+            snackbars.currentSnackbarData?.dismiss()
+            snackbars.showSnackbar(message)
+        }
+    }
+
+    val sound by model.sound.collectAsStateWithLifecycle()
+    // The small player's size, for the map to fit above it, or beside it on a short screen.
+    var soundBarSize by remember { mutableStateOf(IntSize.Zero) }
+
+    // A sound pauses as Orbit leaves the screen, as videos do, and stops with the map.
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { model.pauseSound() }
+    DisposableEffect(model) { onDispose { model.stopSound() } }
+
+    // A sound whose idea lost it, or went, stops.
+    LaunchedEffect(ui.nodes, sound?.item) {
+        val playing = sound?.item ?: return@LaunchedEffect
+
+        if (ui.map != null && ui.nodes[playing.nodeId]?.audio?.src != playing.media.src) {
+            model.stopSound()
+        }
+    }
 
     val talk = rememberTalk(model) { message, action, onAction ->
         scope.launch {
@@ -340,9 +449,9 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
         }
     }
 
-    // A presentation has the map and the microphone to itself: a talk still going ends as it starts, the idea being said left out.
-    LaunchedEffect(ui.presentation != null) {
-        if (ui.presentation != null) {
+    // A presentation or a study session has the map and the microphone to itself: a talk still going ends as it starts, the idea being said left out.
+    LaunchedEffect(ui.presentation != null || ui.study != null) {
+        if (ui.presentation != null || ui.study != null) {
             talk.cancel()
         }
     }
@@ -370,95 +479,71 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                         effect.onUndo?.invoke() ?: model.undo()
                     }
                 }
+                MapEvent.KeptInHistory -> scope.launch {
+                    snackbars.currentSnackbarData?.dismiss()
+                    val result = snackbars.showSnackbar(
+                        resources.getString(R.string.map_change_kept_in_history),
+                        actionLabel = resources.getString(R.string.common_version_history),
+                        duration = SnackbarDuration.Long,
+                    )
+
+                    if (result == SnackbarResult.ActionPerformed) {
+                        model.openHistory()
+                    }
+                }
                 MapEvent.Deleted -> {
                     withdrawShortcut(context, model.id)
                     onClose()
+                }
+                MapEvent.PresentAgain -> scope.launch {
+                    snackbars.currentSnackbarData?.dismiss()
+                    val result = snackbars.showSnackbar(
+                        resources.getString(R.string.private_presentation_stopped),
+                        actionLabel = resources.getString(R.string.private_present_again),
+                        duration = SnackbarDuration.Long,
+                    )
+
+                    if (result == SnackbarResult.ActionPerformed) {
+                        model.startPresentation(app.presentationSeconds)
+                    }
                 }
             }
         }
     }
 
-    fun act(node: MapNode, action: NodeAction) {
-        if (action is NodeAction.StepGoal) {
-            // A step keeps the menu open, for the next one; the ring behind it moves with each.
-            model.addToGoal(node.id, BigDecimal(action.by))
-            return
-        }
-
-        model.show(null)
-        val parent = node.parentId?.let { ui.nodes[it] }
-
-        when (action) {
-            NodeAction.AddChild -> model.addIdea(node.id)
-            NodeAction.AddSibling -> model.addIdea(node.parentId ?: return, node.index + 1)
-            NodeAction.Rename -> model.rename(node.id)
-            NodeAction.Edit -> model.show(Panel.Editor(node.id))
-            NodeAction.PickIcon -> pickingIcon = node.id
-            NodeAction.PickColor -> pickingColor = node.id
-            is NodeAction.SetStatus -> model.update(node.id, "status", action.status?.let(::JsonPrimitive))
-            is NodeAction.SetColor -> model.update(node.id, "color", action.color?.let(::JsonPrimitive))
-            is NodeAction.SetCollapsed -> model.update(node.id, "collapsed", if (action.collapsed) JsonPrimitive(true) else null)
-            NodeAction.Copy -> model.copy(node.id)
-            NodeAction.Paste -> model.paste(node.id)
-            NodeAction.Duplicate -> model.duplicate(node.id)
-            NodeAction.MoveEarlier -> model.move(node.id, node.parentId ?: return, node.index - 1)
-            NodeAction.MoveLater -> model.move(node.id, node.parentId ?: return, node.index + 1)
-            NodeAction.MoveOut -> {
-                val grandparent = parent?.parentId ?: return
-                model.move(node.id, grandparent, parent.index + 1)
-            }
-            NodeAction.MoveIn -> {
-                val before = ui.map?.nodes?.firstOrNull { it.parentId == node.parentId && it.index == node.index - 1 } ?: return
-                model.move(node.id, before.id, null)
-            }
-            NodeAction.Delete -> model.remove(node.id)
-            is NodeAction.ChangeGoal -> {
-                changingGoal = node.id
-                goalChange = action.change
-            }
-            is NodeAction.StepGoal -> Unit
-        }
-    }
-
     // Swiping back flies up a level, with the map shrinking under the finger like any screen does.
     val backScale = remember { Animatable(1f) }
-    val canGoUp = ui.path.size > 1 || ui.mode == "all"
+    MapBackHandlers(model, ui, talk, backScale)
 
-    PredictiveBackHandler(enabled = canGoUp && !ui.editing && ui.source == null && ui.presentation == null && ui.panel == null) { events ->
-        try {
-            events.collect { event -> backScale.snapTo(1f - 0.06f * event.progress) }
-            model.goUp()
-        } catch (cancelled: CancellationException) {
-            // Swiped back in: stay.
-        } finally {
-            scope.launch { backScale.animateTo(1f, tween(220)) }
-        }
-    }
-
-    // Back while typing keeps what was typed and closes the field.
-    BackHandler(enabled = ui.editing) { model.stopEditing(save = true) }
-    BackHandler(enabled = ui.source != null && !ui.editing) { model.closeSource() }
-    BackHandler(enabled = ui.presentation != null) { model.stopPresentation() }
-    BackHandler(enabled = talk.active && ui.presentation == null) { talk.stop() }
-    // Making a path, back flies up the map like always, and at its top keeps the path.
-    BackHandler(enabled = ui.pathMaking && !canGoUp && !ui.editing && ui.panel == null) { model.finishPath() }
-
-    val mapAlpha by animateFloatAsState(if (ui.ready) 1f else 0f, tween(260), label = "map")
-    val style = mapStyle(ui.map?.style)
-    val background = parseCssColor(ui.map?.surface) ?: style.background.takeIf { ui.map?.style != null && it.isSpecified } ?: colors.background
+    // The map fades in once its page has drawn it, over its own colors from the start: a dark map doesn't open through
+    // the app's light screen, then its empty surface, then itself painting from the top down.
+    val mapAlpha by animateFloatAsState(if (ui.ready && ui.drawn) 1f else 0f, tween(260), label = "map")
+    // Until the page says which style the map has, its file does.
+    val styleName = if (ui.map != null) ui.map?.style else model.summary()?.outline?.style
+    val style = mapStyle(styleName)
+    val background = parseCssColor(ui.map?.surface) ?: style.background.takeIf { styleName != null && it.isSpecified } ?: colors.background
     // A map Orbit couldn't read has no title on the page: the one its file's first heading gives stands in.
     val title = ui.map?.title?.takeIf { it.isNotBlank() } ?: model.summary()?.title.orEmpty()
 
     // With nothing over it, the map holds the keyboard's focus, so its keys work as it opens and once a panel closes.
-    val mapClear = ui.ready && ui.panel == null && ui.source == null && ui.presentation == null
+    val mapClear = ui.ready && ui.panel == null && ui.source == null && ui.presentation == null && ui.study == null
 
-    // The keyboard: the map's shortcuts, or while presenting, the presentation's own keys, listed.
+    // The keyboard: the map's shortcuts, or while presenting, the presentation's own keys, listed. Under a private
+    // map's lock, none: the keyboard can't reach the map.
     val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+    val coveredByLock = LocalMapLocked.current
     KeyboardShortcuts(
-        if (ui.presentation != null) {
-            presentingShortcuts()
-        } else {
-            mapShortcuts(model, ui, present = { model.startPresentation(app.presentationSeconds) }, back = { backDispatcher?.onBackPressed() })
+        when {
+            coveredByLock -> emptyList()
+            ui.presentation != null -> presentingShortcuts()
+            ui.study != null -> studyShortcuts()
+            else -> mapShortcuts(
+                model,
+                ui,
+                present = { model.startPresentation(app.presentationSeconds) },
+                back = { backDispatcher?.onBackPressed() },
+                lockNow = if (isPrivate) model::lockPrivateMapsNow else null,
+            )
         },
         priority = ShortcutPriority.Map,
     )
@@ -468,21 +553,31 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
         return
     }
 
+    if (ui.study != null) {
+        StudyMode(model, ui, background) { MapCanvas(model, Modifier.fillMaxSize().graphicsLayer { alpha = mapAlpha }, focusable = false) }
+        return
+    }
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val short = maxHeight < ShortScreen
-        val wide = maxWidth >= WideScreen || (maxWidth > maxHeight && maxWidth >= SidePanelWidth + MinimumMapWidth)
-        // A map with pictures or videos keeps room for the button that shows them, whichever idea is in focus,
-        // so Style and layout doesn't come and go as the map is flown through.
-        val showStyle = maxWidth >= RoomForStyle + (if (ui.hasMedia) ToolbarButtonWidth else 0.dp) && !short
+        val layout = mapLayout(maxWidth, maxHeight, ui)
+        val short = layout.short
+        val wide = layout.wide
+        val showStyle = layout.styleInToolbar
         val density = LocalDensity.current
         val layoutDirection = LocalLayoutDirection.current
-        val idea = ui.sun.takeIf { ui.mode == "focus" }
+        val idea = ui.sun.takeIf { ui.focused }
         val onDetails = idea?.takeIf { ui.hasDetails(it) }?.let { node -> { model.show(Panel.Details(node.id)) } }
         val onEdit = idea?.let { node -> { model.show(Panel.Editor(node.id)) } }
 
         val onMedia = idea?.takeIf { it.image != null || it.video != null }?.let { node ->
             { if (node.image != null) model.view(node.id, MediaKind.Picture) else model.play(node.id) }
         }
+
+        // The idea in focus's sound plays in the small player, and the map can be flown on meanwhile.
+        val onSound = idea?.takeIf { it.audio != null }?.let { node -> { model.toggleSound(node.id) } }
+        val soundPlaying = sound?.playing == true && sound?.item?.nodeId == idea?.id
+        val soundBar = sound != null && ui.recording == null && !ui.editing && ui.source == null && !ui.pathMaking && ui.study == null
+        val soundRoom = if (soundBar) with(density) { (if (short) soundBarSize.width else soundBarSize.height).toDp() } + SoundBarGap else 0.dp
 
         // The toolbar floats over the map's bottom edge, or stands at its side on a short screen, and
         // a sheet that stops partway covers its lower part: Orbit fits its views into the room they
@@ -511,7 +606,7 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
         }
 
         val pathRoom = with(density) { (maxOf(pathBarHeight, toolbarHeight) + bars.getBottom(density)).toDp() } + ToolbarMargin + Clearance
-        val lifted = !wide && ui.panel.liftsMap()
+        val lifted = layout.lifted
 
         LaunchedEffect(lifted) {
             if (!lifted) {
@@ -525,7 +620,7 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
         // The breadcrumbs' room is kept even at the top level, so flying in and out never resizes the map.
         val crumbsRoom = BreadcrumbsHeight.value
         // Making a path, the breadcrumbs float over the map on every screen: the top bar is the path's.
-        val crumbsOver = !short || ui.pathMaking
+        val crumbsOver = layout.crumbsOver
 
         LaunchedEffect(talk.active) {
             if (!talk.active) {
@@ -550,7 +645,13 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
             short -> {
                 // The panel stands at the side the rail doesn't, clear of the bars there.
                 val panelSide = if (railAtLeft) bars.getRight(density, layoutDirection) else bars.getLeft(density, layoutDirection)
-                val panelRoom = if (talking) (with(density) { panelSide.toDp() } + TalkMargin + talkRoom).value else 0f
+
+                // The small player stands there too: a talk stops the sound, so they never meet.
+                val panelRoom = when {
+                    talking -> (with(density) { panelSide.toDp() } + TalkMargin + talkRoom).value
+                    soundBar -> (with(density) { panelSide.toDp() } + TalkMargin + soundRoom).value
+                    else -> 0f
+                }
 
                 if (railAtLeft) {
                     MapInsets(top = bannerRoom.value, left = railRoom.value, right = panelRoom, bottom = navigation)
@@ -558,10 +659,18 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                     MapInsets(top = bannerRoom.value, left = panelRoom, right = railRoom.value, bottom = navigation)
                 }
             }
-            else -> MapInsets(top = topRoom, bottom = (toolbarRoom + if (talking) talkRoom else 0.dp).value)
+            else -> MapInsets(top = topRoom, bottom = (toolbarRoom + soundRoom + if (talking) talkRoom else 0.dp).value)
         }
 
-        LaunchedEffect(insets) { model.setInsets(insets) }
+        // The talk's panel coming or going is a change made once: the map glides to make room for it, with the panel,
+        // rather than jumping. Every other change, such as the keyboard sliding, moves it at once. A talk that leaves
+        // the insets as they were (behind a sheet) still counts, so the next change isn't taken for the panel's.
+        var talkingBefore by remember { mutableStateOf(talking) }
+
+        LaunchedEffect(insets, talking) {
+            model.setInsets(insets, glide = talking != talkingBefore)
+            talkingBefore = talking
+        }
 
         Scaffold(
             containerColor = background,
@@ -576,19 +685,26 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                         title = title,
                         ui = ui,
                         background = background,
-                        onBack = onClose,
+                        // What's being typed is kept before the map closes, as Back keeps it.
+                        onBack = { scope.launch { model.finishEditing(); onClose() } },
                         onUndo = model::undo,
                         onRedo = model::redo,
-                        onRename = if (ui.readOnly == null) ({ renamingMap = true }) else null,
-                        onTags = if (ui.readOnly == null) ({ taggingMap = true }) else null,
+                        onRename = if (ui.readOnly == null) ({ dialogs.renamingMap = true }) else null,
+                        onTags = if (ui.readOnly == null) ({ dialogs.taggingMap = true }) else null,
+                        isPrivate = isPrivate,
+                        onPrivate = { private -> model.summary()?.let { map -> makePrivate(map, private) } },
+                        cover = cover,
+                        onCover = if (isPrivate) ({ dialogs.coveringMap = true }) else null,
+                        onLockNow = if (isPrivate) model::lockPrivateMapsNow else null,
                         onSource = model::openSource,
                         onPresent = { model.startPresentation(app.presentationSeconds) },
                         onPath = model::startPath,
                         onRehearse = { model.startPresentation(0, fromStart = true, rehearse = true) },
+                        onStudy = { model.startStudy() },
                         onHistory = model::openHistory,
                         onExport = { model.show(Panel.Export) },
-                        onSend = { sending = true },
-                        onDelete = { deletingMap = true },
+                        onSend = { dialogs.sending = true },
+                        onDelete = { dialogs.deletingMap = true },
                         onFocus = { model.focus(it.id) },
                         onStyle = if (showStyle || ui.readOnly != null) null else ({ model.show(Panel.Style) }),
                         compact = short,
@@ -596,22 +712,46 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                         onMedia = if (short) onMedia else null,
                         onDetails = if (short) onDetails else null,
                         onEdit = if (short) onEdit else null,
-                        labeledPresent = maxWidth >= LabeledPresentWidth,
+                        labeledPresent = layout.labeledPresent,
+                        onSound = if (short) onSound else null,
+                        soundPlaying = soundPlaying,
                     )
                 }
             },
             snackbarHost = {
                 // Messages come up above the toolbar, the path's strip or the keyboard, rather than under them.
                 val lift = when {
-                    ui.source != null || !crumbsOver || ui.editing -> 0.dp
+                    ui.source != null || ui.editing -> 0.dp
+                    // On a short screen they come up above the small player, beside the map.
+                    !crumbsOver -> if (soundBar) with(density) { soundBarSize.height.toDp() } + ToolbarMargin + SoundBarGap else 0.dp
                     ui.pathMaking -> with(density) { pathBarHeight.toDp() } + ToolbarMargin
-                    else -> 88.dp
+                    else -> 88.dp + soundRoom
                 }
 
-                SnackbarHost(
+                // With a panel or the map's text beside the map, they sit over the map they're about, clear of it (and on a
+                // short screen of the rail at the map's side), gliding there as it comes and goes.
+                val clearOfBeside by animateDpAsState(
+                    besideRoom(
+                        beside = layout.beside,
+                        // The scaffold keeps them clear of the bars at the screen's end already, which what's beside reaches over.
+                        scaffoldEnd = with(density) {
+                            if (layoutDirection == LayoutDirection.Rtl) {
+                                ScaffoldDefaults.contentWindowInsets.getLeft(density, layoutDirection).toDp()
+                            } else {
+                                ScaffoldDefaults.contentWindowInsets.getRight(density, layoutDirection).toDp()
+                            }
+                        },
+                        rail = if (short && ui.source == null) with(density) { (railWidth + railSide).toDp() } + ToolbarMargin else 0.dp,
+                    ),
+                    animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+                    label = "clearOfBeside",
+                )
+
+                OrbitSnackbarHost(
                     snackbars,
                     Modifier
-                        .padding(bottom = lift)
+                        // The glide's spring may overshoot on its way back to nothing.
+                        .padding(bottom = lift, end = clearOfBeside.coerceAtLeast(0.dp))
                         .windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets.navigationBars)),
                 )
             },
@@ -622,7 +762,8 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                     .padding(top = padding.calculateTopPadding())
                     .consumeWindowInsets(padding),
             ) {
-                val sourceBeside = ui.source != null && wide
+                // Beside the map, its text: the layout says so only while there is one.
+                val sourceBeside = ui.source?.takeIf { layout.sourceBeside }
 
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     Column(Modifier.fillMaxSize()) {
@@ -648,12 +789,20 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                                         scaleY = backScale.value
                                     },
                             )
-                            MapOverlays(model, ui, ::act, hint = !talk.active, onBannerHeight = { readOnlyBannerHeight = it })
+                            MapOverlays(model, ui, { node, action -> actOnIdea(model, ui, dialogs, node, action) }, hint = !talk.active, onBannerHeight = { readOnlyBannerHeight = it })
+                            // What a drag from another app would do: under the breadcrumbs, or above the toolbar while the finger is high.
+                            DropFeedback(
+                                model.drops,
+                                ui,
+                                top = if (crumbsOver && ui.path.size > 1 && ui.focused) BreadcrumbsHeight + 8.dp else 16.dp,
+                                bottom = insets.bottom.dp + 8.dp,
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                            )
 
                             // On a short screen the breadcrumbs are in the top bar instead, unless it's the path's.
                             if (crumbsOver && ui.source == null) {
                                 androidx.compose.animation.AnimatedVisibility(
-                                    visible = ui.path.size > 1 && ui.mode == "focus",
+                                    visible = ui.path.size > 1 && ui.focused,
                                     enter = fadeIn() + slideInVertically(),
                                     exit = fadeOut() + slideOutVertically(),
                                     modifier = Modifier.align(Alignment.TopStart),
@@ -717,6 +866,33 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                             },
                     )
 
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = soundBar,
+                        enter = fadeIn() + slideInVertically { it / 2 },
+                        exit = fadeOut() + slideOutVertically { it / 2 },
+                        modifier = Modifier
+                            .align(if (short) Alignment.BottomStart else Alignment.BottomCenter)
+                            .padding(clearOfBars)
+                            .then(
+                                if (short) {
+                                    Modifier.padding(start = TalkMargin, bottom = ToolbarMargin).widthIn(max = SoundBarBesideWidth)
+                                } else {
+                                    Modifier.padding(start = 16.dp, end = 16.dp, bottom = ToolbarMargin + with(density) { toolbarHeight.toDp() } + SoundBarGap)
+                                },
+                            )
+                            .onSizeChanged { if (it.height > 0) soundBarSize = it },
+                    ) {
+                        sound?.let { playing ->
+                            SoundBar(
+                                sound = playing,
+                                controls = model.sounds,
+                                source = model::mediaModel,
+                                onOpen = { model.viewSound(playing.item.nodeId) },
+                                onStop = model::stopSound,
+                            )
+                        }
+                    }
+
                     if (ui.source == null) {
                         MapToolbar(
                             ui = ui,
@@ -728,6 +904,8 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                             onToggleView = model::toggleView,
                             onStyle = if (showStyle && ui.readOnly == null) ({ model.show(Panel.Style) }) else null,
                             onMedia = if (short) null else onMedia,
+                            onSound = if (short) null else onSound,
+                            soundPlaying = soundPlaying,
                             onDetails = if (short) null else onDetails,
                             onEdit = if (short || ui.readOnly != null) null else onEdit,
                             onAdd = if (ui.readOnly == null) ({ model.addIdea() }) else null,
@@ -748,156 +926,38 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                     }
                 }
 
-                if (sourceBeside) {
+                // Beside the map, the text and the panels reach the screen's edge, under the navigation bar or the
+                // cutout there on a phone on its side, and under the taskbar: what they hold keeps clear of them.
+                val besideEdge = with(density) { railSide.toDp() }
+
+                if (sourceBeside != null) {
                     VerticalDivider()
-                    SourceEditor(model, ui.source, ui.readOnly, Modifier.width(SidePanelWidth + 80.dp).fillMaxHeight(), clearOfBars.calculateBottomPadding())
-                } else if (wide && ui.panel.showsBeside()) {
+
+                    Box(Modifier.width(SidePanelWidth + SourceExtraWidth).fillMaxHeight().background(colors.surfaceContainerLow)) {
+                        SourceEditor(model, sourceBeside, ui.readOnly, Modifier.fillMaxSize().padding(end = besideEdge), clearOfBars.calculateBottomPadding())
+                    }
+                } else if (layout.panelBeside) {
                     VerticalDivider()
 
                     Surface(color = colors.surfaceContainerLow, modifier = Modifier.width(SidePanelWidth).fillMaxHeight()) {
-                        MapPanels(model, ui, sheet = false, onPickIcon = { pickingIcon = it }, onPickColor = { pickingColor = it })
+                        Box(Modifier.padding(end = besideEdge, bottom = clearOfBars.calculateBottomPadding())) {
+                            MapPanels(model, ui, sheet = false, onPickIcon = { dialogs.pickingIcon = it }, onPickColor = { dialogs.pickingColor = it })
+                        }
                     }
                 }
             }
         }
 
-        if (!wide || !ui.panel.showsBeside()) {
+        if (!layout.panelBeside) {
             CompositionLocalProvider(LocalSheetRest provides onSheetRest) {
-                MapPanels(model, ui, sheet = true, onPickIcon = { pickingIcon = it }, onPickColor = { pickingColor = it })
+                MapPanels(model, ui, sheet = true, onPickIcon = { dialogs.pickingIcon = it }, onPickColor = { dialogs.pickingColor = it })
             }
         }
     }
 
-    pickingIcon?.let { nodeId ->
-        val node = ui.nodes[nodeId]
-        EmojiPickerSheet(
-            title = stringResource(R.string.map_icon_for, node?.text.orEmpty()),
-            hasIcon = node?.icon != null,
-            onPick = { emoji ->
-                pickingIcon = null
-                model.update(nodeId, "icon", emoji?.let(::JsonPrimitive))
-            },
-            onDismiss = { pickingIcon = null },
-        )
-    }
-
-    pickingColor?.let { nodeId ->
-        val node = ui.nodes[nodeId]
-
-        if (node == null) {
-            pickingColor = null
-        } else {
-            ColorPickerDialog(
-                title = stringResource(R.string.map_color_for, node.text),
-                label = node.label(stringResource(R.string.common_untitled)),
-                initial = parseCssColor(node.color) ?: parseCssColor(node.drawnColor) ?: OrbitPalette.first(),
-                onPick = { hex ->
-                    pickingColor = null
-                    model.update(nodeId, "color", JsonPrimitive(hex))
-                },
-                onDismiss = { pickingColor = null },
-            )
-        }
-    }
-
-    val goalNode = changingGoal?.let { ui.nodes[it] }
-    val goal = goalNode?.let(Goal::of)
-    val change = goalChange
-
-    if (goalNode != null && goal != null && change != null) {
-        GoalAmountDialog(
-            goal = goal,
-            change = change,
-            onDone = { amount ->
-                changingGoal = null
-                model.addToGoal(goalNode.id, goal.signed(change, amount))
-            },
-            onDismiss = { changingGoal = null },
-        )
-    }
-
-    if (renamingMap) {
-        TitleDialog(
-            heading = stringResource(R.string.map_rename_map),
-            confirm = stringResource(R.string.common_rename),
-            initial = ui.map?.root?.text ?: title,
-            onConfirm = { text ->
-                renamingMap = false
-                ui.map?.root?.let { root -> model.update(root.id, "text", JsonPrimitive(text)) }
-            },
-            onDismiss = { renamingMap = false },
-        )
-    }
-
-    if (taggingMap) {
-        // Every tag the maps have, to pick from: the map's own come from the page, which writes them.
-        val summaries by LocalContext.current.container.maps.maps.collectAsStateWithLifecycle()
-        val known = remember(summaries) { tagCounts(summaries.orEmpty()).map { it.name } }
-
-        TagsSheet(
-            title = title,
-            tags = ui.map?.options?.tags.orEmpty(),
-            known = known,
-            onChange = { tags -> model.setOptions(mapOf("tags" to JsonArray(tags.map(::JsonPrimitive)))) },
-            onDismiss = { taggingMap = false },
-        )
-    }
-
-    if (sending) {
-        SendSheet(model.id, title, onDismiss = { sending = false })
-    }
-
-    ui.viewing?.let { viewing ->
-        MediaViewer(
-            items = viewing.items,
-            start = viewing.start,
-            source = model::mediaModel,
-            onPlay = model::play,
-            onClosed = model::closeViewer,
-        )
-    }
-
-    // After the pictures, so a video started from them plays over them, and they're still there after it.
-    ui.playing?.let { item -> VideoScreen(item, resolve = model::mediaModel, onClosed = model::stopPlaying) }
-
-    ui.rehearsal?.let { rehearsal ->
-        RehearsalSheet(
-            rehearsal,
-            ui.nodes,
-            onAgain = {
-                model.closeRehearsal()
-                model.startPresentation(0, fromStart = true, rehearse = true)
-            },
-            onDismiss = model::closeRehearsal,
-        )
-    }
-
-    if (deletingMap) {
-        AlertDialog(
-            onDismissRequest = { deletingMap = false },
-            title = {
-                EscapeCloses { deletingMap = false }
-                Text(stringResource(R.string.map_delete_dialog_title, title))
-            },
-            text = { Text(pluralStringResource(R.plurals.map_delete_dialog_body, TRASH_DAYS, TRASH_DAYS)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    deletingMap = false
-                    model.deleteMap()
-                }) { Text(stringResource(R.string.common_delete)) }
-            },
-            dismissButton = { TextButton(onClick = { deletingMap = false }) { Text(stringResource(R.string.common_cancel)) } },
-        )
-    }
+    MapDialogs(model, ui, dialogs, title)
+    MapFullScreen(model, ui, sound)
 }
-
-/** Sheets that stop halfway over the map, with the map lifted into the space above them. */
-private fun Panel?.liftsMap(): Boolean =
-    this is Panel.Editor || this is Panel.Details || this is Panel.Outline || this is Panel.Style || this is Panel.History
-
-/** Panels that sit beside the map on wide screens; menus and exports stay over it. */
-private fun Panel?.showsBeside(): Boolean =
-    this is Panel.Outline || this is Panel.Editor || this is Panel.Details || this is Panel.Search || this is Panel.Style || this is Panel.History
 
 /** The text, in the app's language. */
 @Composable
@@ -907,9 +967,10 @@ fun ShownText.text(): String = text(LocalResources.current)
 @Composable
 private fun MapOverlays(model: MapViewModel, ui: MapUi, act: (MapNode, NodeAction) -> Unit, hint: Boolean, onBannerHeight: (Int) -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val sound by model.sound.collectAsStateWithLifecycle()
 
     Box(Modifier.fillMaxSize()) {
-        if (!ui.ready && !ui.stopped && ui.error == null) {
+        if (!(ui.ready && ui.drawn) && !ui.stopped && ui.error == null) {
             LoadingIndicator(Modifier.align(Alignment.Center).size(56.dp))
         }
 
@@ -926,6 +987,7 @@ private fun MapOverlays(model: MapViewModel, ui: MapUi, act: (MapNode, NodeActio
                     ideasUnder = remember(ui.map?.nodes, node.id) { ideasUnder(ui.map?.nodes.orEmpty(), node.id) },
                     mapColors = remember(ui.map?.nodes, node.color) { offeredCustomColors(ui.map?.nodes.orEmpty().map { it.color }, node.color) },
                     pasteable = remember(menu) { model.pasteable() },
+                    soundPlaying = sound?.playing == true && sound?.item?.nodeId == node.id,
                     onDismiss = { model.show(null) },
                     onAction = { action -> act(node, action) },
                 )
@@ -935,7 +997,7 @@ private fun MapOverlays(model: MapViewModel, ui: MapUi, act: (MapNode, NodeActio
         val root = ui.map?.root
 
         AnimatedVisibility(
-            visible = hint && ui.ready && ui.readOnly == null && root != null && root.childCount == 0 && !ui.editing && ui.mode == "focus",
+            visible = hint && ui.ready && ui.readOnly == null && root != null && root.childCount == 0 && !ui.editing && ui.focused,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -966,15 +1028,19 @@ private fun MapOverlays(model: MapViewModel, ui: MapUi, act: (MapNode, NodeActio
             }
         }
 
-        ReadOnlyBanner(
-            model,
-            ui,
-            Modifier
-                .align(Alignment.TopCenter)
-                .padding(start = 16.dp, end = 16.dp, top = ReadOnlyBannerTop)
-                .widthIn(max = 560.dp)
-                .onSizeChanged { onBannerHeight(it.height) },
-        )
+        val banner = Modifier
+            .align(Alignment.TopCenter)
+            .padding(start = 16.dp, end = 16.dp, top = ReadOnlyBannerTop)
+            .widthIn(max = 560.dp)
+            .onSizeChanged { onBannerHeight(it.height) }
+
+        // A map that can't be changed is never saved: only one of them says something.
+        if (ui.readOnly != null) {
+            ReadOnlyBanner(model, ui, banner)
+        } else {
+            UnsavedBanner(model, ui, banner)
+        }
+
         val webView = SystemWebView.of(LocalContext.current)
 
         if (!webView.drawsMaps) {
@@ -1007,7 +1073,9 @@ private fun ReadOnlyBanner(model: MapViewModel, ui: MapUi, modifier: Modifier = 
 
     AnimatedVisibility(readOnly != null && ui.source == null && ui.presentation == null, enter = fadeIn(), exit = fadeOut(), modifier = modifier) {
         val shown = readOnly ?: return@AnimatedVisibility
-        val problem = ui.readProblem
+        // Orbit says what it couldn't read in English: in another language, the note says what to do without it.
+        val english = LocalConfiguration.current.locales[0].language == "en"
+        val problem = ui.readProblem.takeIf { english }
 
         val (title, body) = when (shown) {
             ReadOnly.Unreadable -> stringResource(R.string.map_read_only_unreadable_title) to if (problem != null) {
@@ -1050,16 +1118,55 @@ private fun ReadOnlyBanner(model: MapViewModel, ui: MapUi, modifier: Modifier = 
     }
 }
 
+/**
+ * Over the top of a map whose latest changes the device's storage couldn't
+ * take: they're kept on this screen and saved as soon as there's room, which
+ * it says, with the way to the phone's storage settings and to try again now.
+ */
+@Composable
+private fun UnsavedBanner(model: MapViewModel, ui: MapUi, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+
+    AnimatedVisibility(ui.unsaved && ui.source == null && ui.presentation == null, enter = fadeIn(), exit = fadeOut(), modifier = modifier) {
+        val storage = remember { storageSettings(context) }
+
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)) {
+            Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.SdCardAlert, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Text(stringResource(R.string.map_unsaved_title), style = MaterialTheme.typography.titleSmall)
+                }
+
+                Text(stringResource(R.string.map_unsaved_body), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(end = 8.dp))
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    if (storage != null) {
+                        TextButton(onClick = { runCatching { context.startActivity(storage) } }) { Text(stringResource(R.string.map_storage_settings)) }
+                    }
+
+                    TextButton(onClick = model::saveAgain) { Text(stringResource(R.string.map_try_again)) }
+                }
+            }
+        }
+    }
+}
+
 /** How far below the top of the map the note over a map that can't change sits: below the breadcrumbs. */
 private val ReadOnlyBannerTop = 56.dp
+
+/** The phone's settings for its storage, where space is freed up, when it has them. */
+private fun storageSettings(context: Context): Intent? =
+    Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        .takeIf { it.resolveActivity(context.packageManager) != null }
 
 /** Text ending as a sentence does, for another to follow it. */
 private fun sentence(text: String): String = text.trim().let { if (it.endsWith('.') || it.endsWith('!') || it.endsWith('?')) it else "$it." }
 
 /** Orbit's page in the phone's app store, when there's one that opens it. */
-private fun orbitStorePage(context: android.content.Context): android.content.Intent? =
-    android.content.Intent(android.content.Intent.ACTION_VIEW, "market://details?id=${context.packageName}".toUri())
-        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+private fun orbitStorePage(context: Context): Intent? =
+    Intent(Intent.ACTION_VIEW, "market://details?id=${context.packageName}".toUri())
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         .takeIf { it.resolveActivity(context.packageManager) != null }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1073,10 +1180,16 @@ private fun MapTopBar(
     onRedo: () -> Unit,
     onRename: (() -> Unit)?,
     onTags: (() -> Unit)?,
+    isPrivate: Boolean,
+    onPrivate: (Boolean) -> Unit,
+    cover: LockedCover?,
+    onCover: (() -> Unit)?,
+    onLockNow: (() -> Unit)?,
     onSource: () -> Unit,
     onPresent: () -> Unit,
     onPath: () -> Unit,
     onRehearse: () -> Unit,
+    onStudy: () -> Unit,
     onHistory: () -> Unit,
     onExport: () -> Unit,
     onSend: () -> Unit,
@@ -1089,8 +1202,12 @@ private fun MapTopBar(
     onDetails: (() -> Unit)?,
     onEdit: (() -> Unit)?,
     labeledPresent: Boolean,
+    onSound: (() -> Unit)?,
+    soundPlaying: Boolean,
 ) {
-    val crumbs = ui.path.size > 1 && ui.mode == "focus"
+    val crumbs = ui.path.size > 1 && ui.focused
+    // A phone either way up: its top bar is short of room for the map's name.
+    val phone = LocalConfiguration.current.smallestScreenWidthDp < TABLET_SMALLEST_WIDTH
     TopAppBar(
         title = {
             // On a short screen the way to the idea takes the title's place, rather than a row of its own.
@@ -1116,6 +1233,10 @@ private fun MapTopBar(
             if (idea != null && onEdit != null) {
                 AnimatedVisibility(onMedia != null, enter = fadeIn() + expandHorizontally(), exit = fadeOut() + shrinkHorizontally()) {
                     MediaButton(idea, onClick = { onMedia?.invoke() })
+                }
+
+                AnimatedVisibility(onSound != null, enter = fadeIn() + expandHorizontally(), exit = fadeOut() + shrinkHorizontally()) {
+                    SoundButton(idea, soundPlaying, onClick = { onSound?.invoke() })
                 }
 
                 AnimatedVisibility(onDetails != null, enter = fadeIn() + expandHorizontally(), exit = fadeOut() + shrinkHorizontally()) {
@@ -1145,8 +1266,16 @@ private fun MapTopBar(
 
             val redo = stringResource(R.string.common_redo)
 
-            Hint(redo, MapKeys.Redo) {
-                IconButton(onClick = onRedo, enabled = ui.canRedo) { Icon(Icons.AutoMirrored.Outlined.Redo, contentDescription = redo) }
+            // On a phone, Redo leaves its room to the map's name until something has been undone. Undo stays.
+            AnimatedVisibility(ui.canRedo || !phone, enter = fadeIn() + expandHorizontally(), exit = fadeOut() + shrinkHorizontally()) {
+                Hint(redo, MapKeys.Redo) {
+                    IconButton(onClick = onRedo, enabled = ui.canRedo) { Icon(Icons.AutoMirrored.Outlined.Redo, contentDescription = redo) }
+                }
+            }
+
+            // A private map locks at once from here on tablets, where the bar has room; on a phone, from the menu.
+            if (onLockNow != null && !phone) {
+                LockNowButton(onLockNow)
             }
 
             // A TV the phone casts to, after a presentation: the way to stop it. Looking for TVs starts only with presenting.
@@ -1170,7 +1299,7 @@ private fun MapTopBar(
                 }
             }
 
-            MapMenu(ui.presentPath.count { it in ui.nodes }, onPath, onRehearse, onHistory, onRename, onTags, onSource, onExport, onSend, onDelete, onStyle)
+            MapMenu(ui.presentPath.count { it in ui.nodes }, onPath, onRehearse, onStudy, onHistory, onRename, onTags, isPrivate, onPrivate, cover, onCover, onLockNow, onSource, onExport, onSend, onDelete, onStyle)
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = background, scrolledContainerColor = background),
     )
@@ -1182,9 +1311,15 @@ private fun MapMenu(
     pathLength: Int,
     onPath: () -> Unit,
     onRehearse: () -> Unit,
+    onStudy: () -> Unit,
     onHistory: () -> Unit,
     onRename: (() -> Unit)?,
     onTags: (() -> Unit)?,
+    isPrivate: Boolean,
+    onPrivate: (Boolean) -> Unit,
+    cover: LockedCover?,
+    onCover: (() -> Unit)?,
+    onLockNow: (() -> Unit)?,
     onSource: () -> Unit,
     onExport: () -> Unit,
     onSend: () -> Unit,
@@ -1194,7 +1329,11 @@ private fun MapMenu(
     var open by remember { mutableStateOf(false) }
 
     Box {
-        IconButton(onClick = { open = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.map_more)) }
+        val more = stringResource(R.string.map_more)
+
+        Hint(more) {
+            IconButton(onClick = { open = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = more) }
+        }
 
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             onStyle?.let { style ->
@@ -1215,6 +1354,12 @@ private fun MapMenu(
                 text = { Text(stringResource(R.string.map_rehearse)) },
                 leadingIcon = { Icon(Icons.Outlined.Timer, contentDescription = null) },
                 onClick = { open = false; onRehearse() },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.study_study)) },
+                leadingIcon = { Icon(Icons.Outlined.School, contentDescription = null) },
+                trailingIcon = if (showsMenuKeys()) ({ Text(MapKeys.Study.caps.joinToString("+"), style = MaterialTheme.typography.labelLarge) }) else null,
+                onClick = { open = false; onStudy() },
             )
             HorizontalDivider()
             DropdownMenuItem(
@@ -1254,13 +1399,32 @@ private fun MapMenu(
                 )
             }
 
+            PrivateMenuItem(isPrivate, onChange = onPrivate, onDismiss = { open = false })
+
+            onCover?.let { choose ->
+                CoverMenuItem(cover) { open = false; choose() }
+            }
+
+            onLockNow?.let { lock ->
+                val everyPrivateMap = stringResource(R.string.private_lock_private_maps_now)
+
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.private_menu_lock_now)) },
+                    leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null) },
+                    trailingIcon = if (hasHardwareKeyboard()) ({ Text(MapKeys.LockNow.caps.joinToString("+"), style = MaterialTheme.typography.labelLarge) }) else null,
+                    onClick = { open = false; lock() },
+                    // Every private map locks, not this one alone: screen readers say so.
+                    modifier = Modifier.semantics { contentDescription = everyPrivateMap },
+                )
+            }
+
             val shortcuts = LocalShortcuts.current
 
             if (shortcuts != null && hasHardwareKeyboard()) {
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.common_keyboard_shortcuts)) },
                     leadingIcon = { Icon(Icons.Outlined.Keyboard, contentDescription = null) },
-                    trailingIcon = { Text(ShortcutListKeys.caps.joinToString("+"), style = MaterialTheme.typography.labelLarge) },
+                    trailingIcon = if (showsMenuKeys()) ({ Text(ShortcutListKeys.caps.joinToString("+"), style = MaterialTheme.typography.labelLarge) }) else null,
                     onClick = { open = false; shortcuts.listOpen = true },
                 )
             }
@@ -1271,6 +1435,29 @@ private fun MapMenu(
                 leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
                 onClick = { open = false; onDelete() },
             )
+        }
+    }
+}
+
+/**
+ * Locks every private map now, from a private map's top bar on a tablet, as
+ * Home's lock does: its shape answers the press, and the phone a confirming
+ * tap, as the map goes behind its lock.
+ */
+@Composable
+private fun LockNowButton(onLockNow: () -> Unit) {
+    val haptics = LocalHapticFeedback.current
+    val label = stringResource(R.string.private_lock_private_maps_now)
+
+    Hint(label, MapKeys.LockNow) {
+        IconButton(
+            onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                onLockNow()
+            },
+            shapes = IconButtonDefaults.shapes(),
+        ) {
+            Icon(Icons.Outlined.Lock, contentDescription = label)
         }
     }
 }
@@ -1300,6 +1487,8 @@ private fun Breadcrumbs(path: List<MapNode>, onPick: (MapNode) -> Unit, modifier
             }
 
             val current = index == path.lastIndex
+            val here = stringResource(R.string.map_breadcrumb_here)
+            val name = node.label
             FilterChip(
                 selected = current,
                 onClick = {
@@ -1307,7 +1496,18 @@ private fun Breadcrumbs(path: List<MapNode>, onPick: (MapNode) -> Unit, modifier
                         onPick(node)
                     }
                 },
-                label = { Text(node.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                label = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                // The way back up, not a choice: screen readers hear each level as a button, and the last as where the map is.
+                modifier = Modifier.clearAndSetSemantics {
+                    contentDescription = name
+
+                    if (current) {
+                        stateDescription = here
+                    } else {
+                        role = Role.Button
+                        onClick { onPick(node); true }
+                    }
+                },
             )
         }
     }
@@ -1331,6 +1531,8 @@ private fun MapToolbar(
     onToggleView: () -> Unit,
     onStyle: (() -> Unit)?,
     onMedia: (() -> Unit)?,
+    onSound: (() -> Unit)?,
+    soundPlaying: Boolean,
     onDetails: (() -> Unit)?,
     onEdit: (() -> Unit)?,
     /** Adds an idea; none on a map that can't change, and the toolbar has no + then. */
@@ -1363,7 +1565,7 @@ private fun MapToolbar(
             }
         }
 
-        val buttons = @Composable { ToolbarButtons(ui, vertical, idea, onOutline, onSearch, onToggleView, onStyle, onMedia, onDetails, onEdit) }
+        val buttons = @Composable { ToolbarButtons(ui, vertical, idea, onOutline, onSearch, onToggleView, onStyle, onMedia, onSound, soundPlaying, onDetails, onEdit) }
 
         if (onAdd == null) {
             if (vertical) {
@@ -1394,6 +1596,8 @@ private fun ToolbarButtons(
     onToggleView: () -> Unit,
     onStyle: (() -> Unit)?,
     onMedia: (() -> Unit)?,
+    onSound: (() -> Unit)?,
+    soundPlaying: Boolean,
     onDetails: (() -> Unit)?,
     onEdit: (() -> Unit)?,
 ) {
@@ -1409,7 +1613,7 @@ private fun ToolbarButtons(
         IconButton(onClick = onSearch) { Icon(Icons.Outlined.Search, contentDescription = search) }
     }
 
-    if (ui.mode == "all") {
+    if (!ui.focused) {
         val focus = stringResource(R.string.map_focus_on_one_idea)
 
         Hint(focus, MapKeys.Orbit) {
@@ -1449,6 +1653,14 @@ private fun ToolbarButtons(
         }
 
         AnimatedVisibility(
+            onSound != null,
+            enter = fadeIn() + if (vertical) expandVertically() else expandHorizontally(),
+            exit = fadeOut() + if (vertical) shrinkVertically() else shrinkHorizontally(),
+        ) {
+            SoundButton(idea, soundPlaying, onClick = { onSound?.invoke() })
+        }
+
+        AnimatedVisibility(
             onDetails != null,
             enter = fadeIn() + if (vertical) expandVertically() else expandHorizontally(),
             exit = fadeOut() + if (vertical) shrinkVertically() else shrinkHorizontally(),
@@ -1466,6 +1678,18 @@ private fun ToolbarButtons(
 
         Hint(edit, MapKeys.Edit) {
             IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, contentDescription = edit) }
+        }
+    }
+}
+
+/** The idea in focus's sound: plays it in the small player, or pauses it, the button saying which. */
+@Composable
+private fun SoundButton(idea: MapNode, playing: Boolean, onClick: () -> Unit) {
+    val name = stringResource(if (playing) R.string.audio_pause_the_sound_in else R.string.audio_play_the_sound_in, idea.text)
+
+    Hint(name) {
+        IconButton(onClick = onClick) {
+            Icon(if (playing) Icons.Outlined.PauseCircle else Icons.Outlined.GraphicEq, contentDescription = name)
         }
     }
 }

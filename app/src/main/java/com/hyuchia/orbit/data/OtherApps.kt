@@ -7,11 +7,11 @@ import java.io.InputStream
 import java.io.SequenceInputStream
 import java.util.zip.ZipInputStream
 
-/** The other apps' formats Orbit brings maps in from, by the name people know them by. */
-enum class OtherFormat(val label: String) {
-    Opml("OPML"),
-    FreeMind("FreeMind"),
-    XMind("XMind"),
+/** The other apps' formats Orbit brings maps in from, by the name people know them by, with the extensions and types their files come with. */
+enum class OtherFormat(val label: String, val extensions: List<String>, val types: List<String>) {
+    Opml("OPML", listOf("opml"), listOf("text/x-opml", "application/x-opml")),
+    FreeMind("FreeMind", listOf("mm"), listOf("application/x-freemind")),
+    XMind("XMind", listOf("xmind"), listOf("application/vnd.xmind.workbook", "application/x-xmind", "application/xmind")),
 }
 
 /** What a file someone opens is: a map from another app, a zip of Orbit's, or text. */
@@ -30,14 +30,7 @@ sealed interface FileKind {
  */
 object OtherApps {
     /** The types other apps' maps come as: for the file picker, opening files and shares. */
-    val TYPES = listOf(
-        "text/x-opml",
-        "application/x-opml",
-        "application/x-freemind",
-        "application/vnd.xmind.workbook",
-        "application/x-xmind",
-        "application/xmind",
-    )
+    val TYPES = OtherFormat.entries.flatMap { it.types }
 
     /** The most a workbook from XMind may be: it carries its pictures. */
     const val WORKBOOK_LIMIT = 32L * 1024 * 1024
@@ -48,16 +41,9 @@ object OtherApps {
     /** The most entries of a zip read to tell an XMind workbook from a zip of maps. */
     private const val ENTRIES_TO_READ = 2_000
 
-    private val EXTENSIONS = mapOf("opml" to OtherFormat.Opml, "mm" to OtherFormat.FreeMind, "xmind" to OtherFormat.XMind)
+    private val EXTENSIONS = OtherFormat.entries.flatMap { format -> format.extensions.map { it to format } }.toMap()
 
-    private val FORMATS_BY_TYPE = mapOf(
-        "text/x-opml" to OtherFormat.Opml,
-        "application/x-opml" to OtherFormat.Opml,
-        "application/x-freemind" to OtherFormat.FreeMind,
-        "application/vnd.xmind.workbook" to OtherFormat.XMind,
-        "application/x-xmind" to OtherFormat.XMind,
-        "application/xmind" to OtherFormat.XMind,
-    )
+    private val FORMATS_BY_TYPE = OtherFormat.entries.flatMap { format -> format.types.map { it to format } }.toMap()
 
     private val ROOTS = mapOf("opml" to OtherFormat.Opml, "map" to OtherFormat.FreeMind, "xmap-content" to OtherFormat.XMind)
 

@@ -11,18 +11,34 @@
     <string name="home_add_widget_from_list">Add Orbit’s widget from your home screen’s list of widgets</string>
     <!-- Sharing a map from its card, when no file of it could be made to share. -->
     <string name="home_could_not_share_map">Orbit couldn’t make a file of that map to share. Is this device’s storage full?</string>
+    <!-- A map renamed, tagged or copied from its card that Orbit can only show, so it's left as it is. -->
+    <string name="home_map_from_newer_orbit">A newer version of Orbit made this map, so this one leaves it as it is. Update Orbit to change it.</string>
+    <string name="home_map_unreadable">Orbit couldn’t read all of this map, so it leaves it as it is. Open it to fix its text.</string>
+    <string name="home_map_kept_changing">The map kept changing, so Orbit left it as it was. Try again.</string>
+    <!-- A tag renamed or taken out in every map stays on maps Orbit can only show. -->
+    <plurals name="home_tag_left_on_maps">
+        <item quantity="one">The tag stays on %1$d map that Orbit can only show: a newer version made it, or it can’t read all of it.</item>
+        <item quantity="other">The tag stays on %1$d maps that Orbit can only show: a newer version made them, or it can’t read all of them.</item>
+    </plurals>
     <string name="home_pinned_maps">Pinned</string>
     <string name="home_everything_else">Everything else</string>
     <string name="home_clear_the_search">Clear the search</string>
     <!-- %1$s is what was searched for. -->
     <string name="home_no_maps_match">No maps match “%1$s”</string>
+    <!-- The same, as screen readers say it while the search field says what was typed. -->
+    <string name="home_no_maps_match_said">No maps match</string>
     <string name="home_search_looks_in">Search looks in titles, ideas and notes.</string>
+    <!-- Above a search's results, and said as they change. -->
+    <plurals name="home_maps_match">
+        <item quantity="one">%1$d map matches</item>
+        <item quantity="other">%1$d maps match</item>
+    </plurals>
     <string name="home_sort_last_edited">Last edited</string>
     <string name="home_sort_last_opened">Last opened</string>
     <string name="home_sort_newest_first">Newest first</string>
     <string name="home_sort_by_title">By title</string>
-    <!-- Read out on the order the maps are in now. -->
-    <string name="home_sort_current">Current</string>
+    <!-- The sort button, as screen readers say it: %1$s is the order the maps are in now, as Last edited. -->
+    <string name="home_sorted_by">Sort: %1$s</string>
     <string name="home_empty_title">Your ideas, in orbit</string>
     <string name="home_empty_body">Start with a blank map or a template. On a map, tap + to add ideas, and long-press any idea to change it.</string>
     <string name="home_templates">Templates</string>
@@ -34,7 +50,6 @@
     <!-- Whether the + menu is open or closed, as TalkBack says it. -->
     <string name="home_menu_open">Open</string>
     <string name="home_menu_closed">Closed</string>
-    <string name="home_close_the_menu">Close the menu</string>
 
     <!-- Asking for a map's title -->
     <string name="home_what_is_it_about">What is it about?</string>
@@ -69,12 +84,12 @@
     </plurals>
     <!-- A map's to-dos and goals, when every one is done. Goals and to-dos are both ideas. -->
     <plurals name="home_progress_all_done">
-        <item quantity="one">All %1$d done</item>
+        <item quantity="one">%1$d of %1$d done</item>
         <item quantity="other">All %1$d done</item>
     </plurals>
     <!-- A map's goals, when every one is reached. -->
     <plurals name="home_progress_all_reached">
-        <item quantity="one">All %1$d reached</item>
+        <item quantity="one">%1$d of %1$d reached</item>
         <item quantity="other">All %1$d reached</item>
     </plurals>
     <!-- %1$d of a map's %2$d to-dos and goals are done. The quantity is %1$d, the ones done. -->
@@ -106,7 +121,8 @@
 
     <!-- Starting a map -->
     <string name="home_start_a_map">Start a map</string>
-    <string name="home_templates_drawn_live">Templates are drawn live by Orbit, in their own styles</string>
+    <!-- Under Start a map, in its bar: the three ways in that the screen offers. -->
+    <string name="home_start_a_map_subtitle">Start from a blank map, a file or a template</string>
     <string name="home_blank_map_description">Just a title, and room for ideas</string>
     <string name="home_open_a_file_description">Markdown, YAML, a zip with pictures, OPML, FreeMind or XMind</string>
     <!-- What tapping a template does, as TalkBack says it. -->
@@ -114,7 +130,7 @@
 
     <!-- The card about a crash -->
     <string name="home_crash_title">Orbit closed unexpectedly last time</string>
-    <string name="home_crash_body">A report of what went wrong is on this phone: Orbit\'s and Android\'s versions and where in Orbit it happened, nothing from your maps. Sharing it helps fix it.</string>
+    <string name="home_crash_body">A report of what went wrong is on this device: Orbit\'s and Android\'s versions and where in Orbit it happened, nothing from your maps. Sharing it helps fix it.</string>
     <string name="home_dismiss">Dismiss</string>
     <string name="home_share_report">Share report</string>
     <string name="home_share_the_crash_report">Share the crash report</string>
@@ -128,8 +144,10 @@
     <!-- Tags on the home screen: chips that show only a tag's maps, and renaming or removing a tag in every map. -->
     <string name="home_edit_tags">Edit tags</string>
     <string name="home_rename_tag">Rename tag</string>
+    <!-- The buttons beside a tag, each naming it: %1$s is the tag, as Work. -->
+    <string name="home_rename_named_tag">Rename “%1$s”</string>
     <string name="home_tag">Tag</string>
-    <string name="home_remove_tag">Remove from every map</string>
+    <string name="home_remove_named_tag">Remove “%1$s” from every map</string>
     <!-- %1$s is the tag, %2$d how many maps have it. -->
     <plurals name="home_remove_tag_question">
         <item quantity="one">Remove “%1$s” from %2$d map?</item>
@@ -138,4 +156,40 @@
     <string name="home_remove_tag_body">The maps stay as they are, without this tag.</string>
     <!-- What tapping a tag chip does, as TalkBack says it. -->
     <string name="home_show_only_its_maps">Show only its maps</string>
+    <string name="home_folder_problem_title">Your maps aren\'t in step with their folder</string>
+    <string name="home_folder_problem_try_again">Try again</string>
+    <!-- After restoring Android's backup that wasn't encrypted end to end, which left the private maps out: %1$d is how many. -->
+    <plurals name="home_private_maps_not_restored_title">
+        <item quantity="one">Your private map wasn\'t in the backup</item>
+        <item quantity="other">Your %1$d private maps weren\'t in the backup</item>
+    </plurals>
+    <!-- Under that title, when the maps are kept in a folder: it brings them back without what made them private. -->
+    <string name="home_private_maps_not_restored_folder">Android\'s backup leaves private maps out unless it\'s encrypted. Once Orbit can reach your folder again, they come back from it as ordinary maps: make them private again.</string>
+    <!-- Under that title, without a folder. -->
+    <string name="home_private_maps_not_restored_export">Android\'s backup leaves private maps out unless it\'s encrypted. If you exported your maps, Import maps in Settings brings them back, still private.</string>
+    <!-- %1$d is how many maps. -->
+    <plurals name="home_folder_files_gone_title">
+        <item quantity="one">A map\'s file left the folder</item>
+        <item quantity="other">%1$d maps\' files left the folder</item>
+    </plurals>
+    <!-- %1$s lists the maps, as “Trip”, “Plan” and 2 private maps. %2$s is the folder's name. The quantity is how many maps. -->
+    <plurals name="home_folder_files_gone">
+        <item quantity="one">%1$s is no longer in “%2$s”. If it was deleted there, it goes to the trash here too. If it was moved, or a sync app lost it, keep it and Orbit writes it back.</item>
+        <item quantity="other">%1$s are no longer in “%2$s”. If they were deleted there, they go to the trash here too. If they were moved, or a sync app lost them, keep them and Orbit writes them back.</item>
+    </plurals>
+    <string name="home_folder_files_gone_keep">Keep and write back</string>
+    <string name="home_folder_files_gone_remove">Move to the trash</string>
+    <!-- %1$d is how many maps. -->
+    <plurals name="home_folder_removed_title">
+        <item quantity="one">A map moved to the trash</item>
+        <item quantity="other">%1$d maps moved to the trash</item>
+    </plurals>
+    <!-- %1$s lists the maps, as “Trip”, “Plan” and 2 private maps. %2$s is the folder's name. The quantity is how many maps. -->
+    <plurals name="home_folder_removed">
+        <item quantity="one">Its file was deleted from “%2$s”: %1$s. It waits in the trash, and its 30 days there start once you\'ve seen this.</item>
+        <item quantity="other">Their files were deleted from “%2$s”: %1$s. They wait in the trash, and their 30 days there start once you\'ve seen this.</item>
+    </plurals>
+    <string name="home_folder_open_trash">Open the trash</string>
+    <!-- The end of a list: %1$s is all of it but the last, %2$s the last, as in “Trip”, “Plan” and “Notes”. -->
+    <string name="home_list_last">%1$s and %2$s</string>
 </resources>

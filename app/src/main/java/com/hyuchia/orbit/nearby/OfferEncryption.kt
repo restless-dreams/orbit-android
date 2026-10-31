@@ -1,5 +1,6 @@
 package com.hyuchia.orbit.nearby
 
+import com.hyuchia.orbit.data.readUpTo
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -415,21 +416,4 @@ private fun hmac(key: ByteArray, data: ByteArray): ByteArray {
     val mac = Mac.getInstance(HMAC)
     mac.init(SecretKeySpec(key, HMAC))
     return mac.doFinal(data)
-}
-
-/** Reads until `count` bytes are in `buffer` or the input ends. Returns how many were read. */
-private fun InputStream.readUpTo(buffer: ByteArray, count: Int): Int {
-    var read = 0
-
-    while (read < count) {
-        val got = read(buffer, read, count - read)
-
-        if (got < 0) {
-            break
-        }
-
-        read += got
-    }
-
-    return read
 }

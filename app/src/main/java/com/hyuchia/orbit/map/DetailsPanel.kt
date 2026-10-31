@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.BrokenImage
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.NearMe
@@ -35,24 +36,40 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import coil3.asDrawable
 import coil3.compose.AsyncImage
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.media.FirstFrame
+import com.hyuchia.orbit.media.GalleryItem
+import com.hyuchia.orbit.media.LiveMark
 import com.hyuchia.orbit.media.MediaKind
+import com.hyuchia.orbit.media.SoundCard
 import com.hyuchia.orbit.media.posterOf
+import com.hyuchia.orbit.media.soundOf
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.Media
+import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.MarkdownNote
 import com.hyuchia.orbit.ui.openLink
+import java.io.File
 
 /** The colors status dots take, by tone. */
 fun statusColor(status: String?): Color? = when (status?.lowercase()?.trim()) {
@@ -87,7 +104,11 @@ fun DetailsPanel(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean) 
         partial = true,
         scrim = false,
         actions = {
-            IconButton(onClick = { model.show(Panel.Editor(node.id)) }) { Icon(Icons.Outlined.Edit, contentDescription = stringResource(R.string.common_edit)) }
+            val edit = stringResource(R.string.common_edit)
+
+            Hint(edit) {
+                IconButton(onClick = { model.show(Panel.Editor(node.id)) }) { Icon(Icons.Outlined.Edit, contentDescription = edit) }
+            }
         },
     ) {
         Column(
@@ -128,6 +149,7 @@ fun DetailsPanel(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean) 
 
             node.image?.let { image -> Picture(model, image, onView = { model.view(node.id, MediaKind.Picture) }) }
             node.video?.let { video -> VideoCard(model, video, onPlay = { model.play(node.id) }) }
+            soundOf(node, stringResource(R.string.common_untitled))?.let { item -> DetailsSound(model, item) }
 
             node.embed?.let { embed ->
                 LinkCard(Icons.Outlined.Language, embed.caption ?: stringResource(R.string.common_web_page), embed.src) { openLink(context, embed.src) }
@@ -156,7 +178,7 @@ fun DetailsPanel(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean) 
                     model.show(null)
                     model.focus(id, point = true)
                 })
-            } else if (node.image == null && node.video == null && node.embed == null && node.link == null && !node.isGoal && !following) {
+            } else if (node.image == null && node.video == null && node.audio == null && node.embed == null && node.link == null && !node.isGoal && !following) {
                 Text(stringResource(R.string.map_no_note_yet), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FilledTonalButton(onClick = { model.show(Panel.Editor(node.id)) }) { Text(stringResource(R.string.map_write_one)) }
             }
@@ -181,10 +203,37 @@ fun DetailsPanel(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean) 
     }
 }
 
-/** The idea's picture; a tap shows it full screen. */
+/** The idea's sound, to play here and on as the details close; its art opens it full screen. */
+@Composable
+private fun DetailsSound(model: MapViewModel, item: GalleryItem) {
+    val sound by model.sound.collectAsState()
+    val length by produceState<Long?>(null, item.media.src) { value = model.soundLength(item.media.src) }
+    // A sound on the web says where it's from.
+    val from = item.media.src.takeIf { model.mediaModel(it) !is File }?.let { it.toUri().host ?: it }
+    SoundCard(item, sound, model.sounds, model::mediaModel, length, subtitle = from)
+}
+
+/**
+ * The idea's picture; a tap shows it full screen. An animated GIF or WebP
+ * plays here too, and while Android's animations are off, its first frame
+ * shows with a play button, which plays it full screen. A live photo shows
+ * its mark, and plays full screen.
+ */
 @Composable
 private fun Picture(model: MapViewModel, image: Media, onView: () -> Unit) {
+    val resources = LocalResources.current
+    var still by remember(image.src) { mutableStateOf(false) }
+    var failed by remember(image.src) { mutableStateOf(false) }
+
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // A picture that can't load (a dead address, or one the app won't fetch) says so in a line, rather than leaving
+        // a blank as big as a picture above the note.
+        if (failed) {
+            PictureProblem()
+            image.caption?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            return@Column
+        }
+
         Box(
             Modifier
                 .fillMaxWidth()
@@ -197,6 +246,8 @@ private fun Picture(model: MapViewModel, image: Media, onView: () -> Unit) {
                 model = model.mediaModel(image.src),
                 contentDescription = image.alt,
                 contentScale = ContentScale.Crop,
+                onSuccess = { loaded -> still = loaded.result.image.asDrawable(resources) is FirstFrame },
+                onError = { failed = true },
                 modifier = Modifier.fillMaxSize(),
             )
 
@@ -210,12 +261,25 @@ private fun Picture(model: MapViewModel, image: Media, onView: () -> Unit) {
                     .size(36.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Outlined.OpenInFull, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(if (still) Icons.Outlined.PlayArrow else Icons.Outlined.OpenInFull, contentDescription = null, modifier = Modifier.size(18.dp))
                 }
+            }
+
+            if (image.motion != null) {
+                LiveMark(onPlay = null, modifier = Modifier.align(Alignment.TopStart).padding(12.dp))
             }
         }
 
         image.caption?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
+/** In place of a picture that can't load: a line that says so, as small as a line of the note. */
+@Composable
+internal fun PictureProblem() {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(Icons.Outlined.BrokenImage, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+        Text(stringResource(R.string.media_picture_unreadable), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -246,13 +310,13 @@ internal fun VideoCard(model: MapViewModel, video: Media, onPlay: () -> Unit) {
         }
 
         // A video in the map's folder goes by its caption alone; a link says where it's from.
-        val from = video.src.takeIf { model.mediaModel(it) !is java.io.File }?.let { it.toUri().host ?: it }
+        val from = video.src.takeIf { model.mediaModel(it) !is File }?.let { it.toUri().host ?: it }
         (video.caption ?: from)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis) }
     }
 }
 
 @Composable
-private fun LinkCard(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, url: String, onClick: () -> Unit) {
+private fun LinkCard(icon: ImageVector, title: String, url: String, onClick: () -> Unit) {
     OutlinedCard(onClick = onClick, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(16.dp)) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)

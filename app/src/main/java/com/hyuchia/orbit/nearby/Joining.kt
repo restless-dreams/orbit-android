@@ -307,7 +307,7 @@ class Joining(
             request.method != "GET" -> Response.text(405, "Only reading here")
             member != null -> content(member, rest)
             route == null -> enter(request, content)
-            else -> joinFirst()
+            else -> joinFirst(words)
         }
     }
 
@@ -338,7 +338,7 @@ class Joining(
 
         // Another site's page posting the form is no one joining.
         if (request.headers["sec-fetch-site"] == "cross-site" || request.headers["sec-fetch-site"] == "same-site") {
-            return Response.text(403, "Join from the page at the address on the phone.")
+            return Response.text(403, words.string(R.string.nearby_join_from_the_page))
         }
 
         val fields = formFields(request.body)
@@ -462,8 +462,8 @@ private fun formDecode(text: String): String = try {
     ""
 }
 
-/** What a room answers anyone not in it who asks for more than its page. */
-internal fun joinFirst(): Response = Response.text(403, "Join first, at the address on the phone.")
+/** What a room answers anyone not in it who asks for more than its page, in the phone's language. */
+internal fun joinFirst(words: Words): Response = Response.text(403, words.string(R.string.nearby_join_first))
 
 /**
  * The answer for a code that isn't a room's. Where a code is typed or asked
@@ -477,7 +477,7 @@ internal fun unknownRoom(request: Request, rest: List<String>, guard: CodeGuard,
     val route = rest.firstOrNull()
 
     if (route != null && route != "join" && route != "status") {
-        return joinFirst()
+        return joinFirst(words)
     }
 
     val waiting = guard.wrong(request.from) > 0

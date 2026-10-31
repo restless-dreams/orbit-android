@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="exports" path="exports/" />
-    <!-- Videos added to a map, played in the phone's video app. -->
+    <!-- Videos added to a map, played in the phone's video app. The app hands out only a map's media from here (sharedFileUri in ui/Sharing.kt). -->
     <files-path name="maps" path="maps/" />
 </paths>

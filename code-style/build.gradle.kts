@@ -1,4 +1,5 @@
-// The app's own ktlint rules: blank lines around blocks and around documented members.
+// The app's own ktlint rules: blank lines around blocks and around documented members, and the app's own components
+// where AGENTS.md asks for them.
 // The root build runs ktlint with them (`./gradlew ktlintCheck`, `./gradlew ktlintFormat`).
 plugins {
     alias(libs.plugins.kotlin.jvm)

@@ -28,6 +28,14 @@ export const MOST_PARTS = 65_536;
  */
 export const MOST_COMMAND_LENGTH = 128 * 1024 * 1024;
 
+/**
+ * The most text the commands coming in parts may hold together, from every
+ * phone at once: anyone on the Wi-Fi can join a TV's Cast session, and
+ * several phones each sending most of a command would fill its memory. Past
+ * it, the phone whose part would go over loses the command it was sending.
+ */
+export const MOST_PENDING_LENGTH = MOST_COMMAND_LENGTH + MOST_COMMAND_LENGTH / 2;
+
 /** What the receiver answers a phone's hello with. */
 export interface ReceiverAnnouncement {
   type: 'receiver';
@@ -76,6 +84,9 @@ export interface ReceiverChannelOptions {
 
   /** Follows a whole command from a phone. */
   receive(command: AudienceCommand): void;
+
+  /** The most every phone's unfinished commands may hold together: `MOST_PENDING_LENGTH`, unless a test says less. */
+  mostPending?: number;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
@@ -113,6 +124,9 @@ export const receiverChannel = (options: ReceiverChannelOptions): ReceiverChanne
   const pieces = new Map<string, Joining>();
   const keyOf = (senderId?: string) => senderId ?? '';
 
+  /** What every phone's unfinished commands hold together, in characters. */
+  const pending = (): number => [...pieces.values()].reduce((sum, joining) => sum + joining.length, 0);
+
   const join = (data: Record<string, unknown>, senderId?: string): void => {
     const key = keyOf(senderId);
 
@@ -138,6 +152,11 @@ export const receiverChannel = (options: ReceiverChannelOptions): ReceiverChanne
     }
 
     if (joining.received < joining.count) {
+      // Still coming: what every phone holds unfinished has to fit, or this phone's command goes.
+      if (pending() > (options.mostPending ?? MOST_PENDING_LENGTH)) {
+        pieces.delete(key);
+      }
+
       return;
     }
 

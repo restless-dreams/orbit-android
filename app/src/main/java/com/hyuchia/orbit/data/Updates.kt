@@ -168,6 +168,9 @@ private val TIMEOUT = 15.seconds
 /** GitHub describes a release in a few kilobytes: more than this isn't one. */
 private const val RELEASE_TEXT_LIMIT = 1024 * 1024
 
+/** Where Orbit's releases are: the only pages an update offers to open. */
+private const val RELEASES_PAGE = "https://github.com/restless-dreams/orbit-android/releases/"
+
 /** Whether it's time to look again: a day after the last look, or whenever the clock went back past it. */
 internal fun isDue(checkedAt: Long, now: Long): Boolean = now < checkedAt || now - checkedAt >= INTERVAL.inWholeMilliseconds
 
@@ -218,7 +221,7 @@ private val releaseJson = Json { ignoreUnknownKeys = true }
 /**
  * The release GitHub describes in [text], or null when it isn't one Orbit
  * offers: a draft, a pre-release, a tag that isn't a version (v0.1.1 and
- * 0.1.1 are), or a page that isn't on https.
+ * 0.1.1 are), or a page that isn't GitHub's page of Orbit's releases.
  */
 internal fun parseRelease(text: String): Release? {
     val release = try {
@@ -229,7 +232,8 @@ internal fun parseRelease(text: String): Release? {
 
     val version = release.tag.removePrefix("v")
 
-    if (release.draft || release.prerelease || versionNumbers(version) == null || !release.page.startsWith("https://")) {
+    // The page opens in the browser: only GitHub's page of Orbit's releases, wherever GitHub's answer points.
+    if (release.draft || release.prerelease || versionNumbers(version) == null || !release.page.startsWith(RELEASES_PAGE)) {
         return null
     }
 

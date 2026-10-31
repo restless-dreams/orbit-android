@@ -1,0 +1,38 @@
+name: Release
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  reproducible:
+    # F-Droid builds the release's tag itself, and publishes the release's orbit-x.y.z-fdroid.apk only when that
+    # file is its own build, byte for byte but for the signature (RELEASE.md, step 10). This builds the tag as
+    # F-Droid does and compares the two the same way, with apksigcopier, so a build that wouldn't match shows up
+    # here rather than as a version F-Droid skips.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install Android's platform and build tools 37
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0" > /dev/null
+          echo "$ANDROID_HOME/build-tools/37.0.0" >> "$GITHUB_PATH"
+      - uses: gradle/actions/setup-gradle@v4
+      # F-Droid's recipe builds the libre flavor with nothing else (fdroid/com.hyuchia.orbit.yml), unsigned.
+      - run: ./gradlew assembleLibreRelease
+      - name: The release's F-Droid APK is this build, signed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          gh release download "$GITHUB_REF_NAME" --pattern "orbit-$version-fdroid.apk" --dir release
+          pipx run apksigcopier==1.1.1 compare --unsigned "release/orbit-$version-fdroid.apk" app/build/outputs/apk/libre/release/app-libre-release-unsigned.apk
+          echo "orbit-$version-fdroid.apk is this build of $GITHUB_REF_NAME, signed: F-Droid's build will match it."

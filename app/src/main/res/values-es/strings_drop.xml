@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dragging text, links, pictures, videos, sounds and maps from other apps onto a map: what the drag would do there, said over the map as it goes. -->
+    <string name="drop_add_to">Agregar a %1$s</string>
+    <string name="drop_move_into">Mover dentro de %1$s</string>
+    <string name="drop_open_as_a_map">Abrir como mapa nuevo</string>
+
+    <!-- Pictures, videos and sounds let go on a map, as they're copied into it. -->
+    <string name="drop_adding_to">Agregando a %1$s…</string>
+    <string name="drop_adding_the_video_to">Agregando el video a %1$s… %2$s</string>
+    <string name="drop_adding_the_sound_to">Agregando el audio a %1$s… %2$s</string>
+    <plurals name="drop_adding_some_to">
+        <item quantity="one">Agregando %1$d de %2$d a %3$s…</item>
+        <item quantity="many">Agregando %1$d de %2$d a %3$s…</item>
+        <item quantity="other">Agregando %1$d de %2$d a %3$s…</item>
+    </plurals>
+    <string name="drop_stop_adding">Dejar de agregar</string>
+
+    <!-- After a drop on a map, with Undo. -->
+    <plurals name="drop_added_ideas">
+        <item quantity="one">Se agregó %1$d idea a %2$s</item>
+        <item quantity="many">Se agregaron %1$d ideas a %2$s</item>
+        <item quantity="other">Se agregaron %1$d ideas a %2$s</item>
+    </plurals>
+    <string name="drop_added_the_picture">Se agregó la imagen a %1$s</string>
+    <string name="drop_added_the_live_photo">Se agregó la foto en vivo a %1$s</string>
+    <string name="drop_live_offer_title">¿Unirlos en una foto en vivo?</string>
+    <string name="drop_live_offer">“%1$s” y “%2$s” pueden ser la imagen y el video de una misma foto en vivo. Unidos, la imagen reproduce su movimiento al mantenerla presionada.</string>
+    <string name="drop_live_offer_unnamed">La imagen y el video pueden ser parte de una misma foto en vivo. Unidos, la imagen reproduce su movimiento al mantenerla presionada.</string>
+    <string name="drop_live_join">Unirlos</string>
+    <string name="drop_live_keep_apart">Dejarlos separados</string>
+    <string name="drop_added_the_video">Se agregó el video a %1$s</string>
+    <string name="drop_added_the_sound">Se agregó el audio a %1$s</string>
+    <plurals name="drop_added_pictures">
+        <item quantity="one">Se agregó %1$d imagen a %2$s</item>
+        <item quantity="many">Se agregaron %1$d imágenes a %2$s</item>
+        <item quantity="other">Se agregaron %1$d imágenes a %2$s</item>
+    </plurals>
+    <plurals name="drop_added_videos">
+        <item quantity="one">Se agregó %1$d video a %2$s</item>
+        <item quantity="many">Se agregaron %1$d videos a %2$s</item>
+        <item quantity="other">Se agregaron %1$d videos a %2$s</item>
+    </plurals>
+    <plurals name="drop_added_pictures_and_videos">
+        <item quantity="one">Se agregó %1$d imagen o video a %2$s</item>
+        <item quantity="many">Se agregaron %1$d imágenes y videos a %2$s</item>
+        <item quantity="other">Se agregaron %1$d imágenes y videos a %2$s</item>
+    </plurals>
+    <plurals name="drop_added_sounds">
+        <item quantity="one">Se agregó %1$d audio a %2$s</item>
+        <item quantity="many">Se agregaron %1$d audios a %2$s</item>
+        <item quantity="other">Se agregaron %1$d audios a %2$s</item>
+    </plurals>
+    <plurals name="drop_added_files">
+        <item quantity="one">Se agregó %1$d archivo a %2$s</item>
+        <item quantity="many">Se agregaron %1$d archivos a %2$s</item>
+        <item quantity="other">Se agregaron %1$d archivos a %2$s</item>
+    </plurals>
+    <plurals name="drop_added_some">
+        <item quantity="one">Se agregó %1$d de %2$d a %3$s. %4$s</item>
+        <item quantity="many">Se agregaron %1$d de %2$d a %3$s. %4$s</item>
+        <item quantity="other">Se agregaron %1$d de %2$d a %3$s. %4$s</item>
+    </plurals>
+    <string name="drop_nothing_to_add">Orbit no puede agregar eso a un mapa</string>
+    <string name="drop_text_file_too_long">Ese archivo es demasiado largo para agregarlo como ideas. Suéltalo en tus mapas para hacer un mapa con él.</string>
+    <string name="drop_not_into_itself">Una idea no puede ir dentro de sí misma</string>
+
+    <!-- What a picture, video or sound from another app is called on the map, when its file has no name. -->
+    <string name="drop_picture">Imagen</string>
+    <string name="drop_video">Video</string>
+    <string name="drop_sound">Audio</string>
+
+    <!-- Dropping maps or text onto the list of maps. -->
+    <string name="drop_home_maps_title">Suelta para agregar mapas</string>
+    <string name="drop_home_maps_body">Archivos markdown, YAML y zip, y mapas de OPML, FreeMind, Freeplane y XMind</string>
+    <string name="drop_home_text_title">Suelta para crear un mapa nuevo</string>
+    <string name="drop_home_text_body">La primera línea va en el centro, y el resto alrededor, con sus ramas</string>
+    <string name="drop_home_bringing_in">Importando…</string>
+    <string name="drop_file_problem">%1$s: %2$s</string>
+</resources>

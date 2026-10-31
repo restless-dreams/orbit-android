@@ -1,6 +1,7 @@
 package com.hyuchia.orbit.page
 
 import com.hyuchia.orbit.FileWords
+import com.hyuchia.orbit.present.AUDIENCE_PROTOCOL
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.descriptors.elementNames
 import kotlinx.serialization.json.JsonArray
@@ -8,10 +9,12 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Locale
@@ -43,6 +46,27 @@ class ProtocolTest {
     }
 
     @Test
+    fun `numbers a map writes that an Int can't hold never lose the map's state, nor a save with an edit in it`() {
+        // As Orbit reads them, and as the page sent them before it made them whole (web/whole-numbers.ts): `maxDepth: 1.5`,
+        // `type: goal@99999999999`, `priority: 1000000000000` and `priority: -1e21`.
+        val state = """{"title":"Plans","options":{"maxDepth":1.5},"nodes":[{"id":"plans","text":"Plans"},""" +
+            """{"id":"savings","text":"Savings","parentId":"plans","type":"goal","typeVersion":99999999999},""" +
+            """{"id":"errands","text":"Errands","parentId":"plans","priority":1000000000000},""" +
+            """{"id":"chores","text":"Chores","parentId":"plans","priority":-1e+21}]}"""
+        val ready = protocolJson.decodeFromString(MapMessage.serializer(), """{"type":"ready","state":$state}""")
+        val saved = protocolJson.decodeFromString(MapMessage.serializer(), """{"type":"saved","kind":"update","markdown":"# Plans","state":$state}""")
+        val read = (saved as MapMessage.Saved).state
+
+        assertEquals(MapMessage.Ready(read), ready)
+        // Orbit shows the levels up to maxDepth, so 1.5 shows what 2 does; a goal written for a version past an Int's is newer than
+        // this app's, an idea like any other here.
+        assertEquals(2, read.options.maxDepth)
+        assertEquals(Int.MAX_VALUE, read.nodes[1].typeVersion)
+        assertFalse(read.nodes[1].isGoal)
+        assertEquals(listOf(Int.MAX_VALUE, Int.MIN_VALUE), read.nodes.drop(2).map { it.priority })
+    }
+
+    @Test
     fun `a job's answer is read whatever map the page has`() {
         val message = protocolJson.decodeFromString(MapMessage.serializer(), """{"type":"result","job":7,"value":{"count":2},"map":"other"}""")
 
@@ -65,6 +89,13 @@ class ProtocolTest {
 
             assertEquals(example.type, canonical(example), canonical(protocolJson.encodeToJsonElement(AudienceCommand.serializer(), command)))
         }
+    }
+
+    @Test
+    fun `the audience's page speaks the protocol the app sends TVs and browsers`() {
+        val receiver = examples.getValue("audience").jsonObject.getValue("protocol").jsonPrimitive.int
+
+        assertEquals("AUDIENCE_PROTOCOL and the pages' RECEIVER_PROTOCOL change together", receiver, AUDIENCE_PROTOCOL)
     }
 
     @Test

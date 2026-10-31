@@ -79,6 +79,7 @@ import com.hyuchia.orbit.R
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.theme.parseCssColor
 import com.hyuchia.orbit.ui.EscapeCloses
+import com.hyuchia.orbit.ui.Hint
 
 /** The path's steps that are still on the map, each with its place in the path. */
 private fun MapUi.pathSteps(): List<Pair<Int, MapNode>> =
@@ -99,10 +100,17 @@ fun PathTopBar(ui: MapUi, background: Color, onSearch: () -> Unit, onClear: () -
             )
         },
         actions = {
-            IconButton(onClick = onSearch) { Icon(Icons.Outlined.Search, contentDescription = stringResource(R.string.present_path_find_an_idea)) }
+            val find = stringResource(R.string.present_path_find_an_idea)
+            val startOver = stringResource(R.string.present_path_start_over)
+
+            Hint(find) {
+                IconButton(onClick = onSearch) { Icon(Icons.Outlined.Search, contentDescription = find) }
+            }
 
             AnimatedVisibility(steps > 1, enter = fadeIn(), exit = fadeOut()) {
-                IconButton(onClick = onClear) { Icon(Icons.Outlined.RestartAlt, contentDescription = stringResource(R.string.present_path_start_over)) }
+                Hint(startOver) {
+                    IconButton(onClick = onClear) { Icon(Icons.Outlined.RestartAlt, contentDescription = startOver) }
+                }
             }
 
             Button(onClick = onDone, modifier = Modifier.padding(start = 4.dp, end = 8.dp)) { Text(stringResource(R.string.common_done)) }
@@ -127,7 +135,7 @@ fun PathBar(
     modifier: Modifier = Modifier,
 ) {
     val steps = ui.pathSteps()
-    val sun = ui.sun?.takeIf { ui.mode == "focus" }
+    val sun = ui.sun?.takeIf { ui.focused }
     val canAdd = sun != null && ui.presentPath.lastOrNull() != sun.id
     val list = rememberLazyListState()
 
@@ -280,8 +288,12 @@ private fun PathStep(
             }
         }
 
-        IconButton(onClick = onRemove, modifier = Modifier.align(Alignment.CenterEnd)) {
-            Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.present_path_take_idea_off, node.label), modifier = Modifier.size(18.dp))
+        val takeOff = stringResource(R.string.present_path_take_idea_off, node.label)
+
+        Box(Modifier.align(Alignment.CenterEnd)) {
+            Hint(takeOff) {
+                IconButton(onClick = onRemove) { Icon(Icons.Outlined.Close, contentDescription = takeOff, modifier = Modifier.size(18.dp)) }
+            }
         }
 
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {

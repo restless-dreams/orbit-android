@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sounds on ideas: voice memos recorded in Orbit, sounds from the phone or the web, and the players that play them. See TRANSLATING.md. -->
+<resources>
+    <!-- What a sound is called when it has no caption. -->
+    <string name="audio_sound">Sound</string>
+    <string name="audio_voice_memo">Voice memo</string>
+    <!-- For screen readers, a sound in the viewer without a caption: %1$s is its idea. -->
+    <string name="audio_sound_of">Sound of %1$s</string>
+
+    <!-- The editor's section for an idea's sound. -->
+    <string name="audio_section">Sound</string>
+    <string name="audio_record_a_voice_memo">Record a voice memo</string>
+    <string name="audio_choose_a_sound">Choose a sound file</string>
+    <string name="audio_or_a_sound_address">Or a sound\'s web address</string>
+    <string name="audio_sound_address">Sound address</string>
+    <string name="audio_record_again">Record again</string>
+    <string name="audio_copying_the_sound">Copying the sound…</string>
+    <!-- %1$s is how far along the copy is, such as 42%. -->
+    <string name="audio_copying_the_sound_percent">Copying the sound… %1$s</string>
+    <string name="audio_sound_unreadable">That sound couldn\'t be read.</string>
+
+    <!-- The players' buttons, for screen readers and as tooltips. -->
+    <string name="audio_play">Play</string>
+    <string name="audio_pause">Pause</string>
+    <string name="audio_mute">Turn the sound off</string>
+    <string name="audio_unmute">Turn the sound on</string>
+    <string name="audio_stop">Stop the sound</string>
+    <string name="audio_open_full_screen">Open the sound full screen</string>
+    <string name="audio_share">Share the sound</string>
+    <!-- The slider that moves a sound: for screen readers. -->
+    <string name="audio_position">Position</string>
+    <!-- Where a sound is: %1$s is the time it's at, %2$s how long it is, such as 0:42 of 3:10. -->
+    <string name="audio_time_of">%1$s of %2$s</string>
+    <string name="audio_unplayable">This sound can\'t be played.</string>
+    <!-- A sound of the map's that isn't in its folder: left out of a backup that was full, say. -->
+    <string name="audio_missing">This sound isn\'t on this device.</string>
+
+    <!-- The toolbar's and the long-press menu's button for the idea in focus's sound: %1$s is the idea. -->
+    <string name="audio_play_the_sound_in">Play the sound in %1$s</string>
+    <string name="audio_pause_the_sound_in">Pause the sound in %1$s</string>
+    <string name="audio_play_the_sound">Play the sound</string>
+    <string name="audio_pause_the_sound">Pause the sound</string>
+    <!-- Presenting: the sound plays from the presenter's phone, which the screen says under its button. -->
+    <string name="audio_plays_from_this_phone">Plays from this device</string>
+
+    <!-- The recorder. %1$s is the idea the memo goes on. -->
+    <string name="audio_recorder_for">For %1$s</string>
+    <string name="audio_tap_to_record">Tap to record</string>
+    <string name="audio_recording">Recording</string>
+    <string name="audio_paused">Paused</string>
+    <string name="audio_record">Record</string>
+    <string name="audio_pause_recording">Pause the recording</string>
+    <string name="audio_resume_recording">Go on recording</string>
+    <string name="audio_finish_recording">Finish</string>
+    <string name="audio_discard">Discard</string>
+    <string name="audio_save">Save</string>
+    <string name="audio_saving">Saving…</string>
+    <string name="audio_discard_title">Discard this voice memo?</string>
+    <string name="audio_discard_body">What you recorded won\'t be kept.</string>
+    <string name="audio_keep_it">Keep it</string>
+    <string name="audio_needs_the_microphone">Orbit needs the microphone to record a voice memo. You can allow it in Settings.</string>
+    <string name="audio_no_microphone">This device has no microphone Orbit can record with.</string>
+    <string name="audio_recording_failed">The recording stopped. Another app may be using the microphone.</string>
+    <string name="audio_longest_memo">That\'s as long as a voice memo can be, so it stopped there.</string>
+    <string name="audio_map_room_reached">That\'s all the room this map has left, so the memo stopped there.</string>
+    <!-- %1$s is what the map's pictures, videos and sounds come to, such as 90 MB. -->
+    <string name="audio_map_full">This map\'s pictures, videos and sounds come to %1$s, all a map can carry when it\'s shared or backed up. Take one off to make room for a voice memo.</string>
+    <!-- After a voice memo joins its idea, with Undo: %1$s is the idea. -->
+    <string name="audio_memo_saved">Saved the voice memo in %1$s</string>
+    <!-- Under the recorder's clock once a take is finished: listen to it, then keep it or record again. -->
+    <string name="audio_ready_to_save">Ready to save</string>
+
+    <!-- Sounds a map can't take. Sizes read as data_megabytes does: 50 MB. -->
+    <!-- %1$s is the sound's size, %2$s the most a sound can be. -->
+    <string name="data_sound_too_big">That sound is %1$s, and a map keeps sounds of up to %2$s, so it can still go to your other devices. Trim it, or add it as a web address.</string>
+    <!-- %1$s is the most a sound can be. -->
+    <string name="data_sound_past_limit">That sound is more than %1$s, and a map keeps sounds of up to that, so it can still go to your other devices. Trim it, or add it as a web address.</string>
+    <!-- %1$s is what the map's pictures, videos and sounds come to, %2$s the most they can. -->
+    <string name="data_sound_past_map_room">This map\'s pictures, videos and sounds come to %1$s already. With this sound they\'d be more than the %2$s a map can carry when it\'s shared or backed up. Choose a shorter one, or add it as a web address.</string>
+    <!-- %1$s is the sound's type as computers name it, such as audio/amr. -->
+    <string name="data_sound_kind_refused">Orbit keeps sounds as MP3, MP4, AAC, Ogg, Opus, WAV, FLAC or WebM files, and this one is %1$s.</string>
+    <string name="data_sound_kind_unknown">Orbit keeps sounds as MP3, MP4, AAC, Ogg, Opus, WAV, FLAC or WebM files, and this one is of a kind it doesn\'t know.</string>
+    <string name="data_no_room_for_sound">There isn\'t room on this device for that sound.</string>
+</resources>

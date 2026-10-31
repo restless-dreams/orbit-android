@@ -201,14 +201,90 @@ class SharedPicturesTest {
         assertNull(SharedPictures.withoutMetadata(png.copyOfRange(0, png.size - 20)))
     }
 
+    /** `data` in a GIF's sub-blocks, of at most 255 bytes each, and the empty one that ends them. */
+    private fun subBlocks(data: ByteArray): ByteArray = data.toList().chunked(255).flatMap { listOf(it.size.toByte()) + it }.toByteArray() + 0
+
+    /** A GIF with a comment and XMP saying where it was made, looping, and something after its end. */
+    private fun editorGif(): ByteArray {
+        val plain = picture("gif")
+        val screen = plain[10].toInt() and 0xFF
+        val afterColors = 13 + if (screen and 0x80 != 0) 3 * (1 shl ((screen and 0x07) + 1)) else 0
+        val application = byteArrayOf(0x21, 0xFF.toByte(), 11)
+        val loop = application + latin("NETSCAPE2.0") + byteArrayOf(3, 1, 0, 0, 0)
+        val xmp = application + latin("XMP DataXMP") + subBlocks(latin("<x:xmpmeta>$place</x:xmpmeta>"))
+        val comment = byteArrayOf(0x21, 0xFE.toByte()) + subBlocks(latin(place))
+        return plain.copyOfRange(0, afterColors) + loop + comment + xmp + plain.copyOfRange(afterColors, plain.size) + latin("after $place")
+    }
+
+    private fun latin(value: String): ByteArray = value.toByteArray(Charsets.ISO_8859_1)
+
+    @Test
+    fun `a GIF keeps its frames and looping, without comments, other apps' blocks or what follows its end`() {
+        val gif = editorGif()
+        val shared = SharedPictures.withoutMetadata(gif)!!
+
+        assertFalse(text(shared).contains("Lisbon"))
+        assertFalse(text(shared).contains("XMP DataXMP"))
+        assertTrue(text(shared).contains("NETSCAPE2.0"))
+        assertEquals(0x3B, shared.last().toInt())
+        assertEquals(pixels(picture("gif")), pixels(shared))
+        // Cut short, it isn't whole, and isn't taken for one without metadata.
+        assertNull(SharedPictures.withoutMetadata(gif.copyOfRange(0, gif.size / 2)))
+    }
+
+    @Test
+    fun `an SVG keeps what draws it, without its metadata, comments or an editor's own`() {
+        val drawing = """<?xml version="1.0" encoding="UTF-8"?>
+            <!-- Made by Ana in /home/ana/Lisbon/drawing.svg -->
+            <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+                xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+                width="10" height="10" inkscape:export-filename="/home/ana/Lisbon/drawing.png" sodipodi:docname="Lisbon.svg">
+              <metadata><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description>$place</rdf:Description></rdf:RDF></metadata>
+              <sodipodi:namedview inkscape:current-layer="Lisbon"/>
+              <title>A circle</title>
+              <circle cx="5" cy="5" r="4" fill="#4F5B92"/>
+              <use xlink:href="#dot"/>
+            </svg>"""
+        val shared = text(SharedPictures.withoutMetadata(drawing.toByteArray())!!)
+
+        assertFalse(shared, shared.contains("Lisbon"))
+        assertFalse(shared, shared.contains("ana"))
+        assertFalse(shared, shared.contains("inkscape"))
+        assertTrue(shared, shared.contains("<circle"))
+        assertTrue(shared, shared.contains("<title>A circle</title>"))
+        assertTrue(shared, shared.contains("xlink:href=\"#dot\""))
+        // A drawing with a document type could put anything anywhere: it doesn't go.
+        assertNull(SharedPictures.withoutMetadata("<!DOCTYPE svg [<!ENTITY a \"$place\">]><svg xmlns=\"http://www.w3.org/2000/svg\">&a;</svg>".toByteArray()))
+    }
+
+    @Test
+    fun `lengths made to wrap around aren't followed out of the picture`() {
+        val plain = picture("png")
+        val afterHeader = 8 + 25
+        // A chunk, an EXIF block and a WebP chunk whose lengths, added to where they are, pass 2³¹ and come back negative.
+        val chunkLength = plain.copyOfRange(0, afterHeader) + ByteBuffer.allocate(8).putInt(Int.MAX_VALUE - 8).put("tEXt".toByteArray(Charsets.ISO_8859_1)).array() +
+            ByteArray(40)
+        val exifOffset = plain.copyOfRange(0, afterHeader) +
+            chunk("eXIf", byteArrayOf(0x4D, 0x4D, 0x00, 0x2A) + ByteBuffer.allocate(4).putInt(Int.MAX_VALUE - 1).array() + ByteArray(8)) +
+            plain.copyOfRange(afterHeader, plain.size)
+        val webP = cameraWebP(orientation = null)
+        val webPSize = webP.copyOf().also { ByteBuffer.wrap(it, 16, 4).order(ByteOrder.LITTLE_ENDIAN).putInt(Int.MAX_VALUE - 4) }
+
+        assertNull(SharedPictures.withoutMetadata(chunkLength))
+        assertNull(SharedPictures.withoutMetadata(webPSize))
+        // The EXIF that can't be read says nothing about which way up; the rest of the picture goes as it is.
+        assertFalse(text(SharedPictures.withoutMetadata(exifOffset)!!).contains("eXIf"))
+    }
+
     @Test
     fun `pictures are told apart by what they hold`() {
         assertEquals(Kind.Jpeg, SharedPictures.kindOf(picture("jpg")))
         assertEquals(Kind.Png, SharedPictures.kindOf(picture("png")))
         assertEquals(Kind.WebP, SharedPictures.kindOf(cameraWebP(orientation = null)))
-        assertEquals(Kind.Plain, SharedPictures.kindOf(picture("gif")))
-        assertEquals(Kind.Plain, SharedPictures.kindOf("<?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\"/>".toByteArray()))
+        assertEquals(Kind.Gif, SharedPictures.kindOf(picture("gif")))
+        assertEquals(Kind.Svg, SharedPictures.kindOf("<?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\"/>".toByteArray()))
+        assertEquals(Kind.Plain, SharedPictures.kindOf(picture("bmp")))
         assertEquals(Kind.Other, SharedPictures.kindOf(byteArrayOf(0, 0, 0, 0x18) + "ftypheic".toByteArray(Charsets.ISO_8859_1)))
-        assertNull(SharedPictures.withoutMetadata(picture("gif")))
+        assertNull(SharedPictures.withoutMetadata(picture("bmp")))
     }
 }

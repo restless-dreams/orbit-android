@@ -131,6 +131,8 @@ describe('the app\'s words', () => {
 
   test('set the page\'s lang, which Orbit\'s own words follow, when they name one', () => {
     const page = globalThis as { document?: unknown };
+    // The tests' pretend browser's own document comes back after: the tests that run later draw maps in it.
+    const before = page.document;
     const root = { lang: 'en' };
     page.document = { documentElement: root };
 
@@ -140,7 +142,7 @@ describe('the app\'s words', () => {
       speak({ waiting: 'Esperando' });
       expect(root.lang).toBe('es-MX');
     } finally {
-      delete page.document;
+      page.document = before;
     }
   });
 

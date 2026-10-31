@@ -105,6 +105,59 @@ class CastAudienceTest {
     }
 
     @Test
+    fun `an end goes to the TV at once, a map still being made ready never after it, and the TV stays for the next presentation`() = runBlocking<Unit> {
+        val tv = Tv()
+        val shrinking = CountDownLatch(1)
+        val shrunk = CountDownLatch(1)
+
+        val audience = withContext(main) {
+            CastAudience(tv, scope, words) { markdown ->
+                if (markdown.contains("Journal")) {
+                    shrinking.countDown()
+                    shrunk.await()
+                }
+
+                markdown
+            }
+        }
+
+        withContext(main) { audience.send(AudienceCommand.Show("# Trip", theme)) }
+        assertTrue(eventually { tv.heard().size == 3 })
+
+        // A private map whose pictures take a while to shrink, and it locks: the presentation stops, its screen stays.
+        withContext(main) {
+            audience.send(AudienceCommand.Show("# Journal", theme))
+            audience.send(AudienceCommand.Step("journal", 0, 1))
+        }
+
+        assertTrue(shrinking.await(5, TimeUnit.SECONDS))
+        withContext(main) { audience.send(AudienceCommand.End) }
+        assertEquals(listOf("hello", "language", "show # Trip", "end"), tv.heard())
+
+        // What was made ready meanwhile, and the step behind it, never go.
+        shrunk.countDown()
+        Thread.sleep(200)
+        assertEquals(listOf("hello", "language", "show # Trip", "end"), tv.heard())
+
+        // Still connected, the TV shows the next presentation.
+        withContext(main) { audience.send(AudienceCommand.Show("# Garden", theme)) }
+        assertTrue(eventually { tv.heard().size == 5 })
+        assertEquals(listOf("hello", "language", "show # Trip", "end", "show # Garden"), tv.heard())
+    }
+
+    @Test
+    fun `an end as soon as the TV is there still comes after the hello`() = runBlocking<Unit> {
+        val tv = Tv()
+
+        withContext(main) {
+            CastAudience(tv, scope, words) { it }.send(AudienceCommand.End)
+        }
+
+        assertTrue(eventually { tv.heard().size == 3 })
+        assertEquals(listOf("hello", "language", "end"), tv.heard())
+    }
+
+    @Test
     fun `a map whose pictures can't be read reaches the TV without them, and the presentation goes on`() = runBlocking<Unit> {
         val tv = Tv()
         val audience = withContext(main) { CastAudience(tv, scope, words) { markdown -> if (markdown.contains("gone")) throw IOException("gone") else "$markdown, pictures inside" } }

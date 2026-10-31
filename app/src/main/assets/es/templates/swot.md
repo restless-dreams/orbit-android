@@ -10,7 +10,7 @@ Dónde estamos, por dentro y por fuera.
 - Lo que otros nos piden
 
 ## 🩹 Debilidades
-- Donde nos quedamos cortos
+- En qué nos falta mejorar
 - Lo que evitamos
 
 ## 🌱 Oportunidades

@@ -1,7 +1,7 @@
 // Bundles the pages' scripts, with Orbit. Orbit comes from a local
 // checkout, built first with `bun run build` there:
 //
-//   ORBIT_PATH=../orbit bun run build    (from web/; default: ../../orbit)
+//   ORBIT_PATH=../../orbit bun run build    (from web/; that's the default)
 //
 // Into the app's assets (app/src/main/assets/map/):
 // - bridge.js, the map's own page (index.html);
@@ -13,7 +13,10 @@
 //   join.html, which asks for the presentation's code.
 //
 // And into dist/cast-receiver/, the same audience page as a Cast receiver,
-// for a TV: a site to host over HTTPS and register with Google Cast.
+// for a TV: a site to host over HTTPS and register with Google Cast, as
+// index.html and receiver.js, and as one file with its script inside,
+// orbit-cast-receiver.html, which is what https://orbit.hyuchia.com/cast
+// serves (RELEASE.md, "The Cast receiver").
 //
 // And one of each message between the app and the pages, from
 // protocol-examples.ts, into the app's tests
@@ -37,6 +40,8 @@ const receiver = join(import.meta.dir, 'dist/cast-receiver');
 // The Orbit the pages are built with: the about screen names it, and the receiver tells phones.
 const { version } = JSON.parse(readFileSync(join(orbitPath, 'package.json'), 'utf8')) as { version: string };
 const commit = Bun.spawnSync(['git', '-C', orbitPath, 'rev-parse', '--short', 'HEAD']).stdout.toString().trim();
+// The newest map format that Orbit reads, which the app's folder records say it reads (MAP_FORMAT, held to it by a test).
+const { SUPPORTED_SCHEMA_VERSION: format } = await import(orbitEntry) as { SUPPORTED_SCHEMA_VERSION: number };
 
 /**
  * The newest JavaScript the bundles may be written in: WebViews from
@@ -105,17 +110,26 @@ writeFileSync(join(assets, 'web-page.html'), withStyles('web-page.html'));
 writeFileSync(join(assets, 'browser.html'), page.replace('<!-- scripts -->', '<!-- words -->\n<script type="module" src="browser.js"></script>'));
 writeFileSync(join(assets, 'join.html'), withStyles('join.html'));
 mkdirSync(receiver, { recursive: true });
-writeFileSync(join(receiver, 'index.html'), waitingInEnglish.replace(
-  '<!-- scripts -->',
-  '<script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>\n<script type="module" src="receiver.js"></script>',
-));
+const castFramework = '<script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>';
+writeFileSync(join(receiver, 'index.html'), waitingInEnglish.replace('<!-- scripts -->', `${castFramework}\n<script type="module" src="receiver.js"></script>`));
 
-writeFileSync(join(import.meta.dir, '../app/src/main/assets/map/orbit.json'), `${JSON.stringify({ version, commit })}\n`);
+// The receiver as one file. Its script goes inside the page as it is, so it mustn't hold anything that would end a
+// script element early. A function puts it in, since a replacement string would read the `$` in it as patterns.
+const receiverScript = readFileSync(join(receiver, 'receiver.js'), 'utf8');
+
+if (/<\/?script/i.test(receiverScript)) {
+  console.error('dist/cast-receiver/receiver.js holds "<script" or "</script", which would end the one-file receiver\'s script early.');
+  process.exit(1);
+}
+
+writeFileSync(join(receiver, 'orbit-cast-receiver.html'), waitingInEnglish.replace('<!-- scripts -->', () => `${castFramework}\n<script type="module">${receiverScript}</script>`));
+
+writeFileSync(join(import.meta.dir, '../app/src/main/assets/map/orbit.json'), `${JSON.stringify({ version, commit, format })}\n`);
 writeFileSync(join(import.meta.dir, '../app/src/test/resources/page-protocol.json'), protocolExamples());
 const kilobytes = (size: number) => `${(size / 1024).toFixed(0)} KB`;
 console.log(`From Orbit ${version} at ${orbitPath}:`);
 console.log(`  app/src/main/assets/map/bridge.js (${kilobytes(sizes.bridge)}), audience.js (${kilobytes(sizes.audience)}) and audience.html`);
 console.log(`  app/src/main/assets/map/web-page.js (${kilobytes(sizes.webPage)}) and web-page.html`);
 console.log(`  app/src/main/assets/map/browser.js (${kilobytes(sizes.browser)}), browser.html and join.html`);
-console.log(`  web/dist/cast-receiver/index.html and receiver.js (${kilobytes(sizes.receiver)})`);
+console.log(`  web/dist/cast-receiver/index.html and receiver.js (${kilobytes(sizes.receiver)}), and both as orbit-cast-receiver.html`);
 console.log('  app/src/test/resources/page-protocol.json');

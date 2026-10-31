@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Private maps: locked with the phone's own screen lock, and kept out of widgets, shortcuts and Recents. See TRANSLATING.md. -->
+<resources>
+    <!-- In place of a private map's name while private maps are locked: on its card, its widget, a pinned shortcut and in the trash. -->
+    <string name="private_map">Private map</string>
+    <!-- What screen readers say for the lock on a private map's card. -->
+    <string name="private_badge">Private</string>
+    <!-- In a map's menu. -->
+    <string name="private_make_private">Make private</string>
+    <string name="private_make_not_private">Turn off Private</string>
+    <!-- Said once a map is private. %1$s is the map's title. -->
+    <string name="private_made_private">“%1$s” is private now: it opens with your screen lock</string>
+    <!-- %1$s is the map's title. -->
+    <string name="private_made_not_private">“%1$s” isn\'t private anymore</string>
+    <string name="private_unlock">Unlock</string>
+    <!-- The title of the phone's own prompt for the fingerprint, face or screen lock, and the menus that open it. -->
+    <string name="private_unlock_private_maps">Unlock private maps</string>
+    <string name="private_lock_private_maps">Lock private maps</string>
+    <string name="private_lock_now">Lock them now</string>
+    <!-- In an unlocked private map's menu, and its card's on Home: locks every private map at once, rather than when Orbit has been away a while. -->
+    <string name="private_menu_lock_now">Lock now</string>
+    <!-- What screen readers say for that action, and the hint of the map's lock button on tablets: the lock is one for every private map. -->
+    <string name="private_lock_private_maps_now">Lock private maps now</string>
+    <!-- Under "Private map" on a locked card. -->
+    <string name="private_locked_card_hint">Locked · Tap to unlock</string>
+    <!-- What screen readers say for a locked card. -->
+    <string name="private_locked_card_description">Private map, locked</string>
+    <string name="private_more_options">More options for this private map</string>
+
+    <!-- A private map's screen while private maps are locked. -->
+    <string name="private_cover_title">This map is private</string>
+    <string name="private_cover_body">Unlock it with your fingerprint, face or screen lock to see it.</string>
+    <string name="private_back_to_your_maps">Back to your maps</string>
+
+    <!-- Making a map private on a phone without a screen lock. -->
+    <string name="private_needs_screen_lock_title">Set a screen lock first</string>
+    <string name="private_needs_screen_lock_body">Private maps open with your fingerprint, face or screen lock, and this device doesn\'t have a screen lock yet. Once you set one, this map becomes private.</string>
+    <string name="private_set_screen_lock">Set a screen lock</string>
+    <string name="private_not_now">Not now</string>
+
+    <!-- Settings. -->
+    <string name="private_settings_heading">Private maps</string>
+    <string name="private_settings_description">Make a map private from its menu: it shows locked among your maps, stays out of widgets, shortcuts and Recents, and opens with your fingerprint, face or screen lock.</string>
+    <!-- How many maps are private, then what that means. -->
+    <plurals name="private_settings_count">
+        <item quantity="one">%1$d private map: it shows locked among your maps, stays out of widgets, shortcuts and Recents, and opens with your fingerprint, face or screen lock.</item>
+        <item quantity="other">%1$d private maps: they show locked among your maps, stay out of widgets, shortcuts and Recents, and open with your fingerprint, face or screen lock.</item>
+    </plurals>
+    <!-- Above the choices of how long Orbit can be away before private maps lock again. -->
+    <string name="private_settings_lock_again">Lock them again after leaving Orbit</string>
+    <string name="private_lock_right_away">Right away</string>
+    <!-- Beside private_lock_right_away, under private_settings_lock_again: how long Orbit can be away first. -->
+    <plurals name="private_lock_minutes">
+        <item quantity="one">%1$d minute</item>
+        <item quantity="other">%1$d minutes</item>
+    </plurals>
+    <string name="private_settings_screen_off">Turning the screen off locks them at once.</string>
+    <string name="private_settings_not_encrypted">Private maps are locked in Orbit, not encrypted: their files stay plain markdown, so a sync app, the folder you keep maps in or a backup can read them like any other map.</string>
+    <string name="private_settings_no_screen_lock">This device has no screen lock, so maps can\'t be made private yet. Set a PIN, pattern or password to lock them.</string>
+    <string name="private_settings_no_screen_lock_with_maps">This device has no screen lock anymore, so your private maps aren\'t locked. Set a PIN, pattern or password to lock them again. Until then, Android\'s backup leaves them out.</string>
+
+    <!-- Under "Private map" on a private map's home screen widget. -->
+    <string name="private_widget_hint">Tap to open</string>
+
+    <!-- Where Orbit would name maps outside them, while private maps are locked. -->
+    <!-- Home's message after a private map was deleted from its own screen, with Undo. -->
+    <string name="private_deleted_map">Deleted a private map</string>
+    <!-- A map from another device that updates a private map here. %1$s is the device's name. -->
+    <string name="private_arrival_newer_version_from">A newer private map from %1$s</string>
+    <!-- A file opened with Orbit that is another version of a private map here. -->
+    <string name="private_arrival_another_version">Another version of a private map</string>
+    <!-- At the end of a folder note's list of maps, in place of the private ones: “Trip”, 2 private maps. -->
+    <plurals name="private_maps_in_a_note">
+        <item quantity="one">a private map</item>
+        <item quantity="other">%1$d private maps</item>
+    </plurals>
+    <!-- At the end of the folder note's list of pictures and videos too big for a map, in place of private maps' own. -->
+    <plurals name="private_files_in_a_note">
+        <item quantity="one">a picture or video in a private map</item>
+        <item quantity="other">%1$d pictures and videos in private maps</item>
+    </plurals>
+
+    <!-- In a map's menu, open or on its Home card: a switch showing whether the map is private, which turns it on or off. -->
+    <string name="private_switch">Private</string>
+    <!-- In Home's bar while private maps are hidden (see private_settings_hide): unlocks them and shows them again. It never says how many there are. -->
+    <string name="private_show_private_maps">Show private maps</string>
+    <!-- A switch in Settings, under Private maps. -->
+    <string name="private_settings_hide">Hide them while locked</string>
+    <string name="private_settings_hide_description">Locked, they\'re left out of your maps, searches and tags, rather than keeping their place. The lock at the top shows them.</string>
+    <!-- The same as private_settings_description and private_settings_count, while Settings hides private maps on Home when they're locked (private_settings_hide). -->
+    <string name="private_settings_description_hidden">Make a map private from its menu: it\'s hidden from your maps while locked, stays out of widgets, shortcuts and Recents, and opens with your fingerprint, face or screen lock.</string>
+    <plurals name="private_settings_count_hidden">
+        <item quantity="one">%1$d private map: it\'s hidden from your maps while locked, stays out of widgets, shortcuts and Recents, and opens with your fingerprint, face or screen lock.</item>
+        <item quantity="other">%1$d private maps: they\'re hidden from your maps while locked, stay out of widgets, shortcuts and Recents, and open with your fingerprint, face or screen lock.</item>
+    </plurals>
+    <!-- After exporting every map, while private maps are hidden (private_settings_hide): no count, so it doesn't give their number away. -->
+    <string name="private_exported_every_map">Exported every map.</string>
+    <!-- After a private map's presentation stopped as private maps locked, once they're unlocked: its audience stopped seeing it. -->
+    <string name="private_presentation_stopped">The presentation stopped when private maps locked</string>
+    <string name="private_present_again">Present again</string>
+
+    <!-- A private map's cover: an emoji and a short name of the owner's own, shown instead of the map's name while it's locked, so locked maps tell apart. In a private map's menu, beside the Private switch, and the dialog it opens. -->
+    <string name="private_cover_while_locked">Cover while locked</string>
+    <string name="private_cover_explanation">Shown instead of its name while it\'s locked.</string>
+    <!-- The cover's name field, and an example in it, before anything is typed. -->
+    <string name="private_cover_name">Name</string>
+    <string name="private_cover_name_example">Journal</string>
+    <!-- What screen readers say for the cover's emoji, a button that opens the emoji picker. %1$s is the emoji chosen. -->
+    <string name="private_cover_emoji">Emoji</string>
+    <string name="private_cover_choose_emoji">Choose an emoji</string>
+    <string name="private_cover_change_emoji">Emoji %1$s. Change it</string>
+    <!-- The emoji picker's title, for a private map's cover. -->
+    <string name="private_cover_emoji_title">An emoji for its cover</string>
+    <string name="private_cover_save">Save</string>
+    <string name="private_cover_remove">Remove cover</string>
+    <!-- What screen readers say for a locked private map's card with a cover. %1$s is the cover's name. -->
+    <string name="private_locked_card_description_named">Private map, %1$s, locked</string>
+    <!-- Under a cover's name on a private map's lock, in place of private_cover_title's words. -->
+    <string name="private_cover_named_body">A private map. Unlock it with your fingerprint, face or screen lock to see it.</string>
+    <!-- A map from another device that updates a private map here with a cover. %1$s is the cover (its emoji and name), %2$s the device's name. -->
+    <string name="private_arrival_newer_version_of_from">A newer version of your private map “%1$s” from %2$s</string>
+    <!-- A file opened with Orbit that is another version of a private map here with a cover. %1$s is the cover (its emoji and name). -->
+    <string name="private_arrival_another_version_of">Another version of your private map “%1$s”</string>
+</resources>

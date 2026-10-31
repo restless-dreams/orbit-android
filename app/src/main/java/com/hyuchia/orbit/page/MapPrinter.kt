@@ -10,6 +10,7 @@ import android.print.PageRange
 import android.print.PrintAttributes
 import android.print.PrintDocumentAdapter
 import android.print.PrintJob
+import android.print.PrintJobInfo
 import android.print.PrintManager
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
@@ -27,7 +28,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class PrintRequest(
     /** `focus`, an idea with its orbit, or `all`, the whole map. */
-    val viewMode: String,
+    val view: String,
 
     /** The idea in the middle of a focused picture; the top idea without one. */
     val focus: String? = null,
@@ -48,19 +49,39 @@ object MapPrinter {
     /** The views printing now: each stays alive until its job is done with it. */
     private val printing = mutableSetOf<WebView>()
 
+    /** The last print job, while its dialog may still be open. */
+    private var latest: PrintJob? = null
+
+    /**
+     * Whether the last print job's dialog is still open, before anything was
+     * printed, forgetting the job: it can't be cancelled then, and a dialog
+     * closed with the window that opened it leaves it as it was, so as
+     * private maps lock, MainActivity makes its window again once, and no map
+     * stays over the lock. A job that has started printing goes on.
+     */
+    @MainThread
+    fun takeOpenDialog(): Boolean {
+        val job = latest ?: return false
+        latest = null
+        return runCatching { job.info.state == PrintJobInfo.STATE_CREATED }.getOrDefault(false)
+    }
+
     /**
      * Prints `html`, a page from [WebPage.build] with a [PrintRequest], as
      * `title`. `then` hears true once the print dialog opens, or false when the
-     * page couldn't be laid out.
+     * page couldn't be laid out, or `goes`, asked right before the dialog
+     * opens, says it mustn't: a private map that locked while its page loaded.
      */
     @MainThread
-    fun print(activity: Activity, title: String, html: String, then: (Boolean) -> Unit) {
+    fun print(activity: Activity, title: String, html: String, goes: () -> Boolean = { true }, then: (Boolean) -> Unit) {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             then(false)
             return
         }
 
         val view = WebView(activity)
+        // Quiet as the map's page is: the console would put the map's words in the phone's log.
+        view.webChromeClient = OrbitPage.QuietChrome(players = false)
         val handler = Handler(Looper.getMainLooper())
         val lifecycle = (activity as? LifecycleOwner)?.lifecycle
         lateinit var closing: LifecycleEventObserver
@@ -101,6 +122,13 @@ object MapPrinter {
 
             settled = true
             handler.removeCallbacks(timeout)
+
+            if (!goes()) {
+                release()
+                then(false)
+                return
+            }
+
             val job: PrintJob? = activity.getSystemService(PrintManager::class.java).print(title, ReleasingAdapter(view.createPrintDocumentAdapter(title), ::release), null)
 
             // A window on its way out prints nothing, and the adapter would never hear from a job.
@@ -110,6 +138,7 @@ object MapPrinter {
                 return
             }
 
+            latest = job
             then(true)
         }
 

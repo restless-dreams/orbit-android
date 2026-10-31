@@ -19,7 +19,11 @@ internal const val LAYOUT_VERSION = 2
  */
 internal const val LAYOUT_COMPATIBLE = 1
 
-/** The layout the files are in, as the app that laid them out wrote it in `maps/.layout.json`. */
+/**
+ * The layout the files are in, as the app that laid them out wrote it in
+ * `maps/.layout.json`. Its fields stay whole numbers, and fields are only
+ * ever added: a record an app can't read leaves its maps only read.
+ */
 @Serializable
 internal data class LayoutRecord(val version: Int, val compatible: Int = 1)
 
@@ -52,11 +56,16 @@ internal class StorageLayout(
 
     /**
      * Brings the files to this version's layout. Returns false when a newer
-     * version laid them out in a way this one can't safely change: the maps
-     * are then only read.
+     * version laid them out in a way this one can't safely change, or left a
+     * record of its layout this one can't read: the maps are then only read.
      */
     fun prepare(): Boolean {
         val current = read()
+
+        // A record that's there but can't be read, reshaped by a newer version or damaged, doesn't mean the files are from before layouts.
+        if (current == null && record.exists()) {
+            return false
+        }
 
         if (current != null && current.version > LAYOUT_VERSION && LAYOUT_VERSION < current.compatible) {
             return false
@@ -82,7 +91,7 @@ internal class StorageLayout(
         return true
     }
 
-    /** The layout the files say they're in; null before layouts were written down. */
+    /** The layout the files say they're in; null before layouts were written down, or when their record can't be read. */
     fun read(): LayoutRecord? =
         record.takeIf { it.isFile }?.let { runCatching { layoutJson.decodeFromString(LayoutRecord.serializer(), it.readText()) }.getOrNull() }
 
@@ -104,41 +113,47 @@ internal class StorageLayout(
     /**
      * Each map's history, from its folder (`maps/<map>/history/`) to its own
      * (`history/<map>/`). A version already there stays; one only in the map's
-     * folder moves. Safe to run again after a crash midway.
+     * folder moves. Safe to run again after a crash midway. So does the
+     * history a map brought back from the trash left in its folder
+     * (`.history/`) when it couldn't be moved then.
      */
     fun moveHistoryOutOfMaps() {
         maps.listFiles { file -> file.isDirectory }.orEmpty().forEach { folder ->
-            val old = File(folder, HISTORY_DIRECTORY)
-
-            if (!old.isDirectory) {
-                return@forEach
-            }
-
-            val target = File(history, folder.name)
-
-            if (!target.exists()) {
-                history.mkdirs()
-
-                if (old.renameTo(target)) {
-                    return@forEach
-                }
-            }
-
-            target.mkdirs()
-
-            old.listFiles().orEmpty().forEach { version ->
-                val moved = File(target, version.name)
-
-                if (moved.exists()) {
-                    version.delete()
-                } else if (!version.renameTo(moved)) {
-                    version.copyTo(moved)
-                    version.delete()
-                }
-            }
-
-            old.delete()
+            moveHistory(File(folder, HISTORY_DIRECTORY), folder.name)
+            moveHistory(File(folder, TRASHED_HISTORY), folder.name)
         }
+    }
+
+    /** Moves the versions in `old` into the history of map `id`. */
+    private fun moveHistory(old: File, id: String) {
+        if (!old.isDirectory) {
+            return
+        }
+
+        val target = File(history, id)
+
+        if (!target.exists()) {
+            history.mkdirs()
+
+            if (old.renameTo(target)) {
+                return
+            }
+        }
+
+        target.mkdirs()
+
+        old.listFiles().orEmpty().forEach { version ->
+            val moved = File(target, version.name)
+
+            if (moved.exists()) {
+                version.delete()
+            } else if (!version.renameTo(moved)) {
+                version.copyTo(moved)
+                version.delete()
+            }
+        }
+
+        old.delete()
     }
 
     /**

@@ -5,11 +5,13 @@ plugins {
     alias(libs.plugins.kotlin.compose) apply false
     alias(libs.plugins.kotlin.serialization) apply false
     alias(libs.plugins.aboutlibraries) apply false
+    alias(libs.plugins.roborazzi) apply false
     alias(libs.plugins.kotlin.jvm) apply false
 }
 
-// ktlint checks the Kotlin code style with the app's own rules, in code-style/. Its
-// standard rules are off (.editorconfig): they'd rewrite much more than the style asks.
+// ktlint checks the Kotlin code style with the app's own rules, in code-style/. Of its standard
+// rules, only unused imports, imports' order and double blank lines are on (.editorconfig): the
+// others would rewrite much more than the style asks.
 val ktlint: Configuration by configurations.creating
 
 dependencies {

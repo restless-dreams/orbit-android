@@ -2,6 +2,7 @@ package com.hyuchia.orbit.map
 
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.MapState
+import com.hyuchia.orbit.page.PROGRESS_VERSION
 
 /** Statuses Orbit draws as done: a to-do with one is done. */
 private val DONE_STATUS = Regex("done|complete|completed|shipped|finished|closed")
@@ -24,8 +25,8 @@ val MapNode.isToDo: Boolean get() = TO_DO_STATUS.matches(statusWord)
 /** A to-do that's done. */
 val MapNode.isDone: Boolean get() = DONE_STATUS.matches(statusWord)
 
-/** An idea of the Progress kind. */
-val MapNode.isProgress: Boolean get() = type?.trim().equals("progress", ignoreCase = true)
+/** An idea of the Progress kind, written for this version of Progress or an older one (see [PROGRESS_VERSION]). */
+val MapNode.isProgress: Boolean get() = type?.trim().equals("progress", ignoreCase = true) && (typeVersion ?: 1) <= PROGRESS_VERSION
 
 /** A goal with a target of its own, which shows its own numbers. */
 private val MapNode.hasOwnTarget: Boolean get() = Goal.of(this)?.target != null

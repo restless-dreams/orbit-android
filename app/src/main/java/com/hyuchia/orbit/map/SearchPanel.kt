@@ -22,6 +22,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -40,6 +41,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.page.MapNode
+import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.ListRow
 import com.hyuchia.orbit.ui.foldCase
 import com.hyuchia.orbit.ui.searchWords
@@ -103,7 +105,11 @@ fun SearchPanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
             leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
             trailingIcon = {
                 if (query.isNotEmpty()) {
-                    IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.map_clear)) }
+                    val clear = stringResource(R.string.map_clear)
+
+                    Hint(clear) {
+                        IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, contentDescription = clear) }
+                    }
                 }
             },
             singleLine = true,
@@ -120,28 +126,34 @@ fun SearchPanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
                 .focusRequester(focus),
         )
 
-        LazyColumn(
-            contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
-            modifier = Modifier.imePadding(),
-        ) {
-            if (query.isNotBlank() && matches.isEmpty()) {
-                item {
-                    Text(
-                        stringResource(R.string.map_nothing_matches, query),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(24.dp),
+        // Beside the map on a tablet, the list starts afresh once the panes stop moving (see PaneListState).
+        val pane = rememberPaneListState()
+
+        key(pane.list) {
+            LazyColumn(
+                state = pane.list,
+                contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
+                modifier = Modifier.paneList(pane).imePadding(),
+            ) {
+                if (query.isNotBlank() && matches.isEmpty()) {
+                    item {
+                        Text(
+                            stringResource(R.string.map_nothing_matches, query),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(24.dp),
+                        )
+                    }
+                }
+
+                items(matches, key = { it.node.id }) { match ->
+                    ListRow(
+                        headline = { Text(highlight(match.node.label, query), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        overline = if (match.path.isNotEmpty()) ({ Text(match.path, maxLines = 1, overflow = TextOverflow.Ellipsis) }) else null,
+                        supporting = match.snippet?.let { snippet -> { Text(highlight(snippet, query), maxLines = 2, overflow = TextOverflow.Ellipsis) } },
+                        leading = { NodeDot(match.node, 16.dp) },
+                        modifier = Modifier.clickable { open(match.node) },
                     )
                 }
-            }
-
-            items(matches, key = { it.node.id }) { match ->
-                ListRow(
-                    headline = { Text(highlight(match.node.label, query), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    overline = if (match.path.isNotEmpty()) ({ Text(match.path, maxLines = 1, overflow = TextOverflow.Ellipsis) }) else null,
-                    supporting = match.snippet?.let { snippet -> { Text(highlight(snippet, query), maxLines = 2, overflow = TextOverflow.Ellipsis) } },
-                    leading = { NodeDot(match.node, 16.dp) },
-                    modifier = Modifier.clickable { open(match.node) },
-                )
             }
         }
     }

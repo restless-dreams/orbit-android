@@ -24,6 +24,7 @@
   .page:not(.page--presenting) .audience__map,
   .page:not(.page--presenting) .audience__progress,
   .page:not(.page--presenting) .audience__caption,
+  .page:not(.page--presenting) .audience__still,
   .page--presenting .page__explore,
   .page--presenting .page__present,
   .page--presenting .page__credit,
@@ -39,6 +40,33 @@
   .page--downloadable .page__download {
     transform: translateX(6px);
     text-decoration: none;
+  }
+
+  /* Side by side on a phone, they'd reach Orbit's zoom buttons in one corner and the credit in the other: the map
+     itself goes above Present instead, on one line where it fits between the zoom buttons' room on either side. */
+  @media (max-width: 600px) {
+    .page--downloadable .page__present {
+      width: max-content;
+      max-width: calc(100vw - 136px);
+      transform: translateX(-50%);
+    }
+
+    .page--downloadable .page__download {
+      bottom: calc(max(16px, env(safe-area-inset-bottom)) + 52px);
+      transform: translateX(-50%);
+    }
+  }
+
+  /* Presenting, the title of the idea shown has the focus, which the keys need: it takes it without a ring, and an
+     idea with nothing to say keeps it, invisible, rather than dropping it onto the page. */
+  .audience__title:focus {
+    outline: none;
+  }
+
+  .page .audience__caption--empty {
+    visibility: visible;
+    opacity: 0;
+    pointer-events: none;
   }
 
   .page--presenting {
@@ -105,6 +133,15 @@
     display: none;
   }
 
+  /* Under the map, the caption rises above the controls while they show, as the app's own presenting keeps their room. */
+  .page .audience__caption {
+    transition: opacity 320ms ease, transform 300ms cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  .page--controls:not(.audience--beside) .audience__caption {
+    transform: translate(-50%, calc(var(--audience-margin) - max(16px, env(safe-area-inset-bottom)) - 54px));
+  }
+
   .page__button {
     justify-content: center;
     width: 44px;
@@ -137,7 +174,7 @@
     display: none;
   }
 
-  /* A goal's or a Progress idea's ring, written out on paper (web/print.ts). */
+  /* A goal's or a Progress idea's ring, written out on paper (web/print.ts), in the colors of the layout's chips and links: web-page.ts sets them on #print (printColors). */
   .print-ring {
     display: inline-flex;
     align-items: center;
@@ -149,14 +186,14 @@
     width: 48pt;
     height: 4pt;
     border-radius: 2pt;
-    background: var(--orbit-print-chip-background, var(--_orbit-print-chip-background));
+    background: var(--orbit-print-chip-background);
     overflow: hidden;
   }
 
   .print-ring__fill {
     display: block;
     height: 100%;
-    background: var(--orbit-print-link-text, var(--_orbit-print-link-text));
+    background: var(--orbit-print-link-text);
   }
 
   @media print {
@@ -186,9 +223,16 @@
 <div id="map" class="audience__map"></div>
 <div class="audience__progress"><div class="audience__progress-bar"></div></div>
 <section class="audience__caption audience__caption--empty" aria-live="polite">
-  <h1 class="audience__title"></h1>
+  <h1 class="audience__title" tabindex="-1"></h1>
   <div class="audience__note"></div>
 </section>
+<figure class="audience__still" hidden>
+  <img class="audience__still-picture" alt="">
+  <figcaption class="audience__still-caption">
+    <h2 class="audience__still-title"></h2>
+    <p class="audience__still-text"></p>
+  </figcaption>
+</figure>
 <button class="page__present" type="button" title="<!-- present key -->">
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
   <!-- present -->

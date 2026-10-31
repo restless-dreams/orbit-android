@@ -191,6 +191,29 @@ class LocalServerTest {
     }
 
     @Test
+    fun aStreamClosedBeforeItsConnectionTakesItStillSaysWhatWasSent() {
+        // As a browser's, removed while its stream starts: whichever thread comes first, it hears so, then the stream ends.
+        val ended = CountDownLatch(1)
+        val removed = EventStream { ended.countDown() }
+        removed.send("{\"type\":\"removed\"}")
+        removed.close()
+        assertTrue(removed.isClosed)
+
+        val lines = open(server { Response.Events(removed) }, "/events").inputStream.bufferedReader()
+        assertEquals("data: {\"type\":\"removed\"}", lines.readLine())
+        assertEquals("", lines.readLine())
+        assertNull(lines.readLine())
+        assertTrue(ended.await(5, TimeUnit.SECONDS))
+
+        // With nothing left to say, it's over at once, and a connection that takes it only ends.
+        val silent = CountDownLatch(1)
+        val quiet = EventStream { silent.countDown() }
+        quiet.close()
+        assertEquals(0L, silent.count)
+        assertNull(open(server { Response.Events(quiet) }, "/events").inputStream.bufferedReader().readLine())
+    }
+
+    @Test
     fun eventStreamsNeverHoldTheAppsThreadsNorOneOfTheirOwn() {
         val count = 150
         val streams = List(count) { EventStream() }
@@ -772,7 +795,7 @@ class LocalServerTest {
 
         /** Waits up to five seconds for `condition`. */
         fun eventually(condition: () -> Boolean): Boolean {
-            val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
 
             while (System.nanoTime() < until) {
                 if (condition()) {

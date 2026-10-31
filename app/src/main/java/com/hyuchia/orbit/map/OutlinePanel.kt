@@ -1,8 +1,14 @@
 package com.hyuchia.orbit.map
 
-import androidx.compose.foundation.ExperimentalFoundationApi
+import android.view.HapticFeedbackConstants
+import android.view.View
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -29,20 +34,27 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -51,6 +63,8 @@ import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.rememberWords
+import com.hyuchia.orbit.theme.parseCssColor
+import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.WavyProgress
 import kotlinx.serialization.json.JsonPrimitive
 import java.text.NumberFormat
@@ -84,18 +98,35 @@ fun OutlinePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
     }
 
     val visible = nodes.filter { it.id !in hidden }
-    val list = rememberLazyListState()
+    // Beside the map on a tablet, the list starts afresh once the panes stop moving (see PaneListState).
+    val pane = rememberPaneListState()
     val sunId = ui.sun?.id
+    var shownSun by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
+    // The idea in focus is in view as the outline opens, and comes into view each time it changes.
+    LaunchedEffect(sunId) {
         val index = visible.indexOfFirst { it.id == sunId }
+        val opening = shownSun == null
+        shownSun = sunId
 
-        if (index > 2) {
-            list.scrollToItem(index - 2)
+        if (index < 0) {
+            return@LaunchedEffect
+        }
+
+        val list = pane.list
+
+        if (opening) {
+            if (index > 2) {
+                list.scrollToItem(index - 2)
+            }
+        } else if (!list.showsWhole(index)) {
+            list.animateScrollToItem((index - 2).coerceAtLeast(0))
         }
     }
 
     val total = nodes.firstOrNull()?.let { progress.under(it) }
+    val untitled = stringResource(R.string.common_untitled)
+    val fallbackColor = MaterialTheme.colorScheme.primaryContainer.toArgb()
 
     PanelFrame(title = stringResource(R.string.common_outline), sheet = sheet, onDismiss = { model.show(null) }, partial = true, scrim = false) {
         if (total != null && total.total > 0) {
@@ -109,32 +140,52 @@ fun OutlinePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
             }
         }
 
-        LazyColumn(state = list, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 32.dp)) {
-            items(visible, key = { it.id }) { node ->
-                OutlineRow(
-                    node = node,
-                    current = node.id == sunId,
-                    folded = folded[node.id] == true,
-                    under = progress.under(node),
-                    ring = progress.followsItsIdeas(node),
-                    onFold = { folded[node.id] = !(folded[node.id] ?: false) },
-                    onOpen = {
-                        if (sheet) {
-                            model.show(null)
-                        }
+        key(pane.list) {
+            LazyColumn(state = pane.list, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 32.dp), modifier = Modifier.paneList(pane)) {
+                items(visible, key = { it.id }) { node ->
+                    OutlineRow(
+                        node = node,
+                        current = node.id == sunId,
+                        folded = folded[node.id] == true,
+                        under = progress.under(node),
+                        ring = progress.followsItsIdeas(node),
+                        onFold = { folded[node.id] = !(folded[node.id] ?: false) },
+                        onOpen = {
+                            if (sheet) {
+                                model.show(null)
+                            }
 
-                        model.focus(node.id, point = true)
-                    },
-                    onEdit = { model.show(Panel.Editor(node.id)) },
-                    onCheck = { checked -> model.update(node.id, "status", JsonPrimitive(if (checked) "done" else "todo")) },
-                    modifier = Modifier.animateItem(),
-                )
+                            model.focus(node.id, point = true)
+                        },
+                        onEdit = { model.show(Panel.Editor(node.id)) },
+                        onCheck = { checked -> model.update(node.id, "status", JsonPrimitive(if (checked) "done" else "todo")) },
+                        onDragOut = { view ->
+                            val started = model.drops.canDragOut && startIdeaDrag(view, model.id, nodes, node.id, untitled, parseCssColor(node.drawnColor)?.toArgb() ?: fallbackColor)
+
+                            if (started) {
+                                model.drops.wentOut()
+                            }
+
+                            // A sheet is a window over the map: it steps aside, so the idea can land on the map as well as in another app.
+                            if (started && sheet) {
+                                model.show(null)
+                            }
+
+                            started
+                        },
+                        modifier = Modifier.animateItem(),
+                    )
+                }
             }
         }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+/**
+ * A row of the outline. Tapped, it flies to its idea; held, it lifts, as an
+ * idea does on the map: let go, its editor opens, and moved on, the idea is
+ * dragged out to other apps (or back onto the map, into another idea).
+ */
 @Composable
 private fun OutlineRow(
     node: MapNode,
@@ -146,6 +197,7 @@ private fun OutlineRow(
     onOpen: () -> Unit,
     onEdit: () -> Unit,
     onCheck: (Boolean) -> Unit,
+    onDragOut: (View) -> Boolean,
     modifier: Modifier = Modifier,
 ) {
     val done = node.isDone
@@ -153,6 +205,13 @@ private fun OutlineRow(
     val locale = LocalConfiguration.current.locales[0]
     val words = rememberWords()
     val colors = MaterialTheme.colorScheme
+    val view = LocalView.current
+    var lifted by remember { mutableStateOf(false) }
+    val lift by animateFloatAsState(if (lifted) 1f else 0f, spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow), label = "lift")
+    val edit by rememberUpdatedState(onEdit)
+    val dragOut by rememberUpdatedState(onDragOut)
+    // A press on the fold's button is the button's: held, it shows its hint, rather than lifting the idea to edit it.
+    var pressOnFold by remember { mutableStateOf(false) }
 
     val textColor = when {
         current -> colors.onSecondaryContainer
@@ -161,7 +220,7 @@ private fun OutlineRow(
     }
 
     val mutedColor = if (current) colors.onSecondaryContainer.copy(alpha = 0.78f) else colors.onSurfaceVariant
-    val edit = stringResource(R.string.common_edit)
+    val editLabel = stringResource(R.string.common_edit)
 
     val ideas = when {
         node.childCount == 0 -> null
@@ -173,24 +232,65 @@ private fun OutlineRow(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (current) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent)
-            .combinedClickable(onClickLabel = stringResource(R.string.map_fly_to_it), onLongClickLabel = edit, onClick = onOpen, onLongClick = onEdit)
+            // Lifted, it rises off the list, as an idea held on the map does.
+            .graphicsLayer {
+                scaleX = 1f + 0.02f * lift
+                scaleY = 1f + 0.02f * lift
+                shadowElevation = 8.dp.toPx() * lift
+                shape = RoundedCornerShape(16.dp)
+                clip = true
+            }
+            .background(
+                when {
+                    lifted -> colors.surfaceContainerHighest
+                    current -> colors.secondaryContainer
+                    else -> Color.Transparent
+                },
+            )
+            .clickable(onClickLabel = stringResource(R.string.map_fly_to_it), onClick = onOpen)
+            .pointerInput(node.id) {
+                liftThenDrag(
+                    onLift = { up ->
+                        lifted = up
+
+                        if (up) {
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        }
+                    },
+                    onLetGo = { edit() },
+                    onDragOut = { dragOut(view) },
+                    ours = { !pressOnFold.also { pressOnFold = false } },
+                )
+            }
             .semantics {
                 if (ideas != null) {
                     stateDescription = ideas
                 }
 
-                customActions = listOf(CustomAccessibilityAction(edit) { onEdit(); true })
+                onLongClick(label = editLabel) {
+                    onEdit()
+                    true
+                }
+
+                customActions = listOf(CustomAccessibilityAction(editLabel) { onEdit(); true })
             }
             .padding(start = (node.depth * 18).dp, end = 4.dp),
     ) {
         if (node.childCount > 0) {
-            IconButton(onClick = onFold, modifier = Modifier.size(48.dp)) {
-                Icon(
-                    if (folded) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown,
-                    contentDescription = stringResource(if (folded) R.string.map_show_its_ideas else R.string.map_fold_its_ideas),
-                )
+            val fold = stringResource(if (folded) R.string.map_show_its_ideas else R.string.map_fold_its_ideas)
+
+            Hint(fold) {
+                // The button hears a press before the row does, and tells the row the press is its own.
+                val heard = Modifier.pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        pressOnFold = true
+                    }
+                }
+
+                IconButton(onClick = onFold, modifier = Modifier.size(48.dp).then(heard)) {
+                    Icon(if (folded) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown, contentDescription = fold)
+                }
             }
         } else {
             Spacer(Modifier.size(48.dp))

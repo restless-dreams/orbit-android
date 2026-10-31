@@ -1,2 +1,5 @@
 [tools]
 java = "temurin-21"
+# The Bun that builds the pages, as web/package.json's packageManager says (CI checks they match). Orbit builds
+# with the Bun its own package.json names.
+bun = "1.4.3"

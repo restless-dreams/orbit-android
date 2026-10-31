@@ -2,7 +2,7 @@
 <!-- Configuración, Acerca de, la papelera y las licencias de código abierto. Consulta TRANSLATING.md. -->
 <resources>
     <string name="settings_appearance">Apariencia</string>
-    <string name="settings_theme_like_the_phone">Como el teléfono</string>
+    <string name="settings_theme_system">Sistema</string>
     <string name="settings_theme_light">Claro</string>
     <string name="settings_theme_dark">Oscuro</string>
     <string name="settings_wallpaper_colors">Colores del fondo de pantalla</string>
@@ -11,11 +11,13 @@
     <string name="settings_new_map_style_description">El estilo con el que empieza un mapa nuevo en blanco</string>
     <string name="settings_on_the_map">En el mapa</string>
     <string name="settings_haptics">Respuesta háptica</string>
-    <string name="settings_haptics_description">Un clic cuando los planetas pasan por arriba y un toque cuando las ideas se unen al mapa</string>
+    <string name="settings_haptics_description">Un clic cuando un planeta llega arriba o se mueve un control deslizante, y un toque cuando las ideas se unen al mapa</string>
     <string name="settings_snap_to_planets">Ajustar a los planetas</string>
     <string name="settings_snap_to_planets_description">Una órbita que haces girar se detiene con un planeta arriba</string>
     <string name="settings_presenting">Al presentar</string>
     <string name="settings_presentation_advance">Pasar a la siguiente idea automáticamente después de</string>
+    <string name="settings_studying">Al estudiar</string>
+    <string name="settings_new_cards_a_day">Tarjetas nuevas que cada mapa suma al estudio del día, después de las que están por estudiar</string>
     <string name="settings_presentation_only_when_i_tap">Solo cuando toco</string>
     <plurals name="settings_presentation_seconds">
         <item quantity="one">%1$d segundo</item>
@@ -31,11 +33,10 @@
     <string name="settings_nearby_name_empty_hint">Si lo dejas vacío, se usa el nombre de este dispositivo.</string>
     <string name="settings_save">Guardar</string>
     <string name="settings_this_device_address">La dirección de este dispositivo es %1$s</string>
-    <string name="settings_connect_to_wifi">Conéctalo a una red Wi-Fi para llegar a tus otros dispositivos.</string>
+    <string name="settings_connect_to_wifi">Conéctalo a una red Wi-Fi para encontrar tus otros dispositivos.</string>
     <string name="settings_folder">Carpeta</string>
-    <string name="settings_keyboard_shortcuts_description">Ctrl+/ las muestra en cualquier parte de Orbit</string>
     <string name="settings_about_orbit">Acerca de Orbit</string>
-    <string name="settings_about_orbit_description">La biblioteca que dibuja todos los mapas aquí</string>
+    <string name="settings_about_orbit_description">Versión, privacidad, código fuente y licencias</string>
     <string name="settings_check_for_updates">Buscar actualizaciones</string>
     <string name="settings_check_for_updates_description">Una vez al día, Orbit le pregunta a GitHub si salió una versión nueva. No envía nada sobre ti ni sobre tus mapas.</string>
 
@@ -56,7 +57,8 @@
         <item quantity="other">%1$d días</item>
     </plurals>
     <string name="settings_export_all_maps">Exportar todos los mapas</string>
-    <string name="settings_export_all_maps_description">Todos los mapas, con sus imágenes, videos e historial, en un archivo para guardar donde quieras</string>
+    <string name="settings_export_all_maps_description">Una copia de seguridad: todos los mapas, con sus imágenes, videos e historial tal como están, en un archivo para guardar donde quieras</string>
+    <string name="settings_exporting">Exportando tus mapas…</string>
     <string name="settings_all_maps_file_name">Mapas de Orbit %1$s</string>
     <plurals name="settings_exported_maps">
         <item quantity="one">Se exportó %1$d mapa.</item>
@@ -67,6 +69,7 @@
     <string name="settings_not_allowed_to_write">Orbit no tiene permiso para escribir ahí. Prueba en otro lugar.</string>
     <string name="settings_import_maps">Importar mapas</string>
     <string name="settings_import_maps_description">Desde un archivo de mapas exportado aquí o en otro dispositivo. Los mapas que ya están aquí se quedan como están.</string>
+    <string name="settings_importing">Importando mapas…</string>
     <string name="settings_no_maps_in_file">No hay mapas en ese archivo.</string>
     <string name="settings_every_map_in_file_already_here">Todos los mapas de ese archivo ya están aquí.</string>
     <string name="settings_could_not_read_file">Orbit no pudo leer ese archivo: %1$s.</string>
@@ -74,10 +77,10 @@
     <string name="settings_newer_version_keeps_maps">Una versión más reciente de Orbit guarda tus mapas de una manera que esta no puede cambiar sin riesgo. Actualiza Orbit para editarlos; mientras tanto, solo se muestran.</string>
 
     <string name="settings_keep_maps_in_folder">Guardar los mapas en una carpeta</string>
-    <string name="settings_keep_maps_in_folder_description">Cada mapa como un archivo markdown en una carpeta que elijas, sincronizados en ambos sentidos: los cambios que se hagan allí, con una app de sincronización o en una computadora, vuelven aquí.</string>
+    <string name="settings_keep_maps_in_folder_description">Cada mapa como un archivo markdown en una carpeta que elijas, sincronizada en ambos sentidos: los cambios que se hagan allí, con una app de sincronización o en una computadora, vuelven aquí.</string>
     <string name="settings_your_folder">Tu carpeta</string>
     <string name="settings_check_folder_now">Revisar la carpeta ahora</string>
-    <string name="settings_folder_how_it_works">Cada mapa es un archivo markdown allí, y las imágenes y los videos van en la carpeta “media”, junto a ellos. Un mapa que cambió aquí y allá se guarda dos veces, para que no se pierda nada.</string>
+    <string name="settings_folder_how_it_works">Cada mapa es un archivo markdown allí, y las imágenes y los videos van en la carpeta “media”, junto a ellos. Tu avance al estudiar también se guarda allí, para que tus otros dispositivos sigan donde lo dejaste. Un mapa que cambió aquí y en la carpeta se guarda dos veces, para que no se pierda nada.</string>
     <string name="settings_folder_syncing">Sincronizando tus mapas y la carpeta…</string>
     <string name="settings_folder_checking">Revisando la carpeta…</string>
     <string name="settings_folder_in_step">Sincronizada con tus mapas, revisada %1$s</string>
@@ -102,15 +105,25 @@
         <item quantity="many">Son demasiado grandes para un mapa, así que solo están en la carpeta: %1$s. Un mapa admite videos de hasta %2$s y hasta %3$s de imágenes y videos en total, para que siempre quepa en su archivo zip.</item>
         <item quantity="other">Son demasiado grandes para un mapa, así que solo están en la carpeta: %1$s. Un mapa admite videos de hasta %2$s y hasta %3$s de imágenes y videos en total, para que siempre quepa en su archivo zip.</item>
     </plurals>
+    <plurals name="settings_folder_too_large">
+        <item quantity="one">Es demasiado grande para ser un mapa, así que solo está en la carpeta: %1$s. El texto de un mapa puede tener hasta %2$s.</item>
+        <item quantity="many">Son demasiado grandes para ser mapas, así que solo están en la carpeta: %1$s. El texto de un mapa puede tener hasta %2$s.</item>
+        <item quantity="other">Son demasiado grandes para ser mapas, así que solo están en la carpeta: %1$s. El texto de un mapa puede tener hasta %2$s.</item>
+    </plurals>
+    <plurals name="settings_folder_newer_format">
+        <item quantity="one">Está guardado para un Orbit más nuevo que el de algunos dispositivos de esta carpeta, así que solo pueden mostrarlo: %1$s. Actualiza Orbit en ellos para poder cambiarlo también allí.</item>
+        <item quantity="many">Están guardados para un Orbit más nuevo que el de algunos dispositivos de esta carpeta, así que solo pueden mostrarlos: %1$s. Actualiza Orbit en ellos para poder cambiarlos también allí.</item>
+        <item quantity="other">Están guardados para un Orbit más nuevo que el de algunos dispositivos de esta carpeta, así que solo pueden mostrarlos: %1$s. Actualiza Orbit en ellos para poder cambiarlos también allí.</item>
+    </plurals>
     <string name="settings_quoted_map_title">“%1$s”</string>
     <string name="settings_got_it">Entendido</string>
     <string name="settings_change_folder">Cambiar carpeta</string>
     <string name="settings_stop_keeping_maps_there">Dejar de guardar mapas allí</string>
     <string name="settings_keep_maps_in_named_folder">¿Guardar los mapas en “%1$s”?</string>
     <plurals name="settings_folder_has_markdown_files">
-        <item quantity="one">Ya tiene un archivo markdown. Orbit lo agrega como mapa, a menos que sea uno de los tuyos, y desde entonces lo mantiene sincronizado con tus mapas. El archivo tal como está ahora se queda para siempre en el historial del mapa.</item>
-        <item quantity="many">Ya tiene %1$d archivos markdown. Orbit agrega cada uno como mapa, a menos que sea uno de los tuyos, y desde entonces los mantiene sincronizados con tus mapas. Cada archivo tal como está ahora se queda para siempre en el historial de su mapa.</item>
-        <item quantity="other">Ya tiene %1$d archivos markdown. Orbit agrega cada uno como mapa, a menos que sea uno de los tuyos, y desde entonces los mantiene sincronizados con tus mapas. Cada archivo tal como está ahora se queda para siempre en el historial de su mapa.</item>
+        <item quantity="one">Ya tiene un archivo markdown. Orbit lo agrega como mapa, a menos que sea uno de los tuyos, y desde entonces lo mantiene sincronizado con tus mapas. Si lo agrega, el archivo tal como está ahora se queda para siempre en el historial del mapa.</item>
+        <item quantity="many">Ya tiene %1$d archivos markdown. Orbit agrega cada uno como mapa, a menos que sea uno de los tuyos, y desde entonces los mantiene sincronizados con tus mapas. Cada uno que agrega se queda para siempre en el historial de su mapa tal como está ahora.</item>
+        <item quantity="other">Ya tiene %1$d archivos markdown. Orbit agrega cada uno como mapa, a menos que sea uno de los tuyos, y desde entonces los mantiene sincronizados con tus mapas. Cada uno que agrega se queda para siempre en el historial de su mapa tal como está ahora.</item>
     </plurals>
     <string name="settings_keep_maps_here">Guardar mapas aquí</string>
     <string name="settings_folder_access_refused">Android no permitió que Orbit siguiera usando esa carpeta. Prueba con otra.</string>
@@ -138,17 +151,28 @@
         <item quantity="many">%1$d ideas · eliminado el %2$s · %3$s</item>
         <item quantity="other">%1$d ideas · eliminado el %2$s · %3$s</item>
     </plurals>
+    <string name="settings_trash_unreadable_summary">Orbit no puede leerlo · eliminado %1$s · %2$s</string>
+    <string name="settings_trash_unreadable_summary_on_date">Orbit no puede leerlo · eliminado el %1$s · %2$s</string>
+    <string name="settings_trash_private_summary">Eliminado %1$s · %2$s</string>
+    <string name="settings_trash_private_summary_on_date">Eliminado el %1$s · %2$s</string>
     <plurals name="settings_trash_days_left">
         <item quantity="one">queda %1$d día</item>
         <item quantity="many">quedan %1$d días</item>
         <item quantity="other">quedan %1$d días</item>
     </plurals>
     <string name="settings_restored">Se restauró “%1$s”</string>
+    <string name="settings_restore_named">Restaurar “%1$s”</string>
     <string name="settings_could_not_restore">Orbit no pudo restaurar “%1$s”.</string>
     <string name="settings_delete_named_for_good">Eliminar “%1$s” para siempre</string>
     <string name="settings_delete_named_for_good_question">¿Eliminar “%1$s” para siempre?</string>
     <string name="settings_delete_for_good_body">No volverá, y su historial tampoco.</string>
     <string name="settings_delete_for_good">Eliminar para siempre</string>
+    <string name="settings_deleted_for_good">Se eliminó “%1$s” para siempre</string>
+    <plurals name="settings_trash_emptied">
+        <item quantity="one">Se eliminó %1$d mapa para siempre</item>
+        <item quantity="many">Se eliminaron %1$d mapas para siempre</item>
+        <item quantity="other">Se eliminaron %1$d mapas para siempre</item>
+    </plurals>
     <string name="settings_empty_the_trash_question">¿Vaciar la papelera?</string>
     <plurals name="settings_empty_trash_body">
         <item quantity="one">El mapa de la papelera desaparecerá para siempre.</item>
@@ -162,13 +186,13 @@
     <string name="settings_maps_drawn_by_library">Mapas dibujados por la biblioteca Orbit</string>
     <string name="settings_maps_drawn_by_library_version">Mapas dibujados por la biblioteca Orbit %1$s</string>
     <string name="settings_orbit_on_the_web">Orbit en la web</string>
-    <string name="settings_support_orbit">Apoya a Orbit</string>
+    <string name="settings_support_orbit">Apoyar a Orbit</string>
     <string name="settings_support_orbit_description">Patrocina o dona si Orbit te ayuda</string>
     <string name="settings_updates">Actualizaciones</string>
-    <string name="settings_updates_available">Ya salió Orbit %1$s. Toca para descargar la nueva versión</string>
-    <string name="settings_updates_latest">Esta es la versión más reciente. Toca para volver a buscar</string>
+    <string name="settings_updates_available">Ya salió Orbit %1$s. Toca para descargar la nueva versión.</string>
+    <string name="settings_updates_latest">Esta es la versión más reciente. Toca para volver a buscar.</string>
     <string name="settings_updates_checking">Buscando una versión nueva…</string>
-    <string name="settings_updates_failed">No se pudo buscar una versión nueva. Toca para intentarlo de nuevo</string>
+    <string name="settings_updates_failed">No se pudo buscar una versión nueva. Toca para volver a intentarlo.</string>
     <string name="settings_updates_never">Toca para buscar una versión nueva</string>
     <string name="settings_how_maps_are_written">Cómo se escriben los mapas</string>
     <string name="settings_how_maps_are_written_description">El formato orbit-md, con todos sus atributos</string>
@@ -182,5 +206,5 @@
     <string name="settings_welcome_map_description">Un recorrido por lo que puedes hacer</string>
     <string name="settings_licenses_introduction">Orbit para Android es software libre bajo la Licencia Pública General de GNU, versión 3 o posterior. Está hecho con lo siguiente:</string>
     <string name="settings_language">Idioma</string>
-    <string name="settings_language_phone">Idioma del teléfono</string>
+    <string name="settings_language_system">Sistema</string>
 </resources>

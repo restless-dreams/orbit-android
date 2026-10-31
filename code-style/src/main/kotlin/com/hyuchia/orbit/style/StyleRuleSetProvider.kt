@@ -9,5 +9,6 @@ public class StyleRuleSetProvider : RuleSetProviderV3(RuleSetId("orbit")) {
     override fun getRuleProviders(): Set<RuleProvider> = setOf(
         RuleProvider { BlankLinesAroundBlocksRule() },
         RuleProvider { BlankLinesAroundDocumentedMembersRule() },
+        RuleProvider { AppComponentsRule() },
     )
 }

@@ -9,19 +9,24 @@ import android.util.Log
  * message or the exception. Logs can be read by tools on the phone.
  */
 object Logs {
+    /** Whether Android's log is there to write to: not in the unit tests, which run on the JVM without it. */
+    private val onAndroid = System.getProperty("java.vm.name") == "Dalvik"
+
     fun note(tag: String, message: String) {
-        if (BuildConfig.DEBUG) {
+        if (BuildConfig.DEBUG && onAndroid) {
             Log.i(tag, message)
         }
     }
 
     fun warn(tag: String, message: String, error: Throwable? = null) {
-        if (BuildConfig.DEBUG) {
+        if (BuildConfig.DEBUG && onAndroid) {
             Log.w(tag, message, error)
         }
     }
 
     fun error(tag: String, message: String, error: Throwable? = null) {
-        Log.e(tag, message, error)
+        if (onAndroid) {
+            Log.e(tag, message, error)
+        }
     }
 }

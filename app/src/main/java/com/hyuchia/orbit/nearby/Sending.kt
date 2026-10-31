@@ -2,6 +2,13 @@ package com.hyuchia.orbit.nearby
 
 import androidx.annotation.StringRes
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.data.MAP_FILE
+import com.hyuchia.orbit.data.MAP_FORMAT
+import com.hyuchia.orbit.data.MEDIA_DIRECTORY
+import com.hyuchia.orbit.data.MapText
+import com.hyuchia.orbit.data.MediaSummary
+import com.hyuchia.orbit.data.decodeText
+import com.hyuchia.orbit.data.soundNamesIn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -16,6 +23,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.zip.ZipFile
 
 /** How often a sender asks whether its map was taken. */
 private const val CHECK_MILLISECONDS = 1_000L
@@ -32,8 +40,12 @@ internal val PORTS = 1..65_535
 sealed interface SendState {
     data object Sending : SendState
 
-    /** Both devices show `check`: the map goes once the person sending sees the other device show it too. */
-    data class Confirming(val check: String) : SendState
+    /**
+     * Both devices show `check`: the map goes once the person sending sees
+     * the other device show it too. `older` is what an older Orbit there
+     * won't open of the map, for them to know before it goes.
+     */
+    data class Confirming(val check: String, val older: OlderThere? = null) : SendState
 
     /** The other device has the map, and asks whether to take it with `check` beside it, the code this one shows. */
     data class Waiting(val check: String) : SendState
@@ -49,14 +61,23 @@ sealed interface SendState {
 }
 
 /**
+ * What an older Orbit on the other device won't open of the map: the files
+ * of kinds it doesn't keep, which stay here (`staysHere`, counted as the
+ * sheet counts what goes), and whether the map is written for a newer
+ * format than it reads, so it can only show it there (`showsOnly`).
+ */
+data class OlderThere(val staysHere: MediaSummary, val showsOnly: Boolean)
+
+/**
  * Offers the map bundled in `bundle` to the device at `address` (host:port),
  * as `from`. First the two devices agree an offer and show the same check
  * code, sealed to the device's key: `key` from its advertisement, with the
  * offers' `version` it takes, or both asked of it when there's none. The map
  * goes only once `confirm` says the person sending saw the other device
  * show the code too, so a device answering in its place on the Wi-Fi gets
- * nothing of it. Follows the answer: [onState] hears each step, ending with
- * opened, declined, cancelled or failed.
+ * nothing of it, and with the code the person hears what an older Orbit
+ * there won't open of it. Follows the answer: [onState] hears each step,
+ * ending with opened, declined, cancelled or failed.
  */
 suspend fun sendMap(
     address: String,
@@ -90,7 +111,8 @@ suspend fun sendMap(
             return
         }
 
-        onState(SendState.Confirming(agreed.check))
+        val older = withContext(Dispatchers.IO) { olderThere(bundle, agreed.reads) }
+        onState(SendState.Confirming(agreed.check, older))
 
         when (checked(address, agreed, confirm)) {
             Checked.Cancelled -> {
@@ -186,8 +208,8 @@ private suspend fun stoppedWaiting(address: String, id: String) {
     }
 }
 
-/** An offer both devices agreed, its session, and the check code both show. */
-private class Agreed(val id: String, val session: OfferSession, val check: String)
+/** An offer both devices agreed, its session, the check code both show, and what of a map the device opens. */
+private class Agreed(val id: String, val session: OfferSession, val check: String, val reads: DeviceReads)
 
 /** Why the other device didn't take the map, to show the sender. */
 private open class Refusal(@StringRes val reason: Int) : Exception()
@@ -282,7 +304,31 @@ private fun greet(address: String, key: DeviceKey, from: String, onOffered: (Str
         throw Refusal(R.string.nearby_send_could_not_open)
     }
 
-    return Agreed(answer.id, session, session.checkCode(receiverNonce, senderNonce))
+    return Agreed(answer.id, session, session.checkCode(receiverNonce, senderNonce), DeviceReads.of(answer.mapFormat, answer.mediaTypes))
+}
+
+/**
+ * What a device that opens `reads` won't open of the map in `bundle`, or
+ * null when it opens all of it. Only a map this device reads (written for
+ * `readsHere` or older) is said to only show there: one it can only show
+ * itself shows only there too, as the person sees here already. A bundle
+ * that can't be read here says nothing.
+ */
+internal fun olderThere(bundle: File, reads: DeviceReads, readsHere: Int = MAP_FORMAT): OlderThere? {
+    val (text, media) = try {
+        ZipFile(bundle).use { zip ->
+            val text = zip.getEntry(MAP_FILE)?.let { entry -> zip.getInputStream(entry).use { decodeText(it.readBytes()) } }.orEmpty()
+            val media = zip.entries().asSequence().filter { it.name.startsWith("$MEDIA_DIRECTORY/") }.associate { it.name.substringAfter('/') to it.size.coerceAtLeast(0) }
+            text to media
+        }
+    } catch (unreadable: IOException) {
+        return null
+    }
+
+    val unopened = media.filterKeys { name -> name.substringAfterLast('.', "").lowercase() !in reads.mediaTypes }
+    val staysHere = MediaSummary.of(unopened, audio = soundNamesIn(text).toSet())
+    val showsOnly = MapText.formatVersion(text) in (reads.mapFormat + 1)..readsHere
+    return OlderThere(staysHere, showsOnly).takeIf { !staysHere.isEmpty || showsOnly }
 }
 
 /**

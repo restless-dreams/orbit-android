@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Modo de estudio: las ideas bajo cada idea de una rama se vuelven tarjetas para recordar. Ver TRANSLATING.md. -->
+<resources>
+    <string name="study_study">Estudiar</string>
+
+    <string name="study_position">%1$d de %2$d</string>
+    <string name="study_position_description">Tarjeta %1$d de %2$d</string>
+    <string name="study_studying_anyway">Estudiando de todos modos</string>
+    <string name="study_undo_answer">Deshacer la última respuesta</string>
+    <string name="study_stop">Dejar de estudiar</string>
+
+    <plurals name="study_recall_ideas">
+        <item quantity="one">Recuerda la idea que tiene</item>
+        <item quantity="many">Recuerda las %1$d ideas que tiene</item>
+        <item quantity="other">Recuerda las %1$d ideas que tiene</item>
+    </plurals>
+    <plurals name="study_recall_ideas_and_note">
+        <item quantity="one">Recuerda la idea que tiene y su nota</item>
+        <item quantity="many">Recuerda las %1$d ideas que tiene y su nota</item>
+        <item quantity="other">Recuerda las %1$d ideas que tiene y su nota</item>
+    </plurals>
+    <string name="study_recall_note">Recuerda su nota</string>
+    <string name="study_show">Mostrar</string>
+    <string name="study_show_description">Mostrar lo que hay en %1$s</string>
+
+    <string name="study_again">Otra vez</string>
+    <string name="study_knew_it">Lo sabía</string>
+    <string name="study_in_a_moment">en un momento</string>
+    <string name="study_tomorrow">mañana</string>
+    <plurals name="study_in_days">
+        <item quantity="one">en %1$d día</item>
+        <item quantity="many">en %1$d días</item>
+        <item quantity="other">en %1$d días</item>
+    </plurals>
+    <plurals name="study_in_weeks">
+        <item quantity="one">en %1$d semana</item>
+        <item quantity="many">en %1$d semanas</item>
+        <item quantity="other">en %1$d semanas</item>
+    </plurals>
+    <plurals name="study_in_months">
+        <item quantity="one">en %1$d mes</item>
+        <item quantity="many">en %1$d meses</item>
+        <item quantity="other">en %1$d meses</item>
+    </plurals>
+    <string name="study_again_description">Otra vez, vuelve %1$s</string>
+    <string name="study_knew_it_description">Lo sabía, vuelve %1$s</string>
+
+    <string name="study_finished_title">Listo por ahora</string>
+    <plurals name="study_finished">
+        <item quantity="one">Estudiaste %1$d tarjeta</item>
+        <item quantity="many">Estudiaste %1$d tarjetas</item>
+        <item quantity="other">Estudiaste %1$d tarjetas</item>
+    </plurals>
+    <plurals name="study_first_try">
+        <item quantity="one">%1$d a la primera</item>
+        <item quantity="many">%1$d a la primera</item>
+        <item quantity="other">%1$d a la primera</item>
+    </plurals>
+    <plurals name="study_another_look">
+        <item quantity="one">%1$d necesitó otro repaso</item>
+        <item quantity="many">%1$d necesitaron otro repaso</item>
+        <item quantity="other">%1$d necesitaron otro repaso</item>
+    </plurals>
+    <string name="study_next">Las próximas tarjetas vuelven %1$s.</string>
+    <plurals name="study_new_left">
+        <item quantity="one">%1$d tarjeta nueva espera otro día.</item>
+        <item quantity="many">%1$d tarjetas nuevas esperan otro día.</item>
+        <item quantity="other">%1$d tarjetas nuevas esperan otro día.</item>
+    </plurals>
+    <string name="study_keep_going">Seguir</string>
+    <string name="study_new_cards_a_day">Tarjetas nuevas al día</string>
+    <plurals name="study_new_cards_a_day_choice">
+        <item quantity="one">%1$d tarjeta nueva al día</item>
+        <item quantity="many">%1$d tarjetas nuevas al día</item>
+        <item quantity="other">%1$d tarjetas nuevas al día</item>
+    </plurals>
+    <plurals name="study_new_cards_a_day_short">
+        <item quantity="one">%1$d al día</item>
+        <item quantity="many">%1$d al día</item>
+        <item quantity="other">%1$d al día</item>
+    </plurals>
+
+    <string name="study_caught_up_title">Estás al día</string>
+    <string name="study_caught_up">Nada en %1$s está pendiente. Las próximas tarjetas vuelven %2$s.</string>
+    <string name="study_anyway">Estudiar de todos modos</string>
+    <string name="study_anyway_explained">Las tarjetas que sabes siguen su calendario, y las que no, vuelven antes.</string>
+
+    <string name="study_no_cards_title">Aún no hay nada que estudiar aquí</string>
+    <string name="study_no_cards">Las ideas que tienen otras ideas o una nota se vuelven tarjetas. Agrega algunas en %1$s y vuelve a estudiar.</string>
+
+    <plurals name="study_due">
+        <item quantity="one">%1$d por estudiar</item>
+        <item quantity="many">%1$d por estudiar</item>
+        <item quantity="other">%1$d por estudiar</item>
+    </plurals>
+
+    <string name="study_shortcuts">Al estudiar</string>
+    <string name="study_shortcut_show">Mostrar lo que hay en la tarjeta</string>
+</resources>

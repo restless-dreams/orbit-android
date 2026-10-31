@@ -1,2 +1,5 @@
+# The tests' timeout, 60 seconds, is on bun test's command line, in package.json's test script (bun run test), not
+# in a preload: Bun gives a timeout set there only to the last test file. Under load, reading every release's maps
+# took longer than Bun's own 5 seconds.
 [test]
-preload = ["./orbit-for-tests.ts"]
+preload = ["./dom-for-tests.ts", "./orbit-for-tests.ts"]

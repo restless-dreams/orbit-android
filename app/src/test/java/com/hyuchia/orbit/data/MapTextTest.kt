@@ -24,6 +24,38 @@ class MapTextTest {
     }
 
     @Test
+    fun `a version is read as Orbit reads it, any number above 0, one between two versions counting as the later`() {
+        assertEquals(2, MapText.formatVersion("---\nschemaVersion: 2.0\n---\n# Talk\n"))
+        assertEquals(2, MapText.formatVersion("---\nschemaVersion: 1.5\n---\n# Talk\n"))
+        assertEquals(1, MapText.formatVersion("---\nschemaVersion: 0.5\n---\n# Talk\n"))
+        assertEquals(2, MapText.formatVersion("schemaVersion: 2.0\nnodes:\n  - text: Talk\n"))
+        assertEquals(1, MapText.formatVersion("---\nschemaVersion: -2\n---\n# Talk\n"))
+    }
+
+    @Test
+    fun `a YAML map is named, counted and tagged as Orbit reads it`() {
+        // As the release data has one, and older versions of Orbit kept it.
+        val yaml = "title: Study notes\nnodes:\n  - text: Photosynthesis\n    icon: 🌿\n    children:\n      - text: Light reactions\n        status: done\n" +
+            "      - text: Calvin cycle\n        note: Fixes carbon from the air.\n        status: todo\n      - Chlorophyll\n"
+        val outline = MapText.outline(yaml, words)
+
+        assertEquals("Study notes", outline.title)
+        assertEquals(3, outline.branches)
+        assertEquals(3, outline.ideas)
+        assertEquals(listOf("Photosynthesis", "Light reactions", "Calvin cycle", "Chlorophyll"), MapText.ideas(yaml).map { it.name })
+        assertEquals(listOf(null, 0, 0, 0), MapText.ideas(yaml).map { it.parent })
+        assertEquals(1.0, outline.progress.done, 0.0)
+        assertEquals(2, outline.progress.total)
+
+        // Without a title, its one center names it; several at the top share one the title names, or none.
+        assertEquals("Photosynthesis", MapText.outline("nodes:\n  - icon: 🌿\n    text: Photosynthesis\n", words).title)
+        val several = MapText.outline("tags: [science]\nnodes:\n  - text: Photosynthesis\n  - text: Respiration\n", words)
+        assertEquals("Untitled map", several.title)
+        assertEquals(2, several.branches)
+        assertEquals(listOf("science"), several.tags)
+    }
+
+    @Test
     fun headingsAndListsMakeTheOutline() {
         val outline = MapText.outline(
             """
@@ -160,6 +192,24 @@ class MapTextTest {
     }
 
     @Test
+    fun goalsAndProgressWrittenForANewerVersionAreIdeasLikeAnyOther() {
+        val outline = MapText.outline(
+            """
+            # Shopping
+            - Apples <!-- orbit type: goal@2, target: 5, current: 5 -->
+            - Eggs <!-- orbit type: goal@1, target: 12, current: 6 -->
+            - Pears <!-- orbit type: goal@99999999999, target: 4, current: 4 -->
+            - Week <!-- orbit type: progress@2 -->
+              - [x] Bread
+            """.trimIndent(),
+            words,
+        )
+        // A goal written for a newer goal may mean its numbers another way, however new it is: only Eggs is a goal here, and the to-do
+        // under the newer Progress counts as it does under any idea.
+        assertEquals("1 of 2 done · 75%", GoalNumbers.progress(outline.progress, words, Locale.US))
+    }
+
+    @Test
     fun aMapWithoutToDosOrGoalsCountsNothing() {
         assertEquals(0, MapText.outline("# Trip\n- Food\n- Places\n", words).progress.total)
         // Statuses that are labels, as in a map of a database, aren't to-dos.
@@ -230,6 +280,100 @@ class MapTextTest {
         assertFalse(MapText.hasContent("#  <!-- orbit id: empty -->\n"))
         assertFalse(MapText.hasContent("---\ntheme: night\n---\n\n# \n"))
         assertFalse(MapText.hasContent("<!--\norbit\nstatus: done\n-->\n#\n-\n"))
+    }
+
+    @Test
+    fun `a YAML map without ideas has none`() {
+        assertFalse(MapText.hasContent("nodes: []\n"))
+        assertFalse(MapText.hasContent("title: Biology\nnodes:\n"))
+        assertFalse(MapText.hasContent("nodes:\n  - text: \"\"\n"))
+        // Empty nodes at the top share a center Orbit names after the title, as it does a markdown map's after its frontmatter's: nothing of the map's own.
+        assertFalse(MapText.hasContent("title: Biology\ntheme: night\nnodes:\n  - text: ''\n    id: biology\n    children: []\n  - ~\n  - null\n  -\n"))
+        assertFalse(MapText.hasContent("nodes: [{text: \"\", children: []}, \"\", {id: biology}]\n"))
+        assertFalse(MapText.hasContent("nodes: [\n  {text: \"\"},\n  \"\"\n]\n"))
+        assertFalse(MapText.hasContent("# Made by a script\nnodes:\n  - text: \"\"  # none yet\n    children:\n      - \"  \"\n"))
+        // Its options alone: a YAML map without any nodes, as its frontmatter can say too.
+        assertFalse(MapText.hasContent("title: Biology\ntheme: night\n"))
+        assertFalse(MapText.hasContent("---\nflavor: yaml\ntitle: Biology\n---\nnodes: []\n"))
+    }
+
+    @Test
+    fun `a YAML map with an idea, a note or any value on one has content`() {
+        assertTrue(MapText.hasContent("nodes:\n  - text: Biology\n"))
+        assertTrue(MapText.hasContent("title: Biology\nnodes:\n- Biology\n"))
+        assertTrue(MapText.hasContent("nodes: [Biology]\n"))
+        assertTrue(MapText.hasContent("nodes: [{text: \"\", children: [Cells]}]\n"))
+        assertTrue(MapText.hasContent("nodes: [\n  {text: Cells},\n]\n"))
+        assertTrue(MapText.hasContent("nodes:\n  - text: \"\"\n    children: [It's done]\n"))
+        assertTrue(MapText.hasContent("nodes:\n  - text: \"\"\n    note: Cells and how they live.\n"))
+        assertTrue(MapText.hasContent("nodes:\n  - text: \"\"\n    children:\n      - text: Cells\n"))
+        assertTrue(MapText.hasContent("nodes:\n  - text: \"\"\n    image:\n      src: media/cell.jpg\n"))
+        assertTrue(MapText.hasContent("nodes:\n  - text: \"\"\n    note: |\n      # Cells\n"))
+        // A value that starts with # is text, not a comment, as Orbit reads it.
+        assertTrue(MapText.hasContent("nodes:\n  - text: #biology\n"))
+        assertTrue(MapText.hasContent("nodes:\n  - text: 0\n"))
+        assertTrue(MapText.hasContent("nodes:\n  - text: \"Cells,\n      and how they live\"\n"))
+        assertTrue(MapText.hasContent("---\nflavor: yaml\n---\nnodes:\n  - text: Cells\n"))
+    }
+
+    @Test(timeout = 10_000)
+    fun `a YAML map's long line is read in one pass`() {
+        val spaces = " ".repeat(2_000_000)
+        assertTrue(MapText.hasContent("title: Biology\nnodes:\n  - a${spaces}b\n"))
+        assertFalse(MapText.hasContent("title: Biology\nnodes:\n  - text: \"\"$spaces\n"))
+    }
+
+    @Test(timeout = 5_000)
+    fun `a heading, a list item or frontmatter with a long run of spaces is read in one pass`() {
+        val spaces = " ".repeat(100_000)
+        // A line separator after the spaces makes a line neither a heading nor a list item: that's told in one pass too.
+        val markdown = "---\ntitle: Lisbon${spaces}trip\n---\n# Lisbon${spaces}trip\n## Tram$spaces##\n- Fado$spaces<!-- orbit status: done -->\n" +
+            "<!-- orbit\nstatus: done$spaces\n-->\n$spaces\n-$spaces\u2028Seen\n#$spaces\u2028Seen\n"
+        val outline = MapText.outline(markdown, words)
+
+        assertEquals("Lisbon${spaces}trip", outline.title)
+        assertEquals(1, outline.branches)
+        assertEquals(listOf("Lisbon${spaces}trip", "Tram", "Fado"), MapText.ideas(markdown).map { it.name })
+        assertEquals(1.0, outline.progress.done, 0.0)
+        assertFalse(MapText.hasContent("#\n$spaces\n"))
+        assertTrue(MapText.retitle(markdown, "Porto", words).startsWith("---\ntitle: Porto\n---\n# Porto\n"))
+    }
+
+    @Test(timeout = 5_000)
+    fun `a YAML map's item or key with a long run of spaces is read in one pass`() {
+        val spaces = " ".repeat(100_000)
+        val yaml = "title: Trip$spaces\nnodes:\n  - Lisbon${spaces}trip\n    children:\n      - text: Tram$spaces\n        status: done$spaces\n      -$spaces\u2028Seen\n"
+        val outline = MapText.outline(yaml, words)
+
+        assertEquals("Trip", outline.title)
+        assertEquals(listOf("Lisbon${spaces}trip", "Tram"), MapText.ideas(yaml).map { it.name })
+        assertEquals(1.0, outline.progress.done, 0.0)
+    }
+
+    @Test
+    fun `markdown with a line that starts with nodes stays markdown, as Orbit reads it`() {
+        assertTrue(MapText.hasContent("# Graphs\nnodes:\n"))
+        assertTrue(MapText.hasContent("# Graphs\nnodes: []\nGraphs are made of nodes and edges.\n"))
+        assertTrue(MapText.hasContent("# Graphs\nnodes:\n## Edges\nare the lines\n"))
+        assertEquals("Graphs", MapText.outline("# Graphs\nnodes: the points of a graph\n## Edges\n", words).title)
+        assertEquals(listOf("Graphs", "Edges"), MapText.ideas("# Graphs\nnodes: the points of a graph\n## Edges\n").map { it.name })
+    }
+
+    @Test
+    fun ideasAreReadWithTheirNamesAndParents() {
+        val ideas = MapText.ideas("---\ntitle: Trip\n---\n# **Lisbon** trip\n## Flights <!-- orbit status: done -->\n- [x] Book _seats_\n- copy_versions_here\n## Read [the guide](https://example.com)\n")
+
+        assertEquals(
+            listOf(
+                TextIdea("Lisbon trip", null),
+                TextIdea("Flights", 0),
+                TextIdea("Book seats", 1),
+                // Underscores inside a word are the name's own.
+                TextIdea("copy_versions_here", 1),
+                TextIdea("Read the guide", 0),
+            ),
+            ideas,
+        )
     }
 
     @Test

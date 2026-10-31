@@ -2,8 +2,8 @@ package com.hyuchia.orbit.data
 
 import android.content.ContentResolver
 import android.net.Uri
-import android.provider.OpenableColumns
 import com.hyuchia.orbit.BuildConfig
+import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.page.CheckedMap
@@ -13,33 +13,49 @@ import com.hyuchia.orbit.page.ImportedFile
 import com.hyuchia.orbit.page.MapCommand
 import com.hyuchia.orbit.page.PageException
 import com.hyuchia.orbit.page.PagePool
-import java.io.ByteArrayOutputStream
-import java.io.IOException
-import java.io.InputStream
-import java.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.serializer
+import java.io.IOException
+import java.util.Base64
+import kotlin.coroutines.cancellation.CancellationException
 
 sealed interface ImportResult {
     /** A map that came in; `notes` say what another app's map had that Orbit keeps another way, or couldn't keep. */
     data class Imported(val id: String, val title: String, val notes: List<String> = emptyList()) : ImportResult
 
     /** A zip of maps, as Export all writes them, or a workbook's sheets: `added` came in, `alreadyHere` were here. */
-    data class ImportedMany(val added: Int, val alreadyHere: Int, val notes: List<String> = emptyList()) : ImportResult
+    data class ImportedMany(
+        val added: Int,
+        val alreadyHere: Int,
+        val notes: List<String> = emptyList(),
+        val privateAlreadyHere: Int = 0,
+        val filledIn: Int = 0,
+        val privateFilledIn: Int = 0,
+    ) : ImportResult
 
     /** A map that's already here, `existing`, in another version: it can update it, or be kept as well. */
-    data class AlreadyHere(val bundle: MapBundle, val existing: String) : ImportResult
+    data class AlreadyHere(val bundle: MapBundle, val existing: String, val name: String? = null) : ImportResult
 
     data class Failed(val reason: String) : ImportResult
+
+    /**
+     * Several files brought in at once, some of them other versions of maps
+     * that are here: each of `otherVersions` is asked about in turn, as one
+     * file would be, then `summary` says what the rest brought, when there's
+     * anything to say.
+     */
+    data class SeveralFiles(val otherVersions: List<AlreadyHere>, val summary: ImportResult?) : ImportResult
 }
 
-/** Files are at most this big; a map is text, so anything larger isn't one. */
-private const val MAXIMUM_SIZE = 8L * 1024 * 1024
-
-/** The types zips come as, from different apps. */
-private val ZIP_TYPES = setOf("application/zip", "application/x-zip-compressed", "application/x-zip")
+/**
+ * The most a map's text may be, in a file opened or let go on the list of
+ * maps, and in a zip ([ZIP_TEXT_LIMIT]): a map is text, so anything larger
+ * isn't one.
+ */
+internal const val MAP_TEXT_LIMIT = 8L * 1024 * 1024
 
 /** A heading or a list item: text with a shape Orbit can draw. */
 private val STRUCTURE = Regex("""^\s{0,3}#{1,6}\s|^\s*(?:[-*+]|\d+[.)])\s""")
@@ -49,6 +65,12 @@ private val YAML_NODES = Regex("""(?m)^nodes:\s*$""")
 
 /** The longest a map's title gets from shared text; a longer line is kept whole as the map's note. */
 private const val TITLE_LENGTH = 80
+
+/** A markdown heading: text with one is a map of its own. */
+private val HEADING = Regex("""^\s{0,3}#{1,6}\s""")
+
+/** How many spaces a tab counts for in an outline's indents (web/paste.ts reads them the same). */
+private const val TAB_WIDTH = 4
 
 /** What each of Orbit's warnings about another app's map says, by its code. */
 private val WARNING_TEXTS = mapOf(
@@ -87,15 +109,14 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
         }
 
         return try {
-            // Even asking a file's name can be refused, when the app that gave it can't give it.
-            val name = withContext(Dispatchers.IO) { displayName(uri, resolver) }.orEmpty()
-            val type = resolver.getType(uri).orEmpty()
-            val zipNamed = name.endsWith(".zip", ignoreCase = true) || type in ZIP_TYPES
+            // Even asking a file's name can be refused, when the app that gave it can't give it: then the address names it.
+            val (name, type) = withContext(Dispatchers.IO) { displayName(uri, resolver).orEmpty() to fromProvider { resolver.getType(uri) }.orEmpty() }
+            val zipNamed = name.endsWith(".zip", ignoreCase = true) || type in MapFileTypes.ZIP
             val kind = withContext(Dispatchers.IO) { resolver.openInputStream(uri)?.use { OtherApps.kindOf(name, type, zipNamed, it) } }
                 ?: return ImportResult.Failed(words.string(R.string.data_file_unreadable))
 
             if (kind is FileKind.FromOtherApp) {
-                val limit = if (kind.format == OtherFormat.XMind) OtherApps.WORKBOOK_LIMIT else MAXIMUM_SIZE
+                val limit = if (kind.format == OtherFormat.XMind) OtherApps.WORKBOOK_LIMIT else MAP_TEXT_LIMIT
                 val bytes = withContext(Dispatchers.IO) { resolver.openInputStream(uri)?.use { it.readAtMost((limit + 1).toInt()) } }
                     ?: return ImportResult.Failed(words.string(R.string.data_file_unreadable))
 
@@ -113,49 +134,75 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
                     ?: return ImportResult.Failed(words.string(R.string.data_file_unreadable))
 
                 if (many) {
-                    val imported = resolver.openInputStream(uri)?.use { maps.importAll(it) } ?: return ImportResult.Failed(words.string(R.string.data_file_unreadable))
-                    return ImportResult.ImportedMany(imported.added, imported.alreadyHere)
+                    val imported = withContext(Dispatchers.IO) { resolver.openInputStream(uri)?.use { maps.importAll(it) } }
+                        ?: return ImportResult.Failed(words.string(R.string.data_file_unreadable))
+                    // Files brought into maps already here are said once it's known whether private maps hide.
+                    return ImportResult.ImportedMany(
+                        imported.added,
+                        imported.alreadyHere,
+                        notes = zipNotes(filledIn = 0, skipped = imported.skipped, leftOut = imported.leftOut, words),
+                        privateAlreadyHere = imported.privateAlreadyHere,
+                        filledIn = imported.filledIn,
+                        privateFilledIn = imported.privateFilledIn,
+                    )
                 }
 
                 val bundle = withContext(Dispatchers.IO) { resolver.openInputStream(uri)?.use { maps.readBundle(it) } }
                     ?: return ImportResult.Failed(words.string(R.string.data_no_map_in_zip))
-                val existing = bundle.uuid?.let(maps::findByIdentity)
+                val existing = bundle.uuid?.let { uuid -> withContext(Dispatchers.IO) { maps.findByIdentity(uuid) } }
 
                 if (existing != null) {
-                    return ImportResult.AlreadyHere(bundle, existing)
+                    return ImportResult.AlreadyHere(bundle, existing, name.ifBlank { null })
                 }
 
-                return ImportResult.Imported(maps.receive(bundle), bundle.title)
+                return ImportResult.Imported(maps.receive(bundle), bundle.title, notes = listOfNotNull(leftOutNote(bundle.leftOut)))
             }
 
             val text = withContext(Dispatchers.IO) {
                 resolver.openInputStream(uri)?.use { input ->
-                    val bytes = input.readAtMost((MAXIMUM_SIZE + 1).toInt())
-                    if (bytes.size > MAXIMUM_SIZE) null else decodeText(bytes)
+                    val bytes = input.readAtMost((MAP_TEXT_LIMIT + 1).toInt())
+                    if (bytes.size > MAP_TEXT_LIMIT) null else decodeText(bytes)
                 }
             } ?: return ImportResult.Failed(words.string(R.string.data_file_too_big_for_map))
 
             val yaml = name.endsWith(".yaml", ignoreCase = true) || name.endsWith(".yml", ignoreCase = true) || "yaml" in type
-            importText(text, name.substringBeforeLast('.').ifBlank { null }, yaml)
+            importText(text, name.substringBeforeLast('.').ifBlank { null }, yaml, plain = isPlainText(name, type), fileName = name.ifBlank { null })
         } catch (unreadable: SecurityException) {
             ImportResult.Failed(words.string(R.string.common_not_allowed_to_read_that_file))
         } catch (refused: RefusedZipException) {
             ImportResult.Failed(refused.message.orEmpty())
         } catch (unreadable: IOException) {
             ImportResult.Failed(words.string(R.string.data_file_unreadable))
+        } catch (stopped: CancellationException) {
+            throw stopped
+        } catch (unreadable: RuntimeException) {
+            // Whatever else the app that gave it throws back (see fromProvider), or a zip whose names aren't text.
+            Logs.warn(TAG, "Couldn't read a file to import", unreadable)
+            ImportResult.Failed(words.string(R.string.data_file_unreadable))
         }
     }
 
-    /** Text shared from another app, with the title it came with (an article's, say). */
-    suspend fun importShared(text: String, subject: String?): ImportResult = importText(text, title = subject)
+    /** That files of kinds this version doesn't know stayed out of a zip, when some did: a newer Orbit's, say. */
+    private fun leftOutNote(leftOut: Int): String? = words.plural(R.plurals.data_zip_files_left_out, leftOut, leftOut).takeIf { leftOut > 0 }
+
+    /** Text shared from another app, or dropped on the list, with the title it came with (an article's, say). */
+    suspend fun importShared(text: String, subject: String?): ImportResult = importText(text, title = subject, plain = true)
 
     /**
      * A map from text: orbit-md is kept as written, YAML becomes orbit-md,
      * and plain lines become a list under the first one (or under `title`).
-     * YAML Orbit can't read all of isn't imported: the map would lose what
-     * wasn't read.
+     * Text that came as text (`plain`), not in a markdown file, keeps the
+     * branches of lines indented under one another ([newMap]). YAML Orbit
+     * can't read all of isn't imported: the map would lose what wasn't read.
      */
-    suspend fun importText(text: String, fallbackTitle: String? = null, yaml: Boolean = false, title: String? = null): ImportResult {
+    suspend fun importText(
+        text: String,
+        fallbackTitle: String? = null,
+        yaml: Boolean = false,
+        title: String? = null,
+        plain: Boolean = false,
+        fileName: String? = null,
+    ): ImportResult {
         val trimmed = text.trim()
 
         if (trimmed.isEmpty()) {
@@ -182,11 +229,11 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
 
             checked.markdown
         } else {
-            markdownFor(text, title)
+            newMap(text, title, plain, ::outline)
         }
 
         val id = try {
-            maps.add(markdown, original = text)
+            maps.add(markdown, original = text, originalName = fileName)
         } catch (failed: IOException) {
             return ImportResult.Failed(failed.message ?: words.string(R.string.common_could_not_keep_that_map))
         }
@@ -197,6 +244,19 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
     private suspend fun check(text: String): CheckedMap = pages.work { page ->
         page.request(CheckedMap.serializer()) { job -> MapCommand.Check(job, text) }
     }
+
+    /**
+     * A new map from text indented as an outline, nested as pasting nests it,
+     * made on a page (see [MapCommand.MapFromText]). Null when no page can
+     * make it, as where the WebView is too old to draw maps: the map is then
+     * made the way a list without indents is.
+     */
+    private suspend fun outline(text: String, subject: String?): String? =
+        try {
+            pages.work { page -> page.request(String.serializer()) { job -> MapCommand.MapFromText(job, text, subject) } }.takeIf { it.isNotBlank() }
+        } catch (failed: PageException) {
+            null
+        }
 
     /**
      * Maps from another app's file, read by Orbit on a page: one, or one for
@@ -224,7 +284,7 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
         val ids = try {
             file.maps.map { map ->
                 val pictures = map.media.mapValues { (_, data) -> Base64.getDecoder().decode(data) }
-                maps.add(map.markdown, original = original, pictures = pictures)
+                maps.add(map.markdown, original = original, pictures = pictures, originalName = name)
             }
         } catch (failed: IOException) {
             return ImportResult.Failed(failed.message ?: words.string(R.string.common_could_not_keep_that_map))
@@ -240,7 +300,6 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
             ImportResult.ImportedMany(added = ids.size, alreadyHere = 0, notes = notes)
         }
     }
-
 
     companion object {
         /**
@@ -263,6 +322,60 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
             "too-large" -> words.string(R.string.data_import_too_large)
             else -> words.string(R.string.data_could_not_read_that, problem.message)
         }
+
+        /**
+         * The markdown of a new map from text that isn't YAML. A markdown file
+         * (not `plain`) is a map as written, whatever's in it: Orbit reads one
+         * of paragraphs alone, a journal's, as the note of a map without ideas
+         * yet. Text that came as text (`plain`: shared, dropped on the list,
+         * or in a `.txt` file) and is indented as an outline keeps its
+         * branches, as pasting it would, in the map `outline` makes of it on a
+         * page (see [MapCommand.MapFromText]). Other text is made by
+         * [markdownFor]; so is an outline no page could make.
+         */
+        suspend fun newMap(text: String, title: String?, plain: Boolean, outline: suspend (String, String?) -> String?): String = when {
+            !plain -> if (text.endsWith("\n")) text else "$text\n"
+            isOutline(text) -> outline(text, title) ?: markdownFor(text, title)
+            else -> markdownFor(text, title)
+        }
+
+        /**
+         * Whether a file holds plain text, which makes a map as shared text
+         * does ([newMap]): a `.txt` file, or one typed as plain text. One
+         * whose name or type says it's markdown (or YAML) is a map as written,
+         * even when an app calls it plain text.
+         */
+        fun isPlainText(name: String, type: String): Boolean {
+            val extension = name.substringAfterLast('.', "").lowercase()
+            val plain = type.substringBefore(';').trim().lowercase()
+
+            if (extension in MapFileTypes.TEXT_EXTENSIONS || plain in MapFileTypes.MARKDOWN) {
+                return false
+            }
+
+            return extension == "txt" || plain == "text/plain"
+        }
+
+        /**
+         * Whether text is an outline, its lines indented under one another,
+         * which a new map from plain text keeps the branches of ([newMap]).
+         * Markdown with headings or frontmatter is a map of its own, kept as
+         * written, and a list without indents makes the map it always has
+         * ([markdownFor]); so does text whose lines are all indented alike.
+         */
+        fun isOutline(text: String): Boolean {
+            val lines = text.lines().filter { it.isNotBlank() }
+
+            if (lines.isEmpty() || lines.first().trim() == "---" || lines.any { HEADING.containsMatchIn(it) }) {
+                return false
+            }
+
+            val widths = lines.map(::indentWidth)
+            return widths.any { it > widths.min() }
+        }
+
+        /** How far a line is indented, a tab counting as four spaces, as pasting reads it. */
+        private fun indentWidth(line: String): Int = line.takeWhile { it == ' ' || it == '\t' }.sumOf { if (it == '\t') TAB_WIDTH else 1 }
 
         /**
          * Markdown text as Orbit reads it: orbit-md is kept as written, a
@@ -308,28 +421,18 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
                 }
             }
         }
+
+        private const val TAG = "OrbitImport"
+
+        /**
+         * What an import of every map says besides what came in: the `filledIn`
+         * files its maps here were missing, the `skipped` folders without a map,
+         * and the `leftOut` files of kinds this version doesn't know.
+         */
+        fun zipNotes(filledIn: Int, skipped: Int, leftOut: Int, words: Words): List<String> = listOfNotNull(
+            words.plural(R.plurals.data_zip_files_filled_in, filledIn, filledIn).takeIf { filledIn > 0 },
+            words.plural(R.plurals.data_zip_folders_without_maps, skipped, skipped).takeIf { skipped > 0 },
+            words.plural(R.plurals.data_zip_files_left_out, leftOut, leftOut).takeIf { leftOut > 0 },
+        )
     }
-
-    private fun displayName(uri: Uri, resolver: ContentResolver): String? =
-        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) cursor.getString(0) else null
-        } ?: uri.lastPathSegment
-}
-
-/** Up to `limit` bytes of the stream: Android has `readNBytes` only from API 33. */
-internal fun InputStream.readAtMost(limit: Int): ByteArray {
-    val bytes = ByteArrayOutputStream()
-    val chunk = ByteArray(DEFAULT_BUFFER_SIZE)
-
-    while (bytes.size() < limit) {
-        val read = read(chunk, 0, minOf(chunk.size, limit - bytes.size()))
-
-        if (read < 0) {
-            break
-        }
-
-        bytes.write(chunk, 0, read)
-    }
-
-    return bytes.toByteArray()
 }

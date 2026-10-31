@@ -13,6 +13,8 @@
     <string name="present_rehearsing">Rehearsing</string>
     <!-- Where the presentation is: the idea on screen's place among them all, "3 / 10". -->
     <string name="present_position">%1$d / %2$d</string>
+    <!-- What screen readers hear of the presentation's progress bar: the idea on screen's place among them all. -->
+    <string name="present_progress">Idea %1$d of %2$d</string>
     <!-- How the presentation keeps to the last rehearsal's pace. %1$s is a time, like 0:42. -->
     <string name="present_on_pace">On pace</string>
     <string name="present_behind">%1$s behind</string>
@@ -26,7 +28,7 @@
     <string name="present_on_screen">On %1$s</string>
     <string name="present_on_the_tv">On the TV</string>
     <!-- Under the presenter's bar, when the TV's side of Orbit, which TVs load from Orbit's website, is older than this app. -->
-    <string name="present_tv_too_old">This TV can\'t show presentations from this version of Orbit yet. Present on this phone or another screen.</string>
+    <string name="present_tv_too_old">This TV can\'t show presentations from this version of Orbit yet. Present on this device or another screen.</string>
     <!-- Under the presenter's bar, when the map is written for a newer version of Orbit's format than the TV's Orbit reads. -->
     <string name="present_tv_older_maps">The TV draws maps with an older Orbit, so parts of this one may look different there.</string>
     <plurals name="present_browsers_watching">
@@ -43,6 +45,8 @@
     <string name="present_video_paused">Paused · %1$s</string>
     <string name="present_back_to_the_map">Back to the map</string>
     <string name="present_start_over">Start over</string>
+    <!-- While a live photo's picture shows on the audience's screens, which played its motion once as it showed. -->
+    <string name="present_play_live_photo_again">Play the live photo again</string>
     <string name="present_pause_the_video">Pause the video</string>
     <string name="present_no_notes">No notes for this idea.</string>
     <string name="present_up_next">Up next</string>
@@ -50,8 +54,10 @@
     <string name="present_this_idea">This idea</string>
 
     <!-- Showing the presentation in browsers on the local network. -->
-    <string name="present_connect_to_the_wifi">Connect this phone to the room\'s Wi-Fi, or turn on its hotspot and connect the laptop to it, then come back here.</string>
+    <string name="present_connect_to_the_wifi">Connect this device to the room\'s Wi-Fi, or turn on its hotspot and connect the laptop to it, then come back here.</string>
     <string name="present_open_in_a_browser">On a laptop, a TV\'s browser or the phones in the room, on the same Wi-Fi, open:</string>
+    <!-- What TalkBack hears for the QR code under the address, here and in Open on a computer. -->
+    <string name="present_qr_code_for_address">QR code for this address</string>
     <!-- A device kept from guessing the code. -->
     <string name="present_lockout">A device typed too many wrong codes, so it has to wait before trying again. If no one in the room did, stop showing, and show again for a new code.</string>
     <string name="present_stop_showing">Stop showing</string>
@@ -86,7 +92,7 @@
     <!-- Talking ideas onto the map, holding the + button. -->
     <string name="present_talk_ideas_onto_the_map">Talk ideas onto the map</string>
     <string name="present_talk_needs_the_microphone">Orbit needs the microphone to hear your ideas.</string>
-    <string name="present_talk_no_speech_service">This phone has no speech service: type the idea, or use your keyboard\'s microphone.</string>
+    <string name="present_talk_no_speech_service">This device has no speech service: type the idea, or use your keyboard\'s microphone.</string>
     <string name="present_talk_adding_the_last_idea">Adding the last idea…</string>
     <string name="present_talk_say_an_idea">Say an idea, then pause</string>
     <string name="present_talk_listening">Listening…</string>

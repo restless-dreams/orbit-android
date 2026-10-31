@@ -66,6 +66,7 @@ import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.rememberWords
 import com.hyuchia.orbit.ui.EscapeCloses
+import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.WavyProgress
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonElement
@@ -537,12 +538,19 @@ fun GoalDetails(model: MapViewModel, node: MapNode, goal: Goal) {
         when {
             goal.target == null -> FilledTonalButton(onClick = { model.show(Panel.Editor(node.id)) }) { Text(stringResource(R.string.goal_set_a_target)) }
             goal.way == GoalWay.Counting -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                FilledTonalIconButton(onClick = { model.addToGoal(node.id, BigDecimal.ONE.negate()) }, enabled = goal.canStepDown) {
-                    Icon(Icons.Outlined.Remove, contentDescription = stringResource(R.string.goal_take_one_off))
+                val takeOneOff = stringResource(R.string.goal_take_one_off)
+                val addOne = stringResource(R.string.goal_add_one)
+
+                Hint(takeOneOff) {
+                    FilledTonalIconButton(onClick = { model.addToGoal(node.id, BigDecimal.ONE.negate()) }, enabled = goal.canStepDown) {
+                        Icon(Icons.Outlined.Remove, contentDescription = takeOneOff)
+                    }
                 }
 
-                FilledTonalIconButton(onClick = { model.addToGoal(node.id, BigDecimal.ONE) }) {
-                    Icon(Icons.Outlined.Add, contentDescription = stringResource(R.string.goal_add_one))
+                Hint(addOne) {
+                    FilledTonalIconButton(onClick = { model.addToGoal(node.id, BigDecimal.ONE) }) {
+                        Icon(Icons.Outlined.Add, contentDescription = addOne)
+                    }
                 }
             }
             goal.way == GoalWay.SavingUp -> FilledTonalButton(onClick = { changing = GoalChange.Add }) {

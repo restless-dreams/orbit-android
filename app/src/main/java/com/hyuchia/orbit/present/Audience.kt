@@ -36,6 +36,13 @@ interface Audience {
     /** Whether the screen can play the video files kept in the map's folder on the phone: a TV can't reach them. */
     val playsMapVideos: Boolean get() = true
 
+    /**
+     * Whether the map's pictures go to the screen as files, as they do to a
+     * TV, rather than only drawn on it: the presenter is asked first about
+     * those that can't go clean ([com.hyuchia.orbit.data.Uncleaned]).
+     */
+    val carriesPictures: Boolean get() = false
+
     fun send(command: AudienceCommand)
 
     /** Hears how the video on the screen is going, from screens that say: a second screen and a TV. Browsers don't. */
@@ -140,10 +147,11 @@ fun rememberSecondScreen(): Int? {
 /**
  * The audience for a presentation of the map in `mapFolder`: a TV the phone
  * is casting to, else a second screen, else none. Made and closed as screens
- * come and go.
+ * come and go. A TV gets the map's pictures that can't go clean only when
+ * they're among `asTheyAre`, as the presenter chose.
  */
 @Composable
-fun rememberAudience(mapFolder: File, onAudience: (Audience?) -> Unit): Audience? {
+fun rememberAudience(mapFolder: File, asTheyAre: () -> Set<String>, onAudience: (Audience?) -> Unit): Audience? {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val secondScreen = rememberSecondScreen()
@@ -154,7 +162,7 @@ fun rememberAudience(mapFolder: File, onAudience: (Audience?) -> Unit): Audience
         val display = secondScreen?.let { context.getSystemService(DisplayManager::class.java).getDisplay(it) }
 
         val made = when {
-            tv != null -> tv.audience(mapFolder, scope)
+            tv != null -> tv.audience(mapFolder, scope, asTheyAre)
             display != null -> ScreenAudience(context, display)
             else -> null
         }

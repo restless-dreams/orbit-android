@@ -3,8 +3,8 @@
 <resources>
     <!-- Sending a map to another device -->
     <string name="nearby_send_map">Send “%1$s”</string>
-    <string name="nearby_devices_nearby">Devices nearby</string>
-    <string name="nearby_looking_for_devices">Looking for devices with Orbit open on this Wi-Fi. Open Orbit on your tablet or other phone.</string>
+    <string name="nearby_devices_nearby">Nearby devices</string>
+    <string name="nearby_looking_for_devices">Looking for devices with Orbit open on this Wi-Fi. Open Orbit on your other phone or tablet.</string>
     <string name="nearby_tap_to_send">Tap to send</string>
     <string name="nearby_sending">Sending…</string>
     <!-- The same check code shows beside the map on the other device. -->
@@ -29,6 +29,16 @@
     <string name="nearby_check_the_code_title">Does %1$s show this code?</string>
     <string name="nearby_check_the_code_explanation">Send the map only if both devices show the same code. If they don\'t, another device on this Wi-Fi answered in its place, and it gets nothing.</string>
     <string name="nearby_yes_send">Yes, send</string>
+    <!-- With the code, what an older Orbit on the other device won't open of the map: "it" is that device. %1$s is a list such as “2 sounds”, and the count is how many things it names, for the verb. -->
+    <plurals name="nearby_send_older_orbit_without">
+        <item quantity="one">It has an older Orbit, so %1$s stays on this device. Update Orbit there to send everything.</item>
+        <item quantity="other">It has an older Orbit, so %1$s stay on this device. Update Orbit there to send everything.</item>
+    </plurals>
+    <string name="nearby_send_older_orbit_shows_only">It has an older Orbit, so it can only show this map. Update Orbit there to edit it there too.</string>
+    <plurals name="nearby_send_older_orbit_shows_only_without">
+        <item quantity="one">It has an older Orbit, so it can only show this map, and %1$s stays on this device. Update Orbit there to send everything and edit it there.</item>
+        <item quantity="other">It has an older Orbit, so it can only show this map, and %1$s stay on this device. Update Orbit there to send everything and edit it there.</item>
+    </plurals>
 
     <!-- Why a map didn't go to the other device: "it" is that device. -->
     <string name="nearby_send_could_not_get_the_map_ready">Couldn\'t get the map ready to send. Is this device\'s storage full?</string>
@@ -48,16 +58,14 @@
     <string name="nearby_arrival_sent_you_a_map">%1$s sent you a map</string>
     <string name="nearby_arrival_a_map_arrived">A map arrived</string>
     <string name="nearby_arrival_update_yours">You have this map. Update yours with this version? Yours stays in its history.</string>
-    <plurals name="nearby_arrival_update_yours_with_pictures">
-        <item quantity="one">You have this map. Update yours with this version with %1$d picture? Yours stays in its history.</item>
-        <item quantity="other">You have this map. Update yours with this version with %1$d pictures? Yours stays in its history.</item>
-    </plurals>
+    <!-- %1$s is what comes with it, as sharing lists it: "3 pictures, a video and 2 sounds". -->
+    <string name="nearby_arrival_update_yours_with">You have this map. Update yours with this version, with %1$s? Yours stays in its history.</string>
     <string name="nearby_arrival_title">“%1$s”.</string>
-    <plurals name="nearby_arrival_title_with_pictures">
-        <item quantity="one">“%1$s” with %2$d picture.</item>
-        <item quantity="other">“%1$s” with %2$d pictures.</item>
-    </plurals>
+    <!-- %2$s is what comes with it, as sharing lists it. -->
+    <string name="nearby_arrival_title_with">“%1$s” with %2$s.</string>
     <string name="nearby_arrival_sent_from_address">Sent from %1$s on this network.</string>
+    <!-- Several files of maps that are here already, asked about one after another: %1$d is this one, %2$d how many there are. -->
+    <string name="nearby_arrival_position">%1$d of %2$d</string>
     <!-- The four digits both devices show, so people can see the map came from the device in front of them. -->
     <string name="nearby_check_code">Check code %1$s</string>
     <string name="nearby_update">Update</string>
@@ -113,6 +121,11 @@
     <string name="nearby_require_a_pin_to_open_description">Besides the code, opening it takes the PIN shown here.</string>
     <string name="nearby_how_many_at_once">How many at once</string>
     <string name="nearby_no_limit">No limit</string>
+    <!-- What a browser shows, in plain text, when it can't be let in: "the phone" is the one presenting or sharing. -->
+    <string name="nearby_join_first">Join first, at the address on the phone.</string>
+    <string name="nearby_join_from_the_page">Join from the page at the address on the phone.</string>
+    <string name="nearby_server_busy">Too many connections. Try again in a moment.</string>
+    <string name="nearby_server_wrong_address">Open this with the address the phone shows.</string>
     <string name="nearby_let_new_people_in">Let new people in</string>
     <string name="nearby_let_new_people_in_description">Turn it off once everyone\'s in. People already in stay.</string>
     <!-- A device kept from guessing the PIN. -->

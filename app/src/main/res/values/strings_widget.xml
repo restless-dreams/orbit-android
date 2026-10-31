@@ -2,8 +2,6 @@
 <!-- The map widget on the home screen, and choosing the map it shows. Little room: keep it short. See TRANSLATING.md. -->
 <resources>
     <string name="widget_no_maps">Your maps will show here. Open Orbit to start one.</string>
-    <!-- What screen readers say for the map's picture. %1$s is the map's title. -->
-    <string name="widget_map_picture">%1$s, as a map</string>
     <!-- How many of the map's to-dos and goals are done, of how many. -->
     <plurals name="widget_progress_done">
         <item quantity="one">%1$d of %2$d done</item>
@@ -16,8 +14,10 @@
     </plurals>
     <!-- %1$s is the map's title. -->
     <string name="widget_add_idea">Add an idea to %1$s</string>
-    <string name="widget_choose_map">A map for the home screen</string>
+    <string name="widget_choose_map">Choose a map</string>
     <string name="widget_shown_now">Shown now</string>
     <!-- What tapping a map in the list does. %1$s is the map's title. -->
     <string name="widget_show_map">Show %1$s</string>
+    <!-- In the widget's list of maps, under widget_no_maps, when there are none yet. -->
+    <string name="widget_open_orbit">Open Orbit</string>
 </resources>

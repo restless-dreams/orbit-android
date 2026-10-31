@@ -1,8 +1,8 @@
 package com.hyuchia.orbit
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
-import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.os.Looper
@@ -10,11 +10,9 @@ import android.view.KeyEvent
 import android.view.KeyboardShortcutGroup
 import android.view.Menu
 import androidx.activity.ComponentActivity
-import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.core.content.IntentCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -23,12 +21,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.hyuchia.orbit.data.AppSettings
+import com.hyuchia.orbit.page.MapPrinter
+import com.hyuchia.orbit.privacy.keepPrivateMapsOutOfRecents
 import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.theme.OrbitTheme
+import com.hyuchia.orbit.theme.ThemedSystemBars
+import com.hyuchia.orbit.theme.ThemedWindowBackground
 import com.hyuchia.orbit.theme.appIsDark
+import com.hyuchia.orbit.theme.startNextIn
 import com.hyuchia.orbit.ui.KeyboardShortcutsDialog
 import com.hyuchia.orbit.ui.LocalShortcuts
 import com.hyuchia.orbit.ui.ShortcutRegistry
+import com.hyuchia.orbit.ui.closeShareSheet
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -67,6 +71,27 @@ class MainActivity : ComponentActivity() {
             handle(intent)
         }
 
+        keepPrivateMapsOutOfRecents()
+
+        // As private maps lock, what Orbit opened over itself goes, so nothing of theirs is left offered there: the
+        // share sheet while nothing was chosen in it, and the print dialog before it prints, which Android closes
+        // with the window that opened it: this one is made again, as for a new language, even with the screen off
+        // or Orbit away. A private map on it then shows its lock alone until it's unlocked (PrivateMapGate).
+        lifecycleScope.launch {
+            app.privateMaps.lock.newlyLocked.collect {
+                closeShareSheet(this@MainActivity)
+
+                if (MapPrinter.takeOpenDialog()) {
+                    recreate()
+                }
+            }
+        }
+
+        // The next start's splash is light or dark as Appearance says, where Android lets Orbit choose it.
+        lifecycleScope.launch {
+            settings.filterNotNull().map { it.themeMode }.distinctUntilChanged().collect(::startNextIn)
+        }
+
         // While Orbit is open, nearby devices can find it, by the name chosen, and offer it maps, as the settings allow.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -87,14 +112,10 @@ class MainActivity : ComponentActivity() {
 
             CompositionLocalProvider(LocalAppSettings provides (current ?: AppSettings()), LocalShortcuts provides shortcuts) {
                 val dark = appIsDark()
-
-                DisposableEffect(dark) {
-                    val style = if (dark) SystemBarStyle.dark(Color.TRANSPARENT) else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
-                    enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
-                    onDispose {}
-                }
+                ThemedSystemBars(dark)
 
                 OrbitTheme(dark = dark) {
+                    ThemedWindowBackground()
                     OrbitApp(incoming)
 
                     if (shortcuts.listOpen) {
@@ -143,23 +164,30 @@ class MainActivity : ComponentActivity() {
 
     /** Shortcuts, files opened with Orbit and text shared to it. */
     private fun handle(intent: Intent?) {
-        val request = when (intent?.action) {
-            ACTION_NEW_MAP -> AppRequest.NewMap
-            ACTION_OPEN_MAP -> intent.getStringExtra(EXTRA_MAP_ID)?.let(AppRequest::OpenMap)
-            Intent.ACTION_VIEW -> intent.data?.let(AppRequest::ImportFile)
-            Intent.ACTION_SEND -> {
-                val stream = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
-                val text = intent.getStringExtra(Intent.EXTRA_TEXT)
-
-                when {
-                    stream != null -> AppRequest.ImportFile(stream)
-                    text != null -> AppRequest.ImportText(text, intent.getStringExtra(Intent.EXTRA_SUBJECT))
-                    else -> null
-                }
-            }
-            else -> null
-        } ?: return
-
+        val request = appRequestOf(this, intent) ?: return
         requests.trySend(request)
     }
+}
+
+/**
+ * What an intent asks of Orbit: a map its shortcut or widget opens (marked
+ * as Orbit's own when it carries this install's [OpenMark]), a new map, a
+ * file opened with Orbit, or a file or text shared to it. Null for anything
+ * else, or one that's missing what it needs.
+ */
+internal fun appRequestOf(context: Context, intent: Intent?): AppRequest? = when (intent?.action) {
+    ACTION_NEW_MAP -> AppRequest.NewMap
+    ACTION_OPEN_MAP -> intent.getStringExtra(EXTRA_MAP_ID)?.let { id -> AppRequest.OpenMap(id, ownMark = intent.getStringExtra(EXTRA_OPEN_MARK) == OpenMark.of(context)) }
+    Intent.ACTION_VIEW -> intent.data?.let(AppRequest::ImportFile)
+    Intent.ACTION_SEND -> {
+        val stream = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+
+        when {
+            stream != null -> AppRequest.ImportFile(stream)
+            text != null -> AppRequest.ImportText(text, intent.getStringExtra(Intent.EXTRA_SUBJECT))
+            else -> null
+        }
+    }
+    else -> null
 }

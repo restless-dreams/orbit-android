@@ -16,7 +16,7 @@ Metas, hitos y tareas. El sol se llena a medida que se completan las tareas.
 ## 🛠️ Construcción <!-- orbit type: progress -->
 - [/] Primer prototipo
 - [ ] Probarlo con gente real
-- [ ] Arreglar donde se atoren
+- [ ] Corregir lo que les cueste
 
 ## 🏁 Lanzamiento <!-- orbit type: milestone -->
 - [ ] Escribir el anuncio

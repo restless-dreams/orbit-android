@@ -3,6 +3,8 @@
 <resources>
     <!-- La barra superior, la barra de herramientas y el menú del mapa -->
     <string name="map_back_to_your_maps">Volver a tus mapas</string>
+    <!-- Said of the last breadcrumb, the level the map is at. -->
+    <string name="map_breadcrumb_here">Estás aquí</string>
     <string name="map_rename_the_map">Cambiar el nombre del mapa</string>
     <string name="map_what_the_idea_holds">Lo que hay en %1$s</string>
     <string name="map_edit_the_idea">Editar %1$s</string>
@@ -47,10 +49,19 @@
     <string name="map_edit_the_text">Editar el texto</string>
     <string name="map_update_orbit">Actualizar Orbit</string>
 
+    <!-- Un mapa cuyos últimos cambios no cupieron en el almacenamiento del dispositivo -->
+    <string name="map_unsaved_title">Tus últimos cambios aún no están guardados</string>
+    <string name="map_unsaved_body">El almacenamiento de este dispositivo está lleno, así que solo están en esta pantalla. Libera algo de espacio y Orbit los guardará en cuanto pueda.</string>
+    <string name="map_storage_settings">Configuración de almacenamiento</string>
+    <string name="map_try_again">Volver a intentarlo</string>
+    <string name="map_saved_after_all">Tus cambios están guardados.</string>
+
     <!-- Mensajes -->
     <string name="map_missing">Este mapa ya no está aquí.</string>
     <string name="map_unreadable_file">Orbit no pudo leer el archivo de este mapa. Se dejó como está.</string>
+    <string name="map_change_declined">Orbit no pudo hacer ese cambio, así que el mapa quedó como estaba.</string>
     <string name="map_changed_elsewhere">Este mapa cambió en otro lugar mientras lo editabas. Tu versión está en su historial y Deshacer la recupera.</string>
+    <string name="map_change_kept_in_history">Este mapa cambió en otro lugar, así que tu último cambio está en su historial.</string>
     <string name="map_change_not_saved">Orbit no guardó ese cambio porque habría vaciado el mapa. Deshacer lo revierte.</string>
     <string name="map_deleted_idea">Se eliminó “%1$s”</string>
     <string name="map_copy">Copiar</string>
@@ -71,6 +82,10 @@
     <string name="map_moved_idea_into_another_idea">Se movió %1$s dentro de otra idea</string>
     <string name="map_moved_the_idea_into_another_idea">Se movió la idea dentro de otra idea</string>
     <string name="map_picture_unreadable">No se pudo leer esa imagen.</string>
+    <string name="map_live_photo_motion_left_out">El movimiento de la foto en vivo era demasiado grande para guardarlo, así que solo se agregó su imagen.</string>
+    <string name="map_iphone_motion_offer">¿Es de un iPhone? Agrega el video que se tomó junto con esta imagen y se volverá una foto en vivo.</string>
+    <string name="map_add_its_movie">Agregar su video</string>
+    <string name="map_made_a_live_photo">La imagen ya es una foto en vivo</string>
     <string name="map_video_unreadable">No se pudo leer ese video.</string>
     <plurals name="map_added_ideas">
         <item quantity="one">Se agregó %d idea</item>
@@ -174,7 +189,7 @@
     <string name="map_describe_the_picture">Descríbela para lectores de pantalla</string>
     <string name="map_caption">Leyenda</string>
     <string name="map_replace">Reemplazar</string>
-    <string name="map_add_a_photo">Agregar una foto</string>
+    <string name="map_add_a_photo">Agregar una imagen</string>
     <string name="map_or_a_picture_web_address">O la dirección web de una imagen</string>
     <string name="map_choose_a_video">Elegir un video</string>
     <string name="map_or_a_video_address">O una dirección de YouTube, de Vimeo o de un video</string>
@@ -235,19 +250,88 @@
     <string name="map_history_empty">Las versiones anteriores aparecen aquí mientras trabajas: el mapa como estaba cuando lo abriste, cada diez minutos de edición y antes de los cambios grandes, y se guardan durante meses.</string>
     <string name="map_history_today">Hoy</string>
     <string name="map_history_yesterday">Ayer</string>
-    <!-- Una versión guardada como llegó su archivo de otro lugar, después de la hora en que se guardó. -->
-    <string name="map_history_original_file">%1$s · el archivo como llegó</string>
     <string name="map_history_version_unreadable">Orbit no pudo leer esta versión.</string>
-    <plurals name="map_history_more_than_now">
-        <item quantity="one">%d más que ahora</item>
-        <item quantity="many">%d más que ahora</item>
-        <item quantity="other">%d más que ahora</item>
+    <!-- Cuándo se guardó una versión, dentro de la última hora; las anteriores dicen su hora, bajo su día. -->
+    <string name="map_history_just_now">Hace un momento</string>
+    <plurals name="map_history_minutes_ago">
+        <item quantity="one">Hace %d minuto</item>
+        <item quantity="many">Hace %d minutos</item>
+        <item quantity="other">Hace %d minutos</item>
     </plurals>
-    <plurals name="map_history_fewer_than_now">
-        <item quantity="one">%d menos que ahora</item>
-        <item quantity="many">%d menos que ahora</item>
-        <item quantity="other">%d menos que ahora</item>
+    <!-- Por qué se guardó una versión. -->
+    <string name="map_history_why_opened">Cuando lo abriste</string>
+    <string name="map_history_why_editing">Mientras editabas</string>
+    <string name="map_history_why_removing_alone">Antes de quitar “%1$s”</string>
+    <plurals name="map_history_why_removing">
+        <item quantity="one">Antes de quitar “%2$s” y la idea debajo</item>
+        <item quantity="many">Antes de quitar “%2$s” y %1$d ideas debajo</item>
+        <item quantity="other">Antes de quitar “%2$s” y %1$d ideas debajo</item>
     </plurals>
+    <string name="map_history_why_restoring">Antes de restaurar una versión anterior</string>
+    <!-- De cuándo es la versión que se restauró: una hora de hoy (%1$s), una de ayer, un día de la semana o una fecha con su hora, o una fecha con su año. -->
+    <string name="map_history_why_restoring_today">Antes de restaurar la versión de hoy, %1$s</string>
+    <string name="map_history_why_restoring_yesterday">Antes de restaurar la versión de ayer, %1$s</string>
+    <string name="map_history_why_restoring_on">Antes de restaurar la versión del %1$s, %2$s</string>
+    <string name="map_history_why_restoring_on_date">Antes de restaurar la versión del %1$s</string>
+    <string name="map_history_why_text">Antes de editar el texto a mano</string>
+    <string name="map_history_why_caught">Antes de las ideas que agregaste al vuelo</string>
+    <string name="map_history_why_tags">Antes de cambiar sus etiquetas</string>
+    <string name="map_history_why_renaming">Antes de cambiarle el nombre</string>
+    <!-- El nombre de un dispositivo o de un archivo. -->
+    <string name="map_history_why_from">Antes de una versión de %1$s</string>
+    <string name="map_history_why_from_a_file">Antes de una versión de un archivo</string>
+    <string name="map_history_why_folder">Antes de una versión de la carpeta sincronizada</string>
+    <string name="map_history_why_elsewhere">Tras un cambio hecho en otro lugar</string>
+    <string name="map_history_why_aside">Cambios guardados cuando el mapa cambió en otro lugar</string>
+    <!-- Una versión guardada como llegó su archivo, antes de que Orbit la escribiera a su manera: el nombre del archivo. -->
+    <string name="map_history_why_came_in">Tal como llegó de %1$s</string>
+    <string name="map_history_why_came_in_unnamed">Tal como llegó</string>
+    <!-- Qué cambió una versión respecto a la anterior, por el nombre de las ideas. -->
+    <string name="map_history_added_one">Se agregó “%1$s”</string>
+    <string name="map_history_added_two">Se agregaron “%1$s” y “%2$s”</string>
+    <plurals name="map_history_added_more">
+        <item quantity="one">Se agregaron “%2$s” y %1$d más</item>
+        <item quantity="many">Se agregaron “%2$s” y %1$d más</item>
+        <item quantity="other">Se agregaron “%2$s” y %1$d más</item>
+    </plurals>
+    <plurals name="map_history_added_many">
+        <item quantity="one">Se agregó %d idea</item>
+        <item quantity="many">Se agregaron %d ideas</item>
+        <item quantity="other">Se agregaron %d ideas</item>
+    </plurals>
+    <string name="map_history_removed_one">Se quitó “%1$s”</string>
+    <string name="map_history_removed_two">Se quitaron “%1$s” y “%2$s”</string>
+    <plurals name="map_history_removed_more">
+        <item quantity="one">Se quitaron “%2$s” y %1$d más</item>
+        <item quantity="many">Se quitaron “%2$s” y %1$d más</item>
+        <item quantity="other">Se quitaron “%2$s” y %1$d más</item>
+    </plurals>
+    <plurals name="map_history_removed_many">
+        <item quantity="one">Se quitó %d idea</item>
+        <item quantity="many">Se quitaron %d ideas</item>
+        <item quantity="other">Se quitaron %d ideas</item>
+    </plurals>
+    <string name="map_history_renamed_one">“%1$s” ahora se llama “%2$s”</string>
+    <plurals name="map_history_renamed_many">
+        <item quantity="one">Se cambió el nombre de %d idea</item>
+        <item quantity="many">Se cambió el nombre de %d ideas</item>
+        <item quantity="other">Se cambió el nombre de %d ideas</item>
+    </plurals>
+    <string name="map_history_moved_one">Se movió “%1$s”</string>
+    <plurals name="map_history_moved_many">
+        <item quantity="one">Se movió %d idea</item>
+        <item quantity="many">Se movieron %d ideas</item>
+        <item quantity="other">Se movieron %d ideas</item>
+    </plurals>
+    <string name="map_history_details">Cambiaron notas y detalles</string>
+    <string name="map_history_same">Igual que la versión anterior</string>
+    <!-- El mapa como está ahora, frente a su versión más reciente. -->
+    <string name="map_history_since_latest">Desde la versión más reciente</string>
+    <string name="map_history_no_changes">Sin cambios</string>
+    <!-- Lo dicen los lectores de pantalla. -->
+    <string name="map_history_working_out">Calculando qué cambió</string>
+    <string name="map_history_shown">En el mapa</string>
+    <string name="map_history_show">Mostrar esta versión en el mapa</string>
     <!-- Una versión que vuelve a ser el mapa: una hora de hoy, de ayer, un día y una hora de esta semana, una fecha y una hora de este año, o una fecha. -->
     <string name="map_restored_today">Se restauró el mapa como estaba hoy, %1$s</string>
     <string name="map_restored_yesterday">Se restauró el mapa como estaba ayer, %1$s</string>
@@ -270,6 +354,7 @@
     <string name="map_hide">Ocultar</string>
     <string name="map_show">Mostrar</string>
     <string name="map_line">Línea %1$d</string>
+    <string name="map_source_yaml_rewrites">Lo que edites aquí vuelve a escribir todo el markdown del mapa a la manera de Orbit: no se conservan los comentarios, los espacios ni la forma de las listas y los encabezados.</string>
 
     <!-- Estilo y diseño -->
     <string name="map_colors">Colores</string>

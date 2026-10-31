@@ -11,6 +11,7 @@
     <string name="present_show_on_a_tv">Mostrar en una TV</string>
     <string name="present_rehearsing">Ensayando</string>
     <string name="present_position">%1$d / %2$d</string>
+    <string name="present_progress">Idea %1$d de %2$d</string>
     <string name="present_on_pace">A tiempo</string>
     <string name="present_behind">%1$s de retraso</string>
     <string name="present_ahead">%1$s de adelanto</string>
@@ -19,7 +20,7 @@
 
     <string name="present_on_screen">En %1$s</string>
     <string name="present_on_the_tv">En la TV</string>
-    <string name="present_tv_too_old">Esta TV todavía no puede mostrar presentaciones de esta versión de Orbit. Presenta en este teléfono o en otra pantalla.</string>
+    <string name="present_tv_too_old">Esta TV todavía no puede mostrar presentaciones de esta versión de Orbit. Presenta en este dispositivo o en otra pantalla.</string>
     <string name="present_tv_older_maps">La TV dibuja los mapas con un Orbit anterior, así que partes de este pueden verse distintas ahí.</string>
     <plurals name="present_browsers_watching">
         <item quantity="one">%d navegador</item>
@@ -34,18 +35,20 @@
     <string name="present_video_paused">En pausa · %1$s</string>
     <string name="present_back_to_the_map">Volver al mapa</string>
     <string name="present_start_over">Empezar de nuevo</string>
+    <string name="present_play_live_photo_again">Reproducir la foto en vivo de nuevo</string>
     <string name="present_pause_the_video">Pausar el video</string>
     <string name="present_no_notes">Esta idea no tiene notas.</string>
     <string name="present_up_next">A continuación</string>
     <string name="present_the_end">Fin</string>
     <string name="present_this_idea">Esta idea</string>
 
-    <string name="present_connect_to_the_wifi">Conecta este teléfono al Wi-Fi de la sala, o activa su hotspot y conecta la laptop a él; luego vuelve aquí.</string>
-    <string name="present_open_in_a_browser">En una laptop, el navegador de una TV o los teléfonos de la sala, con el mismo Wi-Fi, abre:</string>
+    <string name="present_connect_to_the_wifi">Conecta este dispositivo a la red Wi-Fi de la sala, o activa su hotspot y conecta la laptop a él; luego vuelve aquí.</string>
+    <string name="present_open_in_a_browser">En una laptop, el navegador de una TV o los teléfonos de la sala, con la misma red Wi-Fi, abre:</string>
+    <string name="present_qr_code_for_address">Código QR de esta dirección</string>
     <string name="present_lockout">Un dispositivo escribió demasiados códigos incorrectos, así que debe esperar antes de volver a intentarlo. Si no fue nadie de la sala, deja de mostrar y vuelve a mostrar para tener un código nuevo.</string>
     <string name="present_stop_showing">Dejar de mostrar</string>
 
-    <string name="present_path">Recorrido de la presentación</string>
+    <string name="present_path">Recorrido</string>
     <string name="present_path_no_ideas">Aún no hay ideas</string>
     <plurals name="present_path_ideas">
         <item quantity="one">%d idea</item>
@@ -72,7 +75,7 @@
 
     <string name="present_talk_ideas_onto_the_map">Dictar ideas al mapa</string>
     <string name="present_talk_needs_the_microphone">Orbit necesita el micrófono para escuchar tus ideas.</string>
-    <string name="present_talk_no_speech_service">Este teléfono no tiene reconocimiento de voz: escribe la idea o usa el micrófono de tu teclado.</string>
+    <string name="present_talk_no_speech_service">Este dispositivo no tiene reconocimiento de voz: escribe la idea o usa el micrófono de tu teclado.</string>
     <string name="present_talk_adding_the_last_idea">Agregando la última idea…</string>
     <string name="present_talk_say_an_idea">Di una idea y haz una pausa</string>
     <string name="present_talk_listening">Escuchando…</string>

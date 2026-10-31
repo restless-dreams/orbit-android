@@ -68,6 +68,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import com.hyuchia.orbit.BuildConfig
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.rememberWords
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.openLink
 import java.io.ByteArrayInputStream
@@ -92,7 +93,8 @@ private class Fullscreen(val view: View, val callback: WebChromeClient.CustomVie
 fun WebVideoPlayer(source: VideoSource, title: String, onClosed: () -> Unit, onKey: (KeyEvent) -> Boolean = { false }) {
     val context = LocalContext.current
     val origin = remember { playerOrigin(context.packageName) }
-    val page = remember(source, title) { playerPage(source, title, origin) }
+    val language = rememberWords().language
+    val page = remember(source, title, language) { playerPage(source, title, origin, language) }
     var fullscreen by remember { mutableStateOf<Fullscreen?>(null) }
     var webView by remember { mutableStateOf<WebView?>(null) }
     val closed by rememberUpdatedState(onClosed)

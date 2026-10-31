@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dragging text, links, pictures, videos, sounds and maps from other apps onto a map: what the drag would do there, said over the map as it goes. -->
+    <string name="drop_add_to">Add to %1$s</string>
+    <string name="drop_move_into">Move into %1$s</string>
+    <string name="drop_open_as_a_map">Open as a new map</string>
+
+    <!-- Pictures, videos and sounds let go on a map, as they're copied into it. -->
+    <string name="drop_adding_to">Adding to %1$s…</string>
+    <string name="drop_adding_the_video_to">Adding the video to %1$s… %2$s</string>
+    <string name="drop_adding_the_sound_to">Adding the sound to %1$s… %2$s</string>
+    <plurals name="drop_adding_some_to">
+        <item quantity="one">Adding %1$d of %2$d to %3$s…</item>
+        <item quantity="other">Adding %1$d of %2$d to %3$s…</item>
+    </plurals>
+    <string name="drop_stop_adding">Stop adding</string>
+
+    <!-- After a drop on a map, with Undo. -->
+    <plurals name="drop_added_ideas">
+        <item quantity="one">Added %1$d idea to %2$s</item>
+        <item quantity="other">Added %1$d ideas to %2$s</item>
+    </plurals>
+    <string name="drop_added_the_picture">Added the picture to %1$s</string>
+    <string name="drop_added_the_live_photo">Added the live photo to %1$s</string>
+    <!-- A picture and a movie let go together that may be an iPhone's live photo, with nothing in them to say so. %1$s and %2$s are their names. -->
+    <string name="drop_live_offer_title">Make them one live photo?</string>
+    <string name="drop_live_offer">“%1$s” and “%2$s” may be the still and the movie of one live photo. Joined, the picture plays its motion when it\'s held.</string>
+    <string name="drop_live_offer_unnamed">The picture and the movie may belong to one live photo. Joined, the picture plays its motion when it\'s held.</string>
+    <string name="drop_live_join">Join them</string>
+    <string name="drop_live_keep_apart">Keep them apart</string>
+    <string name="drop_added_the_video">Added the video to %1$s</string>
+    <string name="drop_added_the_sound">Added the sound to %1$s</string>
+    <plurals name="drop_added_pictures">
+        <item quantity="one">Added %1$d picture to %2$s</item>
+        <item quantity="other">Added %1$d pictures to %2$s</item>
+    </plurals>
+    <plurals name="drop_added_videos">
+        <item quantity="one">Added %1$d video to %2$s</item>
+        <item quantity="other">Added %1$d videos to %2$s</item>
+    </plurals>
+    <plurals name="drop_added_pictures_and_videos">
+        <item quantity="one">Added %1$d picture or video to %2$s</item>
+        <item quantity="other">Added %1$d pictures and videos to %2$s</item>
+    </plurals>
+    <plurals name="drop_added_sounds">
+        <item quantity="one">Added %1$d sound to %2$s</item>
+        <item quantity="other">Added %1$d sounds to %2$s</item>
+    </plurals>
+    <!-- Pictures, videos and sounds together. -->
+    <plurals name="drop_added_files">
+        <item quantity="one">Added %1$d file to %2$s</item>
+        <item quantity="other">Added %1$d files to %2$s</item>
+    </plurals>
+    <plurals name="drop_added_some">
+        <item quantity="one">Added %1$d of the %2$d to %3$s. %4$s</item>
+        <item quantity="other">Added %1$d of the %2$d to %3$s. %4$s</item>
+    </plurals>
+    <string name="drop_nothing_to_add">Orbit can’t add that to a map</string>
+    <!-- A text file let go on a map that's longer than a list of ideas would be: it adds nothing. -->
+    <string name="drop_text_file_too_long">That file is too long to add as ideas. Drop it on your maps to make a map of it.</string>
+    <string name="drop_not_into_itself">An idea can’t go inside itself</string>
+
+    <!-- What a picture, video or sound from another app is called on the map, when its file has no name. -->
+    <string name="drop_picture">Picture</string>
+    <string name="drop_video">Video</string>
+    <string name="drop_sound">Sound</string>
+
+    <!-- Dropping maps or text onto the list of maps. -->
+    <string name="drop_home_maps_title">Drop to add maps</string>
+    <string name="drop_home_maps_body">Markdown, YAML and zip files, and maps from OPML, FreeMind, Freeplane and XMind</string>
+    <string name="drop_home_text_title">Drop to make a new map</string>
+    <string name="drop_home_text_body">The first line goes in the middle, and the rest around it, branches and all</string>
+    <string name="drop_home_bringing_in">Bringing it in…</string>
+    <string name="drop_file_problem">%1$s: %2$s</string>
+</resources>

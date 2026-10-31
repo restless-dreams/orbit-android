@@ -2,7 +2,7 @@
  * Tests import Orbit the way the pages' bundles do: from a local checkout's
  * build, at ORBIT_PATH (from web/; default: ../../orbit).
  *
- *   ORBIT_PATH=../../orbit bun test
+ *   ORBIT_PATH=../../orbit bun run test
  */
 import { plugin } from 'bun';
 import { existsSync } from 'node:fs';

@@ -6,13 +6,14 @@ import type { ReceiverAnnouncement } from './receiver-protocol';
 const ANNOUNCEMENT: ReceiverAnnouncement = { type: 'receiver', protocol: RECEIVER_PROTOCOL, format: 1, orbit: 'f62a16c' };
 
 /** A receiver's channel, with what it followed and what it answered. */
-const tv = () => {
+const tv = (mostPending?: number) => {
   const followed: AudienceCommand[] = [];
   const answered: { senderId: string | undefined; message: ReceiverAnnouncement }[] = [];
   const channel = receiverChannel({
     announcement: ANNOUNCEMENT,
     reply: (senderId, message) => answered.push({ senderId, message }),
     receive: (command) => followed.push(command),
+    mostPending,
   });
   return { channel, followed, answered };
 };
@@ -194,6 +195,29 @@ describe('parts', () => {
     }
 
     expect(followed).toEqual([SHOW]);
+  });
+
+  test('from every phone at once can\'t add up to more than the TV holds', () => {
+    // Each phone's command is half sent; together they'd hold more than the TV takes.
+    const { channel, followed } = tv(200);
+    const parts = inParts(SHOW, 40);
+
+    for (const phone of ['one', 'two']) {
+      channel.hear(parts[0], phone);
+      channel.hear(parts[1], phone);
+    }
+
+    // A third phone's part would go over: its command is dropped, and the others still come whole.
+    channel.hear(parts[0], 'three');
+    channel.hear(parts[1], 'three');
+
+    for (const phone of ['one', 'two', 'three']) {
+      for (const part of parts.slice(2)) {
+        channel.hear(part, phone);
+      }
+    }
+
+    expect(followed).toEqual([SHOW, SHOW]);
   });
 
   test('can\'t be counted past the most a command may come in', () => {

@@ -77,9 +77,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/** A phone on its side: with the keyboard up, the search keeps only what it needs. */
-private val ShortScreen = 480.dp
-
 /**
  * Android's emoji picker, with recent emoji and every category, for an idea's icon, under a
  * search that finds emoji by their names and keywords in the app's language and in English.
@@ -106,7 +103,7 @@ fun EmojiPickerSheet(title: String, hasIcon: Boolean, onPick: (String?) -> Unit,
 
     // Above a keyboard on a phone on its side there's room for the field and a row of emoji, without the title.
     val windowHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
-    val typingOnShortScreen = windowHeight < ShortScreen && WindowInsets.isImeVisible
+    val typingOnShortScreen = isShort(windowHeight) && WindowInsets.isImeVisible
 
     // The picker keeps what's picked in it as recent emoji itself; the search's picks join them here.
     fun pickFound(emoji: String) {
@@ -149,7 +146,11 @@ fun EmojiPickerSheet(title: String, hasIcon: Boolean, onPick: (String?) -> Unit,
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.ui_clear_the_search)) }
+                        val clear = stringResource(R.string.ui_clear_the_search)
+
+                        Hint(clear) {
+                            IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, contentDescription = clear) }
+                        }
                     }
                 },
                 singleLine = true,

@@ -1,10 +1,8 @@
 package com.hyuchia.orbit.capture
 
 import com.hyuchia.orbit.data.MapRepository
-import com.hyuchia.orbit.data.MapText
 import com.hyuchia.orbit.data.SettingsRepository
 import com.hyuchia.orbit.data.WriteResult
-import com.hyuchia.orbit.page.CapturedIdea
 import com.hyuchia.orbit.page.MapCommand
 import com.hyuchia.orbit.page.PagePool
 import kotlinx.serialization.builtins.serializer
@@ -13,24 +11,18 @@ import java.io.IOException
 /** A list item's marker, a checkbox's, or a number's, before an idea on its line. */
 private val ItemMarker = Regex("""^\s*(?:[-*+•]\s+(?:\[[ xX/]]\s+)?|\d+[.)]\s+)""")
 
-/** The longest an idea's name gets: a quick capture is a name, and a longer line is kept whole as its note. */
-private const val IDEA_LENGTH = 200
-
 /** How many times quick capture starts over when the map changes while ideas are added to it. */
 private const val ATTEMPTS = 3
 
 /**
- * The ideas in text caught on the go: one for each line, without the list
- * markers a copied list brings along. Blank lines are none.
+ * The ideas in text caught on the go, for counting them: one for each line,
+ * without the list markers a copied list brings along. Blank lines are none.
+ * The page adds them nested, as pasting nests them (see [QuickCapture.add]).
  */
 fun ideasFromText(text: String): List<String> =
     text.lines()
         .map { line -> line.replace(ItemMarker, "").replace(Regex("""\s+"""), " ").trim() }
         .filter { it.isNotEmpty() }
-
-/** Ideas as they join a map: a long one named by its start, the whole of it kept as its note. */
-fun capturedIdeas(ideas: List<String>): List<CapturedIdea> =
-    ideas.map { idea -> if (idea.length <= IDEA_LENGTH) CapturedIdea(idea) else CapturedIdea(MapText.shorten(idea, IDEA_LENGTH), note = idea) }
 
 /** Why ideas didn't join a map, for the sheet that caught them to say. */
 enum class CaptureFailure {
@@ -42,6 +34,9 @@ enum class CaptureFailure {
 
     /** The map changed on every try. */
     KeptChanging,
+
+    /** The map's file couldn't be written, as when the device's storage is full. */
+    NotWritten,
 }
 
 /** Ideas that didn't join a map, and why. */
@@ -55,14 +50,15 @@ class CaptureException(val failure: CaptureFailure) : IOException("Ideas weren't
  */
 class QuickCapture(private val pool: PagePool, private val maps: MapRepository, private val settings: SettingsRepository) {
     /**
-     * Adds `ideas` at the top of map `mapId`, and remembers it as the map
-     * ideas go to next. When the map changes on the way (an edit on its
-     * screen, a sync), the ideas are added to it as it is now. Throws when
-     * they couldn't be added, the map left as it was: a [CaptureException]
-     * saying why when the map didn't take them.
+     * Adds the ideas in `text` at the top of map `mapId`, a line each,
+     * nested as their lines are indented, as pasting nests them, and
+     * remembers it as the map ideas go to next. When the map changes on the
+     * way (an edit on its screen, a sync), the ideas are added to it as it is
+     * now. Throws when they couldn't be added, the map left as it was: a
+     * [CaptureException] saying why when the map didn't take them.
      */
-    suspend fun add(mapId: String, ideas: List<String>) {
-        if (ideas.isEmpty()) {
+    suspend fun add(mapId: String, text: String) {
+        if (ideasFromText(text).isEmpty()) {
             return
         }
 
@@ -70,7 +66,7 @@ class QuickCapture(private val pool: PagePool, private val maps: MapRepository, 
             val markdown = maps.read(mapId)
 
             val changed = pool.work { page ->
-                page.request(String.serializer()) { job -> MapCommand.AddIdeas(job, markdown, capturedIdeas(ideas)) }
+                page.request(String.serializer()) { job -> MapCommand.AddIdeas(job, markdown, text) }
             }
 
             when (maps.change(mapId, changed, base = markdown)) {
@@ -81,6 +77,7 @@ class QuickCapture(private val pool: PagePool, private val maps: MapRepository, 
                 WriteResult.Changed -> Unit
                 WriteResult.Refused -> throw CaptureException(CaptureFailure.Refused)
                 WriteResult.Missing -> throw CaptureException(CaptureFailure.Missing)
+                WriteResult.NotWritten -> throw CaptureException(CaptureFailure.NotWritten)
             }
         }
 

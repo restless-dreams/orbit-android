@@ -2,16 +2,21 @@ package com.hyuchia.orbit.home
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -21,8 +26,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.outlined.FileOpen
 import androidx.compose.material.icons.automirrored.outlined.NoteAdd
+import androidx.compose.material.icons.outlined.FileOpen
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,11 +35,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,7 +49,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -53,15 +57,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
 import com.hyuchia.orbit.data.ImportResult
+import com.hyuchia.orbit.data.MapFileTypes
 import com.hyuchia.orbit.data.MapTemplate
 import com.hyuchia.orbit.data.MapTemplates
 import com.hyuchia.orbit.data.MapText
 import com.hyuchia.orbit.data.readTemplate
 import com.hyuchia.orbit.rememberWords
+import com.hyuchia.orbit.ui.Hint
+import com.hyuchia.orbit.ui.OrbitSnackbarHost
+import com.hyuchia.orbit.ui.TitleDialog
 import com.hyuchia.orbit.ui.orbitViewModel
 import kotlinx.coroutines.launch
 
@@ -101,13 +112,17 @@ fun NewMapScreen(onCreated: (String) -> Unit, onImported: (ImportResult) -> Unit
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        snackbarHost = { SnackbarHost(snackbars) },
+        snackbarHost = { OrbitSnackbarHost(snackbars) },
         topBar = {
             MediumFlexibleTopAppBar(
                 title = { Text(stringResource(R.string.home_start_a_map)) },
-                subtitle = { Text(stringResource(R.string.home_templates_drawn_live)) },
+                subtitle = { Text(stringResource(R.string.home_start_a_map_subtitle)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back)) }
+                    val back = stringResource(R.string.common_back)
+
+                    Hint(back) {
+                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = back) }
+                    }
                 },
                 scrollBehavior = scrollBehavior,
             )
@@ -128,21 +143,22 @@ fun NewMapScreen(onCreated: (String) -> Unit, onImported: (ImportResult) -> Unit
             modifier = Modifier.fillMaxSize(),
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // The two as tall as the taller, whichever's words wrap.
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.height(IntrinsicSize.Min)) {
                     StartCard(
                         stringResource(R.string.common_blank_map),
                         stringResource(R.string.home_blank_map_description),
                         Icons.AutoMirrored.Outlined.NoteAdd,
-                        Modifier.weight(1f),
+                        Modifier.weight(1f).fillMaxHeight(),
                     ) { naming = true }
 
                     StartCard(
                         stringResource(R.string.common_open_a_file),
                         stringResource(R.string.home_open_a_file_description),
                         Icons.Outlined.FileOpen,
-                        Modifier.weight(1f),
+                        Modifier.weight(1f).fillMaxHeight(),
                     ) {
-                        importer.launch(ImportTypes)
+                        importer.launch(MapFileTypes.FILE_PICKER.toTypedArray())
                     }
                 }
             }
@@ -152,7 +168,7 @@ fun NewMapScreen(onCreated: (String) -> Unit, onImported: (ImportResult) -> Unit
                     stringResource(R.string.home_templates),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 4.dp, top = 12.dp),
+                    modifier = Modifier.padding(start = 4.dp, top = 12.dp).semantics { heading() },
                 )
             }
 
@@ -178,7 +194,7 @@ fun NewMapScreen(onCreated: (String) -> Unit, onImported: (ImportResult) -> Unit
 
 @Composable
 private fun StartCard(title: String, description: String, icon: ImageVector, modifier: Modifier, onClick: () -> Unit) {
-    OutlinedCard(onClick = onClick, shape = RoundedCornerShape(24.dp), modifier = modifier) {
+    OutlinedCard(onClick = onClick, shape = CardShape, modifier = modifier.semantics { role = Role.Button }) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
             Text(title, style = MaterialTheme.typography.titleMedium)
@@ -194,12 +210,19 @@ private fun TemplateCard(template: MapTemplate, onClick: () -> Unit) {
     val markdown by produceState<String?>(null, template) { value = context.readTemplate(template) }
 
     Surface(
-        shape = RoundedCornerShape(24.dp),
+        shape = CardShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.home_start_a_map_from_template), onClick = onClick),
+            .clip(CardShape)
+            .clickable(
+                interactionSource = null,
+                // With the keyboard, the focus ring follows the card's corners, as on Home.
+                indication = ripple(focusRingShape = CardShape),
+                role = Role.Button,
+                onClickLabel = stringResource(R.string.home_start_a_map_from_template),
+                onClick = onClick,
+            ),
     ) {
         Column {
             val text = markdown
@@ -218,7 +241,15 @@ private fun TemplateCard(template: MapTemplate, onClick: () -> Unit) {
                         .clip(RoundedCornerShape(19.dp)),
                 ) { text }
             } else {
-                MapCardPlaceholder()
+                // Only the picture's place while the template draws: the words below are already there.
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 10f)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(19.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                )
             }
 
             Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {

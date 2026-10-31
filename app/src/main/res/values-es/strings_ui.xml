@@ -7,7 +7,7 @@
     <string name="ui_tags_for">Etiquetas de %1$s</string>
     <string name="ui_new_tag">Nueva etiqueta</string>
     <string name="ui_add_tag">Agregar</string>
-    <string name="ui_tags_help">Las etiquetas agrupan tus mapas como tú los pienses, como Trabajo o Viaje a Japón. Un mapa puede tener varias. Escribe una para agregarla.</string>
+    <string name="ui_tags_help">Las etiquetas agrupan tus mapas a tu manera, por ejemplo Trabajo o Viaje a Japón. Un mapa puede tener varias. Escribe una para agregarla.</string>
     <string name="ui_tags_list">Etiquetas: %1$s</string>
     <string name="ui_search_emoji">Buscar emoji</string>
     <string name="ui_clear_the_search">Borrar la búsqueda</string>
@@ -15,7 +15,7 @@
     <string name="ui_choose_a_skin_tone">Elegir un tono de piel</string>
 
     <string name="ui_web_view_update_to_see_maps">Actualiza %1$s para ver tus mapas</string>
-    <string name="ui_web_view_too_old">Orbit dibuja los mapas con %1$s, y el de este teléfono es muy antiguo: Chromium %2$d, y Orbit necesita la versión %3$d o una posterior. Actualízalo desde tu tienda de apps o con una actualización del sistema, y tus mapas aparecerán. Todos siguen aquí.</string>
+    <string name="ui_web_view_too_old">Orbit dibuja los mapas con %1$s, y el de este dispositivo es muy antiguo: Chromium %2$d, y Orbit necesita la versión %3$d o una posterior. Actualízalo desde tu tienda de apps o con una actualización del sistema, y tus mapas aparecerán. Todos siguen aquí.</string>
     <string name="ui_web_view_update">Actualizar %1$s</string>
 
     <string name="ui_hint_with_keys">%1$s (%2$s)</string>

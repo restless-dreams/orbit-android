@@ -70,7 +70,7 @@ class MapMediaTest {
     fun `a video that would take the map past what it can carry is refused`() {
         assertNull(videoRefusal(40_000_000, 50_000_000, words))
         val refusal = videoRefusal(40_000_000, 50_000_001, words)!!
-        assertTrue(refusal, refusal.startsWith("This map's pictures and videos come to 50.1 MB already"))
+        assertTrue(refusal, refusal.startsWith("This map's pictures, videos and sounds come to 50.1 MB already"))
         assertTrue(refusal, "90 MB" in refusal)
     }
 
@@ -84,7 +84,7 @@ class MapMediaTest {
     @Test
     fun `a picture that would take the map past what it can carry is refused`() {
         assertNull(pictureRefusal(500_000, 89_500_000, words))
-        assertTrue(pictureRefusal(500_001, 89_500_000, words)!!.startsWith("This map's pictures and videos come to 89.5 MB"))
+        assertTrue(pictureRefusal(500_001, 89_500_000, words)!!.startsWith("This map's pictures, videos and sounds come to 89.5 MB"))
     }
 
     @Test

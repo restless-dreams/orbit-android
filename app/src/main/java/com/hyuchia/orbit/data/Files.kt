@@ -5,9 +5,12 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.OutputStream
 import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
+import java.nio.file.StandardOpenOption
+import java.util.UUID
 
 /**
  * Writes a file so a crash, a full disk or a dead battery never leaves half
@@ -20,7 +23,8 @@ import java.nio.charset.CodingErrorAction
 internal fun writeAtomically(file: File, write: (OutputStream) -> Unit) {
     val directory = file.absoluteFile.parentFile ?: throw IOException("No folder for $file")
     directory.mkdirs()
-    val partial = File(directory, ".${file.name}.partial")
+    // A name of its own for each write, so two writers of one file never fill the same one.
+    val partial = File(directory, ".${file.name}.${UUID.randomUUID().toString().take(8)}.partial")
 
     try {
         FileOutputStream(partial).use { output ->
@@ -32,10 +36,21 @@ internal fun writeAtomically(file: File, write: (OutputStream) -> Unit) {
         if (!partial.renameTo(file)) {
             throw IOException("Couldn't put ${file.name} in place")
         }
+
+        // The rename reaches the disk too, so a crash right after can't bring the old file back.
+        syncDirectory(directory)
     } finally {
         partial.delete()
     }
 }
+
+/** Puts a folder's entries on the disk, as a rename in it left them; where the system doesn't allow it, it's left to the system. */
+private fun syncDirectory(directory: File) {
+    runCatching { FileChannel.open(directory.toPath(), StandardOpenOption.READ).use { it.force(true) } }
+}
+
+/** Whether `file` is a write's partial file, as [writeAtomically] names them: one left means a write stopped partway. */
+internal fun isPartial(file: File): Boolean = file.name.startsWith(".") && file.name.endsWith(".partial")
 
 internal fun writeAtomically(file: File, bytes: ByteArray) = writeAtomically(file) { it.write(bytes) }
 
@@ -44,8 +59,11 @@ internal fun writeAtomically(file: File, text: String) = writeAtomically(file, t
 /**
  * Text from a file someone else wrote: UTF-8 when it is, else UTF-16 when it
  * says so, else Windows-1252, which reads any bytes as the characters a
- * Western text editor would show. Nothing is replaced with "�", so writing
- * the text back loses no characters (it's written as UTF-8).
+ * Western text editor would show. A UTF-8 file with a few bytes that aren't,
+ * such as one stray byte, keeps its UTF-8 characters, and only those bytes
+ * read as Windows-1252: a file that's mostly characters of more than one
+ * byte is UTF-8. Nothing is replaced with "�", so writing the text back
+ * loses no characters (it's written as UTF-8).
  */
 fun decodeText(bytes: ByteArray): String {
     if (bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) {
@@ -60,7 +78,115 @@ fun decodeText(bytes: ByteArray): String {
         return String(bytes, 2, bytes.size - 2, Charsets.UTF_16BE)
     }
 
-    return strictly(bytes, Charsets.UTF_8) ?: westernText(bytes)
+    strictly(bytes, Charsets.UTF_8)?.let { return it }
+    var characters = 0
+    var strays = 0
+    var index = 0
+
+    while (index < bytes.size) {
+        val length = utf8Length(bytes, index)
+
+        when {
+            length == 0 -> strays += 1
+            length > 1 -> characters += 1
+        }
+
+        index += maxOf(length, 1)
+    }
+
+    return if (characters > 0 && characters >= strays) mixedText(bytes) else westernText(bytes)
+}
+
+/**
+ * Whether `bytes` are UTF-8 that stops partway through a character: what's
+ * there of a file still being written, as a sync app writes one in place,
+ * or one cut short.
+ */
+fun endsMidCharacter(bytes: ByteArray): Boolean {
+    var index = 0
+
+    while (index < bytes.size) {
+        val length = utf8Length(bytes, index)
+
+        if (length == 0) {
+            return bytes.size - index < expectedLength(bytes[index].toInt() and 0xFF) && continuesUntilEnd(bytes, index)
+        }
+
+        index += length
+    }
+
+    return false
+}
+
+/**
+ * Thrown when a file looks like it's still arriving: what could be read of it
+ * so far may be only its start. `text` is what was read, for when it stays
+ * as it is: then it's how the file is.
+ */
+class StillArriving(name: String, val text: String) : IOException("$name is still arriving")
+
+/** How many bytes the UTF-8 character at `index` takes, or 0 when the bytes there aren't one, whole. */
+private fun utf8Length(bytes: ByteArray, index: Int): Int {
+    val lead = bytes[index].toInt() and 0xFF
+
+    if (lead < 0x80) {
+        return 1
+    }
+
+    val length = expectedLength(lead)
+
+    if (length == 0 || index + length > bytes.size) {
+        return 0
+    }
+
+    val second = bytes[index + 1].toInt() and 0xFF
+
+    // Each lead byte allows its own range for the next, so no character is written longer than it needs, nor as a surrogate.
+    val low = when (lead) {
+        0xE0 -> 0xA0
+        0xF0 -> 0x90
+        else -> 0x80
+    }
+
+    val high = when (lead) {
+        0xED -> 0x9F
+        0xF4 -> 0x8F
+        else -> 0xBF
+    }
+
+    if (second !in low..high || (2 until length).any { (bytes[index + it].toInt() and 0xFF) !in 0x80..0xBF }) {
+        return 0
+    }
+
+    return length
+}
+
+/** How many bytes a UTF-8 character starting with `lead` takes, or 0 when no character starts with it. */
+private fun expectedLength(lead: Int): Int = when (lead) {
+    in 0xC2..0xDF -> 2
+    in 0xE0..0xEF -> 3
+    in 0xF0..0xF4 -> 4
+    else -> 0
+}
+
+/** Whether every byte after the lead byte at `index` continues a character, up to the end. */
+private fun continuesUntilEnd(bytes: ByteArray, index: Int): Boolean = (index + 1 until bytes.size).all { (bytes[it].toInt() and 0xFF) in 0x80..0xBF }
+
+/** UTF-8, with each byte that isn't part of a whole character read as Windows-1252. */
+private fun mixedText(bytes: ByteArray): String = buildString(bytes.size) {
+    var index = 0
+
+    while (index < bytes.size) {
+        val length = utf8Length(bytes, index)
+
+        if (length == 0) {
+            append(WESTERN[bytes[index].toInt() and 0xFF])
+            index += 1
+        } else {
+            append(String(bytes, index, length, Charsets.UTF_8))
+            index += length
+        }
+    }
 }
 
 /**

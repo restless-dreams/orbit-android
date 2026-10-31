@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Slideshow
 import androidx.compose.material.icons.outlined.Widgets
@@ -42,6 +44,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -75,6 +79,7 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
@@ -86,17 +91,23 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
+import com.hyuchia.orbit.data.LockedCover
 import com.hyuchia.orbit.data.MapSummary
 import com.hyuchia.orbit.page.AppTheme
+import com.hyuchia.orbit.privacy.CoverMenuItem
+import com.hyuchia.orbit.privacy.PrivateBadge
+import com.hyuchia.orbit.privacy.PrivateMenuItem
+import com.hyuchia.orbit.study.dueCount
 import com.hyuchia.orbit.theme.mapStyle
 import com.hyuchia.orbit.theme.mapTheme
+import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.OrbitGlyph
+import com.hyuchia.orbit.ui.TimeWords
 import com.hyuchia.orbit.ui.WavyProgress
 import java.io.File
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
 import java.time.temporal.ChronoUnit
 
 /**
@@ -144,6 +155,7 @@ fun MapThumbnail(
 data class MapCardActions(
     val onOpen: () -> Unit,
     val onPresent: () -> Unit,
+    val onStudy: () -> Unit,
     val onPin: () -> Unit,
     val onRename: () -> Unit,
     val onTags: () -> Unit,
@@ -154,7 +166,19 @@ data class MapCardActions(
 
     /** Puts a widget showing the map on the home screen; none where the launcher can't be asked to. */
     val onAddToHomeScreen: (() -> Unit)? = null,
+
+    /** Makes the map private, or not: see [com.hyuchia.orbit.privacy.PrivateMaps]. */
+    val onPrivate: ((Boolean) -> Unit)? = null,
+
+    /** Chooses what the map shows while it's locked, while it's private (see [com.hyuchia.orbit.privacy.CoverDialog]). */
+    val onCover: (() -> Unit)? = null,
+
+    /** Locks every private map now, offered while the map is private: its card is unlocked, or it wouldn't be this one. */
+    val onLockNow: (() -> Unit)? = null,
 )
+
+/** A card's corners on Home, its locked card's too. */
+internal val CardShape = RoundedCornerShape(24.dp)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -171,11 +195,11 @@ fun MapCard(map: MapSummary, actions: MapCardActions, modifier: Modifier = Modif
     val pinned = map.metadata.pinned
 
     Surface(
-        shape = RoundedCornerShape(24.dp),
+        shape = CardShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
+            .clip(CardShape)
             .onSizeChanged { size = it }
             // A right click opens the menu where it was clicked, and doesn't open the map.
             .pointerInput(Unit) {
@@ -211,6 +235,9 @@ fun MapCard(map: MapSummary, actions: MapCardActions, modifier: Modifier = Modif
                 }
             }
             .combinedClickable(
+                interactionSource = null,
+                // With the keyboard, the focus ring follows the card's corners.
+                indication = ripple(focusRingShape = CardShape),
                 onClickLabel = stringResource(R.string.common_open),
                 onLongClickLabel = stringResource(R.string.home_more_options),
                 onClick = actions.onOpen,
@@ -220,22 +247,40 @@ fun MapCard(map: MapSummary, actions: MapCardActions, modifier: Modifier = Modif
                 },
             )
             .semantics {
-                customActions = listOf(
+                // A group, so screen readers hear the card before its menu button rather than after it.
+                isTraversalGroup = true
+                // What the menu offers, in its order, Open aside: that's the card's own tap.
+                customActions = listOfNotNull(
+                    CustomAccessibilityAction(resources.getString(R.string.common_present)) { actions.onPresent(); true },
+                    CustomAccessibilityAction(resources.getString(R.string.study_study)) { actions.onStudy(); true },
                     CustomAccessibilityAction(resources.getString(if (pinned) R.string.home_unpin else R.string.home_pin)) { actions.onPin(); true },
+                    actions.onAddToHomeScreen?.let { add -> CustomAccessibilityAction(resources.getString(R.string.home_add_to_home_screen)) { add(); true } },
                     CustomAccessibilityAction(resources.getString(R.string.common_rename)) { actions.onRename(); true },
                     CustomAccessibilityAction(resources.getString(R.string.common_tags)) { actions.onTags(); true },
+                    actions.onPrivate?.let { change ->
+                        CustomAccessibilityAction(resources.getString(if (map.metadata.isPrivate) R.string.private_make_not_private else R.string.private_make_private)) {
+                            change(!map.metadata.isPrivate)
+                            true
+                        }
+                    },
+                    actions.onCover?.takeIf { map.metadata.isPrivate }?.let { cover ->
+                        CustomAccessibilityAction(resources.getString(R.string.private_cover_while_locked)) { cover(); true }
+                    },
+                    actions.onLockNow?.takeIf { map.metadata.isPrivate }?.let { lock ->
+                        CustomAccessibilityAction(resources.getString(R.string.private_lock_private_maps_now)) { lock(); true }
+                    },
                     CustomAccessibilityAction(resources.getString(R.string.common_duplicate)) { actions.onDuplicate(); true },
+                    CustomAccessibilityAction(resources.getString(R.string.home_send_to_a_device)) { actions.onSend(); true },
                     CustomAccessibilityAction(resources.getString(R.string.home_share)) { actions.onShare(); true },
                     CustomAccessibilityAction(resources.getString(R.string.common_delete)) { actions.onDelete(); true },
-                ) + listOfNotNull(
-                    actions.onAddToHomeScreen?.let { add -> CustomAccessibilityAction(resources.getString(R.string.home_add_to_home_screen)) { add(); true } },
                 )
             },
     ) {
-        Column {
-            MapCardMenu(clickedMenu != null, pinned, actions, offset = clickedMenu ?: DpOffset.Zero) { clickedMenu = null }
+        // The badges are drawn over the picture but come after the words, so screen readers hear the map's name first.
+        Box {
+            Column {
+                MapCardMenu(clickedMenu != null, pinned, map.metadata.isPrivate, map.metadata.cover, actions, offset = clickedMenu ?: DpOffset.Zero) { clickedMenu = null }
 
-            Box {
                 val frame = Modifier
                     .fillMaxWidth()
                     .aspectRatio(16f / 10f)
@@ -254,90 +299,115 @@ fun MapCard(map: MapSummary, actions: MapCardActions, modifier: Modifier = Modif
                     ) { context.container.maps.read(map.id) }
                 }
 
+                Row(verticalAlignment = Alignment.Top, modifier = Modifier.padding(start = 16.dp, end = 4.dp, bottom = 12.dp)) {
+                    Column(Modifier.weight(1f).padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        // Two lines each, so a long title or larger text still says what the map is.
+                        Text(map.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            snippet ?: if (map.unreadable) stringResource(R.string.home_unreadable_map) else describe(resources, map),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        val tags = map.outline.tags
+
+                        if (tags.isNotEmpty()) {
+                            val said = stringResource(R.string.ui_tags_list, tags.joinToString(", "))
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.clearAndSetSemantics { contentDescription = said },
+                            ) {
+                                Icon(Icons.AutoMirrored.Outlined.Label, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
+                                Text(tags.joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+
+                        // Cards studied on the other devices in the folder count too: each is due as its latest answer says.
+                        val due = remember(map.metadata.study, map.metadata.studyElsewhere) { dueCount(map.metadata.studyProgress, LocalDate.now().toEpochDay()) }
+
+                        if (due > 0 && snippet == null) {
+                            DueCards(due)
+                        }
+
+                        val progress = map.outline.progress
+
+                        if (progress.total > 0 && snippet == null) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
+                                // As the map's rings fill: goals by how far along they are. Screen readers hear the words beside
+                                // it with the card, rather than stopping again on the line.
+                                WavyProgress(progress = { progress.share.toFloat() }, modifier = Modifier.weight(1f).clearAndSetSemantics {})
+                                // Goals are reached, to-dos done: when every one is a goal, they're all reached.
+                                val allGoals = progress.goals == progress.total
+                                Text(
+                                    if (progress.finished == progress.total) {
+                                        pluralStringResource(if (allGoals) R.plurals.home_progress_all_reached else R.plurals.home_progress_all_done, progress.total, progress.total)
+                                    } else {
+                                        // The words agree with how many are finished: "1 de 3 hecha".
+                                        pluralStringResource(
+                                            if (allGoals) R.plurals.home_progress_reached else R.plurals.home_progress_done,
+                                            progress.finished,
+                                            progress.finished,
+                                            progress.total,
+                                        )
+                                    },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+
+                    Box {
+                        Hint(stringResource(R.string.home_more_options)) {
+                            IconButton(onClick = { menuOpen = true }) {
+                                Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.home_more_options_for_map, map.title))
+                            }
+                        }
+
+                        MapCardMenu(menuOpen, pinned, map.metadata.isPrivate, map.metadata.cover, actions) { menuOpen = false }
+                    }
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.align(Alignment.TopEnd).padding(14.dp)) {
+                if (map.metadata.isPrivate) {
+                    PrivateBadge()
+                }
+
                 if (pinned) {
                     Icon(
                         Icons.Filled.PushPin,
                         contentDescription = stringResource(R.string.home_pinned),
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(14.dp)
                             .size(28.dp)
                             .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
                             .padding(6.dp),
                     )
                 }
             }
-
-            Row(verticalAlignment = Alignment.Top, modifier = Modifier.padding(start = 16.dp, end = 4.dp, bottom = 12.dp)) {
-                Column(Modifier.weight(1f).padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(map.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        snippet ?: if (map.unreadable) stringResource(R.string.home_unreadable_map) else describe(resources, map),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = if (snippet != null) 2 else 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    val tags = map.outline.tags
-
-                    if (tags.isNotEmpty()) {
-                        val said = stringResource(R.string.ui_tags_list, tags.joinToString(", "))
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.clearAndSetSemantics { contentDescription = said },
-                        ) {
-                            Icon(Icons.AutoMirrored.Outlined.Label, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
-                            Text(tags.joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-
-                    val progress = map.outline.progress
-
-                    if (progress.total > 0 && snippet == null) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
-                            // As the map's rings fill: goals by how far along they are.
-                            WavyProgress(progress = { progress.share.toFloat() }, modifier = Modifier.weight(1f))
-                            // Goals are reached, to-dos done: when every one is a goal, they're all reached.
-                            val allGoals = progress.goals == progress.total
-                            Text(
-                                if (progress.finished == progress.total) {
-                                    pluralStringResource(if (allGoals) R.plurals.home_progress_all_reached else R.plurals.home_progress_all_done, progress.total, progress.total)
-                                } else {
-                                    // The words agree with how many are finished: "1 de 3 hecha".
-                                    pluralStringResource(
-                                        if (allGoals) R.plurals.home_progress_reached else R.plurals.home_progress_done,
-                                        progress.finished,
-                                        progress.finished,
-                                        progress.total,
-                                    )
-                                },
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-
-                Box {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.home_more_options_for_map, map.title))
-                    }
-
-                    MapCardMenu(menuOpen, pinned, actions) { menuOpen = false }
-                }
-            }
         }
     }
 }
 
+/** How many of the map's cards are due in study mode, under its title: a light reminder, never a badge to clear. */
 @Composable
-private fun MapCardMenu(open: Boolean, pinned: Boolean, actions: MapCardActions, offset: DpOffset = DpOffset.Zero, onDismiss: () -> Unit) {
+private fun DueCards(due: Int) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 2.dp)) {
+        Icon(Icons.Outlined.School, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(14.dp))
+        Text(pluralStringResource(R.plurals.study_due, due, due), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.tertiary, maxLines = 1)
+    }
+}
+
+@Composable
+private fun MapCardMenu(open: Boolean, pinned: Boolean, private: Boolean, cover: LockedCover?, actions: MapCardActions, offset: DpOffset = DpOffset.Zero, onDismiss: () -> Unit) {
     DropdownMenu(expanded = open, onDismissRequest = onDismiss, offset = offset) {
         MenuItem(stringResource(R.string.common_open), Icons.AutoMirrored.Outlined.OpenInNew) { onDismiss(); actions.onOpen() }
         MenuItem(stringResource(R.string.common_present), Icons.Outlined.Slideshow) { onDismiss(); actions.onPresent() }
+        MenuItem(stringResource(R.string.study_study), Icons.Outlined.School) { onDismiss(); actions.onStudy() }
         MenuItem(stringResource(if (pinned) R.string.home_unpin else R.string.home_pin_to_the_top), Icons.Outlined.PushPin) { onDismiss(); actions.onPin() }
 
         actions.onAddToHomeScreen?.let { add ->
@@ -346,6 +416,27 @@ private fun MapCardMenu(open: Boolean, pinned: Boolean, actions: MapCardActions,
 
         MenuItem(stringResource(R.string.common_rename), Icons.Outlined.DriveFileRenameOutline) { onDismiss(); actions.onRename() }
         MenuItem(stringResource(R.string.common_tags), Icons.AutoMirrored.Outlined.Label) { onDismiss(); actions.onTags() }
+
+        actions.onPrivate?.let { change ->
+            PrivateMenuItem(private, onChange = change, onDismiss = onDismiss)
+        }
+
+        actions.onCover?.takeIf { private }?.let { choose ->
+            CoverMenuItem(cover) { onDismiss(); choose() }
+        }
+
+        actions.onLockNow?.takeIf { private }?.let { lock ->
+            val everyPrivateMap = stringResource(R.string.private_lock_private_maps_now)
+
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.private_menu_lock_now)) },
+                leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null) },
+                onClick = { onDismiss(); lock() },
+                // Every private map locks, not this one alone: screen readers say so.
+                modifier = Modifier.semantics { contentDescription = everyPrivateMap },
+            )
+        }
+
         MenuItem(stringResource(R.string.common_duplicate), Icons.Outlined.ContentCopy) { onDismiss(); actions.onDuplicate() }
         MenuItem(stringResource(R.string.home_send_to_a_device), Icons.Outlined.Devices) { onDismiss(); actions.onSend() }
         MenuItem(stringResource(R.string.home_share), Icons.Outlined.Share) { onDismiss(); actions.onShare() }
@@ -360,7 +451,7 @@ private fun MapCardMenu(open: Boolean, pinned: Boolean, actions: MapCardActions,
 }
 
 @Composable
-private fun MenuItem(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+private fun MenuItem(label: String, icon: ImageVector, onClick: () -> Unit) {
     DropdownMenuItem(text = { Text(label) }, leadingIcon = { Icon(icon, contentDescription = null) }, onClick = onClick)
 }
 
@@ -415,17 +506,15 @@ fun timeAgo(resources: Resources, time: Long, now: Long = System.currentTimeMill
                 TimeAgo(resources.getQuantityString(R.plurals.home_days_ago, days, days), isDate = false)
             }
         }
-        else -> {
-            val format = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(resources.configuration.locales[0])
-            TimeAgo(format.format(Instant.ofEpochMilli(time).atZone(zone)), isDate = true)
-        }
+        // A day has no clock, so the phone's 12- or 24-hour setting doesn't matter here.
+        else -> TimeAgo(TimeWords(resources.configuration.locales[0], is24Hour = false, zone).date(time), isDate = true)
     }
 }
 
 /** The empty card shape shown while maps load. */
 @Composable
 fun MapCardPlaceholder(modifier: Modifier = Modifier) {
-    Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = modifier.fillMaxWidth()) {
+    Surface(shape = CardShape, color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = modifier.fillMaxWidth()) {
         Column {
             Box(
                 Modifier

@@ -1,8 +1,6 @@
 package com.hyuchia.orbit.capture
 
-import com.hyuchia.orbit.page.CapturedIdea
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class QuickCaptureTest {
@@ -40,14 +38,16 @@ class QuickCaptureTest {
     }
 
     @Test
-    fun aLongIdeaIsNamedByItsStartAndKeptWholeAsItsNote() {
+    fun aLongLineIsOneIdea() {
+        // The page names it by its start and keeps it whole as its note (web/paste.test.ts, "ideas caught on the go").
         val line = "word ".repeat(100).trim()
         assertEquals(listOf(line), ideasFromText(line))
-        val idea = capturedIdeas(ideasFromText(line)).single()
-        assertTrue(idea.text.length <= 200)
-        assertTrue(idea.text.endsWith("…"))
-        assertEquals(line, idea.note)
-        assertEquals(listOf(CapturedIdea("Short")), capturedIdeas(listOf("Short")))
+    }
+
+    @Test
+    fun anIndentedLineIsAnIdeaToo() {
+        // Nested under the line above it once the page adds them, as pasting nests them.
+        assertEquals(listOf("Venue", "Call them", "Band"), ideasFromText("Venue\n    - [ ] Call them\nBand"))
     }
 
     @Test

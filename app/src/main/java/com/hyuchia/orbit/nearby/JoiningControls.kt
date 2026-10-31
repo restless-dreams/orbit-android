@@ -2,7 +2,6 @@ package com.hyuchia.orbit.nearby
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -12,7 +11,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.PersonRemove
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -30,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -39,12 +38,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.rememberWords
+import com.hyuchia.orbit.ui.ChoiceChips
 import com.hyuchia.orbit.ui.EscapeCloses
+import com.hyuchia.orbit.ui.Hint
+import com.hyuchia.orbit.ui.rememberDefaultButton
 import kotlinx.coroutines.delay
 import java.text.NumberFormat
 
@@ -92,7 +93,8 @@ fun JoiningControls(joining: Joining, since: Long, onRemove: (Member) -> Unit, o
                     close()
                 }) { Text(stringResource(R.string.common_remove)) }
             },
-            dismissButton = { TextButton(onClick = close) { Text(stringResource(R.string.common_cancel)) } },
+            // Enter keeps them in the room.
+            dismissButton = { TextButton(onClick = close, modifier = Modifier.focusRequester(rememberDefaultButton())) { Text(stringResource(R.string.common_cancel)) } },
         )
     }
 }
@@ -158,13 +160,12 @@ private fun Members(members: List<Member>, kind: RoomKind, onRemove: (Member) ->
 
         members.forEach { member ->
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+                // Both lines wrap: a long name or larger text still says who it is and since when.
                 Column(Modifier.weight(1f)) {
                     Text(
                         member.name,
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
                     // A computer is easier to tell apart by its address than by "Guest".
                     val joined = joinedAgo(member.joined, now, words)
@@ -172,13 +173,15 @@ private fun Members(members: List<Member>, kind: RoomKind, onRemove: (Member) ->
                         if (kind == RoomKind.Share) "$joined · ${member.address}" else joined,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
                 }
 
-                IconButton(onClick = { onRemove(member) }) {
-                    Icon(Icons.Outlined.PersonRemove, contentDescription = stringResource(R.string.nearby_remove_member, member.name))
+                val remove = stringResource(R.string.nearby_remove_member, member.name)
+
+                Hint(remove) {
+                    IconButton(onClick = { onRemove(member) }) {
+                        Icon(Icons.Outlined.PersonRemove, contentDescription = remove)
+                    }
                 }
             }
         }
@@ -215,15 +218,12 @@ private fun Choices(options: JoiningOptions, kind: RoomKind, onChange: (JoiningO
             modifier = Modifier.padding(top = 8.dp),
         )
 
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            JOINING_LIMITS.forEach { limit ->
-                FilterChip(
-                    selected = options.limit == limit,
-                    onClick = { onChange(options.copy(limit = limit)) },
-                    label = { Text(if (limit == 0) stringResource(R.string.nearby_no_limit) else numbers.format(limit)) },
-                )
-            }
-        }
+        ChoiceChips(
+            choices = JOINING_LIMITS,
+            selected = options.limit,
+            onPick = { limit -> onChange(options.copy(limit = limit)) },
+            label = { limit -> if (limit == 0) stringResource(R.string.nearby_no_limit) else numbers.format(limit) },
+        )
 
         Choice(
             stringResource(R.string.nearby_let_new_people_in),

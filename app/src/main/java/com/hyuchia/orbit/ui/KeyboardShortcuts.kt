@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -35,10 +36,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindowProvider
@@ -293,6 +298,18 @@ fun hasHardwareKeyboard(): Boolean {
     return configuration.keyboard == Configuration.KEYBOARD_QWERTY && configuration.hardKeyboardHidden != Configuration.HARDKEYBOARDHIDDEN_YES
 }
 
+/**
+ * Whether a menu shows an item's keys beside its name: with a keyboard
+ * connected, and room for both. From [MENU_KEYS_FONT_SCALE], the keys would
+ * squeeze the name into a column ("Es / tu / di / ar"), and the list of
+ * shortcuts still has them all.
+ */
+@Composable
+fun showsMenuKeys(): Boolean = hasHardwareKeyboard() && LocalDensity.current.fontScale < MENU_KEYS_FONT_SCALE
+
+/** From this font scale, menus leave out their items' keys (see [showsMenuKeys]). */
+private const val MENU_KEYS_FONT_SCALE = 1.5f
+
 /** Every shortcut of the screens on display, group by group. */
 @Composable
 fun KeyboardShortcutsDialog(groups: List<ShortcutGroup>, onDismiss: () -> Unit) {
@@ -313,14 +330,14 @@ fun KeyboardShortcutsDialog(groups: List<ShortcutGroup>, onDismiss: () -> Unit) 
                 groups.forEach { group -> ShortcutGroupList(group) }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) } },
+        confirmButton = { TextButton(onClick = onDismiss, modifier = Modifier.focusRequester(rememberDefaultButton())) { Text(stringResource(R.string.common_close)) } },
     )
 }
 
 @Composable
 private fun ShortcutGroupList(group: ShortcutGroup) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(group.title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        Text(group.title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.semantics { heading() })
 
         group.shortcuts.forEach { shortcut ->
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -396,4 +413,19 @@ fun EscapeCloses(onDismiss: () -> Unit) {
 
         onDispose { window.callback = original }
     }
+}
+
+/**
+ * Focus for the button a dialog answers with: as the dialog opens from the
+ * keyboard, that button takes focus, so Enter presses it and Tab goes on
+ * from there rather than from nowhere. A dialog that takes something away
+ * (a tag from every map, maps for good, someone from a room) gives it to
+ * Cancel. Opened by touch, nothing takes focus: Android only lets a button
+ * take it after a key.
+ */
+@Composable
+fun rememberDefaultButton(): FocusRequester {
+    val button = remember { FocusRequester() }
+    LaunchedEffect(button) { button.requestFocus() }
+    return button
 }

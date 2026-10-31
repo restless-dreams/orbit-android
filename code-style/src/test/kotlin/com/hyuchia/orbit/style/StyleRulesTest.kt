@@ -12,6 +12,7 @@ class StyleRulesTest {
         ruleProviders = setOf(
             RuleProvider { BlankLinesAroundBlocksRule() },
             RuleProvider { BlankLinesAroundDocumentedMembersRule() },
+            RuleProvider { AppComponentsRule() },
         ),
     )
 
@@ -202,5 +203,53 @@ class StyleRulesTest {
         """.trimIndent()
 
         assertEquals(expected, format(source))
+    }
+
+    @Test
+    fun `rows in the map's panels and on Home are ListRow, but a dialog or sheet may use Material's ListItem`() {
+        val panel = """
+            package com.hyuchia.orbit.map
+
+            import androidx.compose.material3.AlertDialog
+            import androidx.compose.material3.ListItem
+
+            @Composable
+            fun OutlineRows(nodes: List<String>) {
+                nodes.forEach { node -> ListItem(headlineContent = { Text(node) }) }
+            }
+
+            @Composable
+            fun NodePicker(nodes: List<String>) {
+                AlertDialog(onDismissRequest = {}, text = { nodes.forEach { node -> ListItem(headlineContent = { Text(node) }) } }, confirmButton = {})
+            }
+        """.trimIndent()
+
+        assertEquals(
+            listOf("8: Use ui/ListRow for rows here, not Material's ListItem: its supporting text throws in a tablet pane's lookahead pass (AGENTS.md)"),
+            problems(panel),
+        )
+
+        // Settings and the send sheet aren't in a pane.
+        assertEquals(emptyList<String>(), problems(panel.replace("package com.hyuchia.orbit.map", "package com.hyuchia.orbit.settings")))
+    }
+
+    @Test
+    fun `only ui uses Material's slider and snackbar`() {
+        val style = """
+            package com.hyuchia.orbit.map
+
+            import androidx.compose.material3.Slider
+            import androidx.compose.material3.SnackbarHost
+        """.trimIndent()
+
+        assertEquals(
+            listOf(
+                "3: Use ui/OrbitSlider, not Material's slider (AGENTS.md)",
+                "4: Show snackbars in ui/OrbitSnackbarHost, not Material's (AGENTS.md)",
+            ),
+            problems(style),
+        )
+
+        assertEquals(emptyList<String>(), problems(style.replace("package com.hyuchia.orbit.map", "package com.hyuchia.orbit.ui")))
     }
 }

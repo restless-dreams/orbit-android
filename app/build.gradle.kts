@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.aboutlibraries)
     alias(libs.plugins.androidx.baselineprofile)
+    alias(libs.plugins.roborazzi)
 }
 
 /**
@@ -18,8 +19,11 @@ plugins {
  *   orbit.signing.keyAlias=orbit                        (ORBIT_SIGNING_KEY_ALIAS)
  *   orbit.signing.keyPassword=…                         (ORBIT_SIGNING_KEY_PASSWORD)
  *
- * Without one, release builds are signed with the debug key, which is
- * fine for trying a build and refused by every store.
+ * Without one, release builds are left unsigned, never signed with the
+ * debug key, which anyone could sign with: they install nowhere until
+ * they're signed, as F-Droid builds them. The builds for a release pass
+ * -Porbit.requireUploadKey=true, which stops them instead, so a mistyped
+ * path can't make an APK no store or phone takes as an update.
  */
 fun signing(name: String): String? =
     providers.gradleProperty("orbit.signing.$name").orNull
@@ -35,16 +39,17 @@ android {
         minSdk = 29
         targetSdk = 36
         // One more with each release, whatever its name: stores and Android tie every update to it.
-        versionCode = 4
-        versionName = "0.3.0"
+        versionCode = 5
+        versionName = "0.4.0"
     }
 
-    // The languages the app speaks (see TRANSLATING.md). Android lists them in the app's language
-    // settings from the locale config made here, and libraries' other languages are left out, so a
-    // phone in another language shows the whole app in English rather than a mix.
+    // The languages the app speaks (see TRANSLATING.md): English, and each language with its strings
+    // in res/. Android lists them in the app's language settings from the locale config made here,
+    // and libraries' other languages are left out, so a phone in another language shows the whole app
+    // in English rather than a mix.
     androidResources {
         generateLocaleConfig = true
-        localeFilters += listOf("en", "es")
+        localeFilters += listOf("en") + translatedLanguages()
     }
 
     // Two builds of the same app. libre has no Google code at all, for F-Droid and anywhere else:
@@ -104,11 +109,15 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
 
+            // Never the debug key, which anyone can sign with: without the upload key, a release is left unsigned, as
+            // F-Droid builds it, and installs nowhere until it's signed.
             signingConfig = if (uploadKey != null) {
                 signingConfigs.getByName("upload")
+            } else if (providers.gradleProperty("orbit.requireUploadKey").orNull == "true") {
+                throw GradleException("orbit: -Porbit.requireUploadKey=true, but there's no upload key at orbit.signing.storeFile (RELEASE.md, step 2).")
             } else {
-                logger.warn("orbit: no upload key (orbit.signing.storeFile); release builds are signed with the debug key, which stores refuse.")
-                signingConfigs.getByName("debug")
+                logger.warn("orbit: no upload key (orbit.signing.storeFile); release builds are left unsigned.")
+                null
             }
         }
     }
@@ -123,6 +132,15 @@ android {
         buildConfig = true
         // For the app's id as a string, below.
         resValues = true
+    }
+
+    // Robolectric's tests read the app's merged resources and manifest: its strings, and the activities and receivers it declares.
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            // Robolectric reaches into file descriptors' internals, which JDK 17 and later keep closed without this.
+            all { it.jvmArgs("--add-opens=java.base/jdk.internal.access=ALL-UNNAMED") }
+        }
     }
 
     // The build tools add a list of the app's libraries, encrypted so that only Google Play can read it. The Play
@@ -186,6 +204,8 @@ dependencies {
     implementation(libs.androidx.navigation3.ui)
     implementation(libs.androidx.webkit)
     implementation(libs.coil.compose)
+    // Animated GIFs and WebPs, played with Android's own ImageDecoder.
+    implementation(libs.coil.gif)
     // Pictures from the web, in the details and full screen.
     implementation(libs.coil.network.okhttp)
     // Pictures full screen, zoomed and flicked away.
@@ -220,4 +240,38 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.icu4j)
+    // Android's framework on the JVM, for the tests that need it (see robolectric.properties), and Glance's widget tests.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.junit)
+    testImplementation(libs.androidx.glance.appwidget.testing)
+    // Pictures of Home and Settings on a phone and a tablet each way up (ScreensTest), compared with src/test/screenshots/.
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(libs.compose.ui.test.junit4)
+    // The empty activity Compose's tests draw in, in debug builds only.
+    debugImplementation(libs.compose.ui.test.manifest)
 }
+
+// The screens' pictures (ScreensTest): ./gradlew recordRoborazziLibreDebug draws them again, and verifyRoborazziLibreDebug,
+// which CI runs, compares the screens with them.
+roborazzi {
+    outputDir.set(file("src/test/screenshots"))
+}
+
+// The libraries the release builds ship are locked (gradle.lockfile), so one that's new or changes shows in review as
+// a change to the lockfile: the sign to try the release builds on a device, since R8 can break a library that works
+// in a debug build (AGENTS.md). After changing a library: ./gradlew :app:dependencies --write-locks
+configurations.matching { it.name == "libreReleaseRuntimeClasspath" || it.name == "playReleaseRuntimeClasspath" }.configureEach {
+    resolutionStrategy.activateDependencyLocking()
+}
+
+/**
+ * The languages the app's strings are translated into: each `values-<language>/` in res/ with
+ * strings in it, as its qualifier (`es`, `pt-rBR`, `b+sr+Latn`), so adding the folder is all it takes
+ * for the build to keep them. `LanguagesTest` checks each has every other part of a language too.
+ */
+fun translatedLanguages(): List<String> = file("src/main/res").listFiles().orEmpty()
+    .filter { folder -> folder.listFiles().orEmpty().any { it.name.startsWith("strings") && it.extension == "xml" } }
+    .mapNotNull { Regex("values-([a-z]{2,3}(-r[A-Z]{2})?|b\\+[A-Za-z0-9+]+)").matchEntire(it.name)?.groupValues?.get(1) }
+    .sorted()

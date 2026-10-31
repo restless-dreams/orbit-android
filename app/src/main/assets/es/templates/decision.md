@@ -24,4 +24,4 @@ Qué tenemos que decidir, y para cuándo.
 - Calidad
 
 ## ✅ Lo que elegimos
-Escribe qué eligieron, y por qué.
+Escribe qué elegimos y por qué.

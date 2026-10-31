@@ -47,7 +47,8 @@
         "baseUrl": "https://appassets.androidplatform.net/maps/trip/",
         "focus": "tokyo",
         "view": "all",
-        "mapId": "trip"
+        "mapId": "trip",
+        "revision": 2
       },
       {
         "type": "insets",
@@ -56,7 +57,8 @@
           "right": 80,
           "bottom": 0,
           "left": 0
-        }
+        },
+        "glide": true
       },
       {
         "type": "unload"
@@ -146,7 +148,8 @@
       },
       {
         "type": "restore",
-        "markdown": "# Trip to Japan\n"
+        "markdown": "# Trip to Japan\n",
+        "revision": 2
       },
       {
         "type": "preview",
@@ -195,7 +198,7 @@
         },
         "transparent": true,
         "style": "",
-        "viewMode": "all",
+        "view": "all",
         "focus": null,
         "baseUrl": "https://appassets.androidplatform.net/maps/trip/"
       },
@@ -220,16 +223,7 @@
         "type": "addIdeas",
         "job": 7,
         "markdown": "# Trip to Japan\n",
-        "ideas": [
-          {
-            "text": "Call the hotel",
-            "note": null
-          },
-          {
-            "text": "Pack the adapter",
-            "note": "Type A, two of them"
-          }
-        ],
+        "text": "Call the hotel\nPack\n  - [ ] The adapter\n  - [x] Passports",
         "parentId": null
       },
       {
@@ -242,6 +236,68 @@
         "job": 9,
         "parentId": "tokyo",
         "text": "- Shibuya\n- Asakusa"
+      },
+      {
+        "type": "dropOver",
+        "x": 182.5,
+        "y": 410
+      },
+      {
+        "type": "dropLeave"
+      },
+      {
+        "type": "dropAt",
+        "job": 10,
+        "x": 182.5,
+        "y": 412.25
+      },
+      {
+        "type": "addNodes",
+        "job": 11,
+        "parentId": "tokyo",
+        "nodes": [
+          {
+            "text": "Shibuya crossing",
+            "image": {
+              "src": "media/shibuya.jpg"
+            }
+          },
+          {
+            "text": "Night walk",
+            "video": {
+              "src": "media/night-walk.mp4",
+              "provider": "native",
+              "thumbnail": "media/night-walk-poster.jpg"
+            }
+          }
+        ]
+      },
+      {
+        "type": "mapFromText",
+        "job": 12,
+        "text": "Trip to Japan\n\tTokyo\n\t\tShibuya\n\tKyoto",
+        "subject": null
+      },
+      {
+        "type": "editMap",
+        "job": 13,
+        "markdown": "# Trip to Japan\n",
+        "title": "Japan in spring",
+        "tags": [
+          "travel",
+          "Plans"
+        ]
+      },
+      {
+        "type": "hideChildren",
+        "ids": [
+          "trip-to-japan",
+          "tokyo"
+        ]
+      },
+      {
+        "type": "revealChildren",
+        "ids": null
       }
     ],
     "messages": [
@@ -259,7 +315,7 @@
               "parentId": null,
               "depth": 0,
               "index": 0,
-              "childCount": 1,
+              "childCount": 2,
               "icon": null,
               "color": null,
               "drawnColor": "var(--_orbit-color-0)",
@@ -268,13 +324,15 @@
               "tags": [],
               "collapsed": false,
               "type": null,
+              "typeVersion": null,
               "link": null,
               "note": null,
               "noteFormat": null,
               "image": null,
               "video": null,
               "embed": null,
-              "attrs": null
+              "attrs": null,
+              "audio": null
             },
             {
               "id": "tokyo",
@@ -293,6 +351,7 @@
               ],
               "collapsed": true,
               "type": "goal",
+              "typeVersion": null,
               "link": "https://example.com/tokyo",
               "note": "Book the **ryokan**",
               "noteFormat": "markdown",
@@ -301,21 +360,59 @@
                 "alt": "The tower at night",
                 "caption": "Tokyo Tower",
                 "provider": null,
-                "thumbnail": null
+                "thumbnail": null,
+                "motion": {
+                  "src": "media/tokyo-motion.mp4",
+                  "still": 1.2
+                }
               },
               "video": {
                 "src": "https://www.youtube.com/watch?v=abc",
                 "alt": null,
                 "caption": null,
                 "provider": "youtube",
-                "thumbnail": "https://i.ytimg.com/vi/abc/hqdefault.jpg"
+                "thumbnail": "https://i.ytimg.com/vi/abc/hqdefault.jpg",
+                "motion": null
               },
               "embed": null,
               "attrs": {
                 "target": 3000,
                 "current": 1250,
                 "unit": "USD"
+              },
+              "audio": {
+                "src": "media/memo-mf2k1x.mp4",
+                "alt": null,
+                "caption": "Where to stay",
+                "provider": null,
+                "thumbnail": null,
+                "motion": null
               }
+            },
+            {
+              "id": "someday",
+              "text": "Someday",
+              "parentId": "trip-to-japan",
+              "depth": 1,
+              "index": 1,
+              "childCount": 0,
+              "icon": null,
+              "color": null,
+              "drawnColor": "var(--_orbit-color-1)",
+              "status": null,
+              "priority": -2147483648,
+              "tags": [],
+              "collapsed": false,
+              "type": "goal",
+              "typeVersion": 2147483647,
+              "link": null,
+              "note": null,
+              "noteFormat": null,
+              "image": null,
+              "video": null,
+              "embed": null,
+              "attrs": null,
+              "audio": null
             }
           ],
           "options": {
@@ -325,10 +422,10 @@
               "#3f51b5"
             ],
             "showRings": true,
-            "orbitAnimation": false,
-            "orbitSpeed": 1.5,
+            "animation": false,
+            "speed": 1.5,
             "maxDepth": 3,
-            "viewMode": "focus",
+            "view": "focus",
             "progressRings": false,
             "tags": [
               "travel"
@@ -358,7 +455,7 @@
               "parentId": null,
               "depth": 0,
               "index": 0,
-              "childCount": 1,
+              "childCount": 2,
               "icon": null,
               "color": null,
               "drawnColor": "var(--_orbit-color-0)",
@@ -367,13 +464,15 @@
               "tags": [],
               "collapsed": false,
               "type": null,
+              "typeVersion": null,
               "link": null,
               "note": null,
               "noteFormat": null,
               "image": null,
               "video": null,
               "embed": null,
-              "attrs": null
+              "attrs": null,
+              "audio": null
             },
             {
               "id": "tokyo",
@@ -392,6 +491,7 @@
               ],
               "collapsed": true,
               "type": "goal",
+              "typeVersion": null,
               "link": "https://example.com/tokyo",
               "note": "Book the **ryokan**",
               "noteFormat": "markdown",
@@ -400,21 +500,59 @@
                 "alt": "The tower at night",
                 "caption": "Tokyo Tower",
                 "provider": null,
-                "thumbnail": null
+                "thumbnail": null,
+                "motion": {
+                  "src": "media/tokyo-motion.mp4",
+                  "still": 1.2
+                }
               },
               "video": {
                 "src": "https://www.youtube.com/watch?v=abc",
                 "alt": null,
                 "caption": null,
                 "provider": "youtube",
-                "thumbnail": "https://i.ytimg.com/vi/abc/hqdefault.jpg"
+                "thumbnail": "https://i.ytimg.com/vi/abc/hqdefault.jpg",
+                "motion": null
               },
               "embed": null,
               "attrs": {
                 "target": 3000,
                 "current": 1250,
                 "unit": "USD"
+              },
+              "audio": {
+                "src": "media/memo-mf2k1x.mp4",
+                "alt": null,
+                "caption": "Where to stay",
+                "provider": null,
+                "thumbnail": null,
+                "motion": null
               }
+            },
+            {
+              "id": "someday",
+              "text": "Someday",
+              "parentId": "trip-to-japan",
+              "depth": 1,
+              "index": 1,
+              "childCount": 0,
+              "icon": null,
+              "color": null,
+              "drawnColor": "var(--_orbit-color-1)",
+              "status": null,
+              "priority": -2147483648,
+              "tags": [],
+              "collapsed": false,
+              "type": "goal",
+              "typeVersion": 2147483647,
+              "link": null,
+              "note": null,
+              "noteFormat": null,
+              "image": null,
+              "video": null,
+              "embed": null,
+              "attrs": null,
+              "audio": null
             }
           ],
           "options": {
@@ -424,10 +562,10 @@
               "#3f51b5"
             ],
             "showRings": true,
-            "orbitAnimation": false,
-            "orbitSpeed": 1.5,
-            "maxDepth": 3,
-            "viewMode": "focus",
+            "animation": false,
+            "speed": 1.5,
+            "maxDepth": 2147483647,
+            "view": "focus",
             "progressRings": false,
             "tags": [
               "travel"
@@ -448,7 +586,8 @@
           "from": "tokio",
           "to": "tokyo"
         },
-        "removed": null
+        "removed": null,
+        "revision": 2
       },
       {
         "type": "state",
@@ -461,7 +600,7 @@
               "parentId": null,
               "depth": 0,
               "index": 0,
-              "childCount": 1,
+              "childCount": 2,
               "icon": null,
               "color": null,
               "drawnColor": "var(--_orbit-color-0)",
@@ -470,13 +609,15 @@
               "tags": [],
               "collapsed": false,
               "type": null,
+              "typeVersion": null,
               "link": null,
               "note": null,
               "noteFormat": null,
               "image": null,
               "video": null,
               "embed": null,
-              "attrs": null
+              "attrs": null,
+              "audio": null
             },
             {
               "id": "tokyo",
@@ -495,6 +636,7 @@
               ],
               "collapsed": true,
               "type": "goal",
+              "typeVersion": null,
               "link": "https://example.com/tokyo",
               "note": "Book the **ryokan**",
               "noteFormat": "markdown",
@@ -503,21 +645,59 @@
                 "alt": "The tower at night",
                 "caption": "Tokyo Tower",
                 "provider": null,
-                "thumbnail": null
+                "thumbnail": null,
+                "motion": {
+                  "src": "media/tokyo-motion.mp4",
+                  "still": 1.2
+                }
               },
               "video": {
                 "src": "https://www.youtube.com/watch?v=abc",
                 "alt": null,
                 "caption": null,
                 "provider": "youtube",
-                "thumbnail": "https://i.ytimg.com/vi/abc/hqdefault.jpg"
+                "thumbnail": "https://i.ytimg.com/vi/abc/hqdefault.jpg",
+                "motion": null
               },
               "embed": null,
               "attrs": {
                 "target": 3000,
                 "current": 1250,
                 "unit": "USD"
+              },
+              "audio": {
+                "src": "media/memo-mf2k1x.mp4",
+                "alt": null,
+                "caption": "Where to stay",
+                "provider": null,
+                "thumbnail": null,
+                "motion": null
               }
+            },
+            {
+              "id": "someday",
+              "text": "Someday",
+              "parentId": "trip-to-japan",
+              "depth": 1,
+              "index": 1,
+              "childCount": 0,
+              "icon": null,
+              "color": null,
+              "drawnColor": "var(--_orbit-color-1)",
+              "status": null,
+              "priority": -2147483648,
+              "tags": [],
+              "collapsed": false,
+              "type": "goal",
+              "typeVersion": 2147483647,
+              "link": null,
+              "note": null,
+              "noteFormat": null,
+              "image": null,
+              "video": null,
+              "embed": null,
+              "attrs": null,
+              "audio": null
             }
           ],
           "options": {
@@ -527,10 +707,10 @@
               "#3f51b5"
             ],
             "showRings": true,
-            "orbitAnimation": false,
-            "orbitSpeed": 1.5,
+            "animation": false,
+            "speed": 1.5,
             "maxDepth": 3,
-            "viewMode": "focus",
+            "view": "focus",
             "progressRings": false,
             "tags": [
               "travel"
@@ -614,10 +794,24 @@
       {
         "type": "error",
         "message": "Orbit couldn't draw this map."
+      },
+      {
+        "type": "declined",
+        "change": "update",
+        "message": "A node's image is its address, or { src, alt, caption, motion }, like { image: 'summit.jpg' }, but got 42."
+      },
+      {
+        "type": "dropTarget",
+        "id": "tokyo"
+      },
+      {
+        "type": "dragOut",
+        "id": "tokyo"
       }
     ]
   },
   "audience": {
+    "protocol": 2,
     "commands": [
       {
         "type": "language",

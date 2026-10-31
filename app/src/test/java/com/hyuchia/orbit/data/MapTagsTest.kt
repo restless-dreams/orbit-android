@@ -53,6 +53,25 @@ class MapTagsTest {
     }
 
     @Test
+    fun `a YAML map keeps its tags among its own keys, never in frontmatter that would make it markdown`() {
+        val yaml = "title: Study notes\nnodes:\n  - text: Photosynthesis\n    tags: [not, the, map's]\n"
+
+        assertEquals(emptyList<String>(), MapTags.read(yaml))
+        assertEquals("tags: [Biology]\n$yaml", MapTags.write(yaml, listOf("Biology")))
+        assertEquals(listOf("Biology", "plants"), MapTags.read("tags:\n  - Biology\n  - plants\nnodes:\n  - text: Photosynthesis\n"))
+        assertEquals("tags: [School]\nnodes:\n  - text: Photosynthesis\n", MapTags.write("tags: [Biology]\nnodes:\n  - text: Photosynthesis\n", listOf("School")))
+        assertEquals("nodes:\n  - text: Photosynthesis\n", MapTags.write("tags: [Biology]\nnodes:\n  - text: Photosynthesis\n", emptyList()))
+    }
+
+    @Test(timeout = 5_000)
+    fun `tags with a long run of spaces are read in one pass`() {
+        val spaces = " ".repeat(100_000)
+
+        assertEquals(listOf("work", "japan trip"), MapTags.read("---\ntags: work,${spaces}japan trip$spaces\n---\n# Trip\n"))
+        assertEquals(listOf("work", "japan trip"), MapTags.read("---\ntags:\n  - work$spaces\n  -${spaces}japan${spaces}trip\n---\n# Trip\n"))
+    }
+
+    @Test
     fun `what's written reads back the same`() {
         val tags = listOf("work", "Japan trip", "2027", "a: b", "\"quoted\"", "-dash", "café")
         assertEquals(tags, MapTags.read(MapTags.write("# Trip\n", tags)))

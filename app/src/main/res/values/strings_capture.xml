@@ -32,4 +32,8 @@
     <string name="capture_problem_refused">Orbit couldn\'t add to %1$s, because the map can\'t be changed here. Your ideas are still here.</string>
     <string name="capture_problem_missing">Orbit couldn\'t add to %1$s. The map isn\'t here anymore. Your ideas are still here.</string>
     <string name="capture_problem_kept_changing">Orbit couldn\'t add to %1$s. The map kept changing. Your ideas are still here.</string>
+    <!-- On the Add button while the ideas are being added. -->
+    <string name="capture_adding">Adding…</string>
+    <!-- The map's file couldn't be written, most often because the device's storage is full. -->
+    <string name="capture_problem_not_written">Orbit couldn\'t add to %1$s. Is this device\'s storage full? Your ideas are still here.</string>
 </resources>

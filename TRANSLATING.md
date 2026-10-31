@@ -12,7 +12,7 @@ Orbit speaks English and Spanish. This is where each kind of text lives, how to 
 | The map's own controls and what screen readers hear on a map | the Orbit library's languages (see Orbit's `docs/languages.md`); the app tells each map its language |
 | What the map's page and the pages in browsers and on TVs say themselves: kinds of ideas, a goal ring's words, presenting in browsers, the page that asks for a name, a map shared as a web page | `strings_pages.xml`, which the app hands to the pages (`web/words.ts`); `pages_language` is the language's code, the pages' `lang` |
 | What a TV says before a phone casts a presentation to it: its waiting screen and its status | `TV_WORDS` in `web/words.ts`, since a TV can't read the app's strings |
-| The welcome map, the templates and the samples | `app/src/main/assets/<language>/`, the same files as in `app/src/main/assets/`, which a language without them falls back to |
+| The welcome map and the templates | `app/src/main/assets/<language>/`, the same files as in `app/src/main/assets/`, which a language without them falls back to. The welcome map's picture, video and sound are the same in every language, in `app/src/main/assets/welcome/`: only their captions and descriptions, in `welcome.md`, are translated |
 | The privacy policy shown in the app | `app/src/main/assets/<language>/privacy.md` |
 | The store listings | `fastlane/metadata/android/<locale>/` |
 
@@ -21,11 +21,14 @@ The English files are the source: a string is added or changed there first, then
 ## Adding a language
 
 1. Copy each `app/src/main/res/values/strings*.xml` into `values-<language>/` and translate it. Android lint reports any string a language is missing (`MissingTranslation`), so `./gradlew lintLibreDebug` lists what's left.
-2. Add the language to `localeFilters` in `app/build.gradle.kts`. The app's language setting and Android's per-app language list come from the languages in `res/`.
-3. Translate the maps under `app/src/main/assets/` into `app/src/main/assets/<language>/`. Keep the markdown's structure, comments and attributes as they are (`<!-- orbit status: done -->`, `- [x]`, front matter keys): only the words people read change.
+2. The build takes the language from its folder in `res/` by itself: the app's language setting and Android's per-app language list then offer it.
+3. Translate the maps under `app/src/main/assets/` into `app/src/main/assets/<language>/`. Keep the markdown's structure, comments and attributes as they are (`<!-- orbit status: done -->`, `- [x]`, front matter keys): only the words people read change. The welcome map's `welcome.json` lists the ideas its presentation goes through, by their ids: its center and each planet, as Orbit names them from their words (lowercase, without accents or emoji, dashes between the words), so it changes with them. A link between ideas, like `(#study)`, takes the new id too. `web/welcome.test.ts` checks that every language's welcome map is the English one in its own words.
 4. If the Orbit library doesn't have the language yet, add it there (`registerLanguage`), so the map's controls match the rest of the app.
 5. Add the TV's words to `TV_WORDS` in `web/words.ts`, and rebuild the pages and the Cast receiver (see CONTRIBUTING.md, "The map's pages" and "Casting to TVs").
-6. Add the store listings in `fastlane/metadata/android/<locale>/`: the texts, and the screenshots and feature graphic in the language (phones at 1080 × 1920, tablets at 2560 × 1440, the feature graphic at 1024 × 500), framed under captions in it.
+6. Add the language's CLDR locales to `LANGUAGES` in `scripts/emoji-names.ts`, and run `bun scripts/emoji-names.ts`: the icon search then finds emoji by their names in it (`app/src/main/assets/emoji/<language>.txt`).
+7. Add the store listings in `fastlane/metadata/android/<locale>/`: the texts, and the screenshots and feature graphic in the language (phones at 1080 × 1920, tablets at 2560 × 1440, the feature graphic at 1024 × 500), framed under captions in it.
+
+`LanguagesTest` checks that each language in `res/` has the rest: its maps, the TV's words, the emoji names and a store listing. The tests pick each language's plurals by Unicode's rules, as Android does.
 
 ## How strings are written
 
@@ -34,6 +37,7 @@ The English files are the source: a string is added or changed there first, then
 - **Whole sentences:** never build a sentence from pieces, because word order changes between languages. Give each case its own string.
 - **Apostrophes:** write `\'` for a straight apostrophe in XML, or use the typographic ’.
 - **Not translated:** Orbit's name, markdown syntax, the words in map attributes (`status: done`, `theme: night`), file formats and anything a computer reads.
+- **This device:** a string about the device it's shown on says "this device" (*este dispositivo*), since that may be a tablet or a Chromebook. "Your phone" stays where it describes how people typically use Orbit, as in the privacy policy and the store listings.
 
 ## Spanish
 
@@ -89,6 +93,11 @@ Neutral Latin American Spanish, the way people across Latin America and the US w
 | present, presenting | presentar, presentación |
 | presentation path | recorrido (de la presentación) |
 | rehearse, rehearsal | ensayar, ensayo |
+| study (a map), studying | estudiar, al estudiar |
+| card (in study mode) | tarjeta |
+| live photo, Live (its mark) | foto en vivo, En vivo |
+| Again, Knew it (a card's answers) | Otra vez, Lo sabía |
+| all caught up, to study (due) | al día, por estudiar |
 | captions (presenting) | subtítulos |
 | pace, on time, up next | ritmo, a tiempo, a continuación |
 | presenter view | vista de quien presenta |
@@ -97,7 +106,7 @@ Neutral Latin American Spanish, the way people across Latin America and the US w
 | room (a presentation's) | sala |
 | join | unirse |
 | second screen | segunda pantalla |
-| device | dispositivo |
+| device, this device | dispositivo, este dispositivo |
 | phone | teléfono |
 | tablet | tablet |
 | computer | computadora |
@@ -114,17 +123,23 @@ Neutral Latin American Spanish, the way people across Latin America and the US w
 | check code | código de verificación |
 | PIN, PINs | PIN |
 | picture | imagen |
-| caption (of a picture or video) | leyenda |
+| caption (of a picture, video or sound) | leyenda |
 | icon | ícono |
 | video | video |
+| sound (an idea's: a voice memo, a file or a web address) | audio (*el audio*) |
+| voice memo | nota de voz |
+| record, recording, take | grabar, grabación, toma |
+| play, pause, turn the sound off/on | reproducir, pausar, silenciar/activar el sonido |
 | catch (an idea, quickly) | capturar |
 | talk ideas onto a map | dictar ideas |
 | speech service | servicio de voz, reconocimiento de voz |
 | nearby | cerca, cercanos |
 | widget | widget |
 | home screen | pantalla de inicio |
+| shortcut (on the home screen or the launcher) | acceso directo |
+| clear (a search, a field) | borrar |
 | settings | configuración |
-| appearance, like the phone | apariencia, como el teléfono |
+| appearance, system (light or dark, and the language, as the device has them) | apariencia, sistema |
 | wallpaper | fondo de pantalla |
 | haptics | respuesta háptica |
 | about, privacy | acerca de, privacidad |
@@ -148,6 +163,11 @@ Neutral Latin American Spanish, the way people across Latin America and the US w
 | long-press, hold | mantener presionado |
 | just now, yesterday | hace un momento, ayer |
 | read-only | solo lectura |
+| private map, make private, Private (the switch) | mapa privado, hacer privado, Privado |
+| lock, unlock, locked | bloquear, desbloquear, bloqueado |
+| screen lock | bloqueo de pantalla |
+| fingerprint, face | huella, rostro |
+| Recents (the overview of open apps) | Recientes |
 
 ### Styles and colors
 
@@ -159,7 +179,6 @@ Neutral Latin American Spanish, the way people across Latin America and the US w
 | Cosmos | Cosmos |
 | Blueprint | Cianotipo |
 | Ink | Tinta |
-| Contrast | Contraste |
 | Flat, Flat night | Plano, Plano nocturno |
 | Material, Material night | Material, Material nocturno |
 | Liquid glass, Liquid glass night | Cristal líquido, Cristal líquido nocturno |

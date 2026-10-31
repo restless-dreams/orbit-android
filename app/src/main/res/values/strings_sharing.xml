@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- What goes with a map when it's shared, sent or shown: its own pictures, videos and audio, counted. -->
+    <plurals name="sharing_pictures">
+        <item quantity="one">a picture</item>
+        <item quantity="other">%1$d pictures</item>
+    </plurals>
+    <!-- A live photo: a picture with the few seconds of motion a phone recorded around it, which goes with it. -->
+    <plurals name="sharing_live_photos">
+        <item quantity="one">a live photo</item>
+        <item quantity="other">%1$d live photos</item>
+    </plurals>
+    <plurals name="sharing_videos">
+        <item quantity="one">a video</item>
+        <item quantity="other">%1$d videos</item>
+    </plurals>
+    <plurals name="sharing_audio">
+        <item quantity="one">a sound</item>
+        <item quantity="other">%1$d sounds</item>
+    </plurals>
+    <!-- A live photo's motion that stays behind while its picture goes, as in a web page without room left for it. -->
+    <plurals name="sharing_motions">
+        <item quantity="one">a live photo\'s motion</item>
+        <item quantity="other">%1$d live photos\' motions</item>
+    </plurals>
+    <!-- A list of two or three things, such as sharing_pictures and sharing_videos: “3 pictures and a video”. -->
+    <string name="sharing_list_two">%1$s and %2$s</string>
+    <string name="sharing_list_three">%1$s, %2$s and %3$s</string>
+
+    <!-- Export and share, under each way out. %1$s is a list such as “3 pictures and a video”, %2$s a size such as “12.4 MB”. -->
+    <string name="sharing_with">With %1$s\u00A0· %2$s</string>
+    <string name="sharing_inside">With %1$s inside</string>
+    <string name="sharing_with_pictures">With %1$s</string>
+    <!-- The count is how many things the list names, for the verb. -->
+    <plurals name="sharing_stays_here">
+        <item quantity="one">%1$s stays on this device</item>
+        <item quantity="other">%1$s stay on this device</item>
+    </plurals>
+    <string name="sharing_without_where">Pictures, videos and sounds go without where and when they were taken or recorded.</string>
+    <!-- Instead of sharing_without_where, once some files that couldn't go clean are going as they are. -->
+    <string name="sharing_others_without_where">The other pictures, videos and sounds go without where and when they were taken or recorded.</string>
+
+    <!-- Under a way out: the map's files Orbit can't take out of what they say beyond what they show or play, as a picture or video cut short, or a file of a kind it doesn't know, which stay on this device. %1$s is a list such as “a picture and a video”; the count is how many things it names, for the verb. -->
+    <plurals name="sharing_uncleaned_stay_taken">
+        <item quantity="one">%1$s stays on this device: Orbit can\'t take out where it was taken.</item>
+        <item quantity="other">%1$s stay on this device: Orbit can\'t take out where they were taken.</item>
+    </plurals>
+    <plurals name="sharing_uncleaned_stay_recorded">
+        <item quantity="one">%1$s stays on this device: Orbit can\'t take out where it was recorded.</item>
+        <item quantity="other">%1$s stay on this device: Orbit can\'t take out where they were recorded.</item>
+    </plurals>
+    <plurals name="sharing_uncleaned_stay_taken_or_recorded">
+        <item quantity="one">%1$s stays on this device: Orbit can\'t take out where it was taken or recorded.</item>
+        <item quantity="other">%1$s stay on this device: Orbit can\'t take out where they were taken or recorded.</item>
+    </plurals>
+    <!-- The same files, once the person chose to share them as they are. -->
+    <plurals name="sharing_uncleaned_go_taken">
+        <item quantity="one">%1$s goes as it is, with where it was taken.</item>
+        <item quantity="other">%1$s go as they are, with where they were taken.</item>
+    </plurals>
+    <plurals name="sharing_uncleaned_go_recorded">
+        <item quantity="one">%1$s goes as it is, with where it was recorded.</item>
+        <item quantity="other">%1$s go as they are, with where they were recorded.</item>
+    </plurals>
+    <plurals name="sharing_uncleaned_go_taken_or_recorded">
+        <item quantity="one">%1$s goes as it is, with where it was taken or recorded.</item>
+        <item quantity="other">%1$s go as they are, with where they were taken or recorded.</item>
+    </plurals>
+
+    <!-- Asked once as a way out starts at the phone, when some of the map's files can't go clean, in the viewer's words (media_share_video_as_it_is_title). %1$s is a list such as “a video” or “2 pictures and a video”. -->
+    <plurals name="sharing_as_they_are_title">
+        <item quantity="one">Share %1$s as it is?</item>
+        <item quantity="other">Share %1$s as they are?</item>
+    </plurals>
+    <plurals name="sharing_as_they_are_taken">
+        <item quantity="one">Orbit couldn\'t take out where and when it was taken and on what device, so they\'d go with it.</item>
+        <item quantity="other">Orbit couldn\'t take out where and when they were taken and on what devices, so they\'d go with them.</item>
+    </plurals>
+    <plurals name="sharing_as_they_are_recorded">
+        <item quantity="one">Orbit couldn\'t take out where and when it was recorded and on what device, so they\'d go with it.</item>
+        <item quantity="other">Orbit couldn\'t take out where and when they were recorded and on what devices, so they\'d go with them.</item>
+    </plurals>
+    <plurals name="sharing_as_they_are_taken_or_recorded">
+        <item quantity="one">Orbit couldn\'t take out where and when it was taken or recorded and on what device, so they\'d go with it.</item>
+        <item quantity="other">Orbit couldn\'t take out where and when they were taken or recorded and on what devices, so they\'d go with them.</item>
+    </plurals>
+    <!-- The choice the question starts on: the files stay on this device. -->
+    <plurals name="sharing_leave_them_out">
+        <item quantity="one">Leave it out</item>
+        <item quantity="other">Leave them out</item>
+    </plurals>
+    <plurals name="sharing_share_them_as_they_are">
+        <item quantity="one">Share it as it is</item>
+        <item quantity="other">Share them as they are</item>
+    </plurals>
+
+    <!-- Sharing from a map's card on Home, when it has pictures, videos or audio. -->
+    <string name="sharing_share_map">Share “%1$s”</string>
+    <string name="sharing_map_with">The map, with %1$s</string>
+    <!-- In place of sharing_map_with when none of the map's own files can go clean: they're named under it, and asked about as it's shared. -->
+    <string name="sharing_map_alone">The map</string>
+    <string name="sharing_map_with_description">A zip that opens in Orbit\u00A0· %1$s</string>
+    <string name="sharing_just_the_text">Just the text</string>
+    <string name="sharing_markdown_file">A markdown file</string>
+
+    <!-- Sending a map to a device, and showing it to browsers. -->
+    <string name="sharing_send_copy">Sends a copy of the map.</string>
+    <string name="sharing_send_copy_with">Sends a copy of the map, with %1$s.</string>
+    <string name="sharing_copies_not_in_step">To keep maps in step across your devices, keep them in a synced folder.</string>
+    <string name="sharing_browsers_get">Whoever joins gets the map, with %1$s.</string>
+    <string name="sharing_computer_gets">The browser gets the map, with %1$s.</string>
+
+    <!-- Where maps are kept: Home's card, once, and Settings. -->
+    <string name="sharing_maps_stay_here_title">Your maps stay on this device</string>
+    <string name="sharing_maps_stay_here_body">Orbit has no account and no cloud. To have your maps on your other devices too, keep them in a folder that a sync app or cloud drive keeps in step.</string>
+    <string name="sharing_choose_a_folder">Choose a folder</string>
+    <string name="sharing_where_on_this_device">On this device</string>
+    <!-- Android's backup to the cloud keeps the maps' text and settings, and their pictures, sounds and videos smallest first while they fit 25 MB; never their history, and private maps only when it's encrypted end to end. Export all maps keeps everything. -->
+    <string name="sharing_where_on_this_device_description">Orbit has no account and no cloud. Android\'s backup, if it\'s on, keeps the maps and settings, and pictures, sounds and videos while they fit, but not the history; private maps only if it\'s encrypted, as a screen lock makes it; otherwise a restore leaves them out. Export all maps keeps every map whole, private ones still private.</string>
+    <!-- After the settings' line about Android's backup, when its last backup to the cloud, 25 MB at most, had no room for some maps' text. -->
+    <plurals name="sharing_backup_left_out">
+        <item quantity="one">Android\'s last backup had no room for %1$d map. Export all maps keeps it.</item>
+        <item quantity="other">Android\'s last backup had no room for %1$d maps. Export all maps keeps them.</item>
+    </plurals>
+    <string name="sharing_where_in_folder">On this device and in “%1$s”</string>
+    <string name="sharing_where_in_folder_description">The folder keeps them in step, and a sync app or cloud drive can take them to your other devices.</string>
+</resources>

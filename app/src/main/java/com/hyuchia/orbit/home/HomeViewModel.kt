@@ -3,26 +3,36 @@ package com.hyuchia.orbit.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hyuchia.orbit.AppContainer
+import com.hyuchia.orbit.R
 import com.hyuchia.orbit.data.AppSettings
+import com.hyuchia.orbit.data.MapEditResult
 import com.hyuchia.orbit.data.MapSummary
 import com.hyuchia.orbit.data.MapTags
 import com.hyuchia.orbit.data.SortOrder
+import com.hyuchia.orbit.data.TagRename
 import com.hyuchia.orbit.data.TrashedMap
+import com.hyuchia.orbit.privacy.PrivateView
+import com.hyuchia.orbit.privacy.conceals
 import com.hyuchia.orbit.ui.foldCase
 import com.hyuchia.orbit.ui.searchWords
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
 import java.io.IOException
 import java.text.Collator
@@ -68,6 +78,18 @@ data class HomeState(
 
     /** The tag whose maps show, when one is picked: the others are hidden. */
     val tag: String? = null,
+
+    /** The private maps that show locked: no title, picture, tags or progress, and left out of searches and tags. */
+    val locked: Set<String> = emptySet(),
+
+    /** Private maps show unlocked, and can be locked again now. */
+    val canLock: Boolean = false,
+
+    /**
+     * Private maps are locked and hidden, as Settings can choose: Home offers to show them, which
+     * unlocks them. It offers whether any are there or not, so it never gives away that they are.
+     */
+    val canShowPrivate: Boolean = false,
 ) {
     val isEmpty: Boolean get() = !loading && pinned.isEmpty() && others.isEmpty()
 }
@@ -82,7 +104,7 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     /** Why something asked of the maps didn't happen, to say on screen: a map that couldn't be added, say. */
     val problems: Flow<String> = problemMessages.receiveAsFlow()
 
-    val state: StateFlow<HomeState> = homeStates(maps.maps, search, container.settings.settings, container.shownTag)
+    val state: StateFlow<HomeState> = homeStates(maps.maps, search, container.settings.settings, container.shownTag, container.privateMaps.view)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeState())
 
     fun search(text: String) {
@@ -127,13 +149,13 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun setTags(id: String, tags: List<String>) {
-        viewModelScope.launch { maps.setTags(id, tags) }
+        viewModelScope.launch { said(container.edits.setTags(id, tags)) }
     }
 
     /** Renames a tag in every map; the maps shown stay the same. */
     fun renameTag(from: String, to: String) {
         viewModelScope.launch {
-            maps.renameTag(from, to)
+            said(container.edits.renameTag(from, to))
 
             if (container.shownTag.value?.let(MapTags::key) == MapTags.key(from)) {
                 container.shownTag.value = to
@@ -144,7 +166,7 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     /** Takes a tag out of every map. */
     fun removeTag(tag: String) {
         viewModelScope.launch {
-            maps.renameTag(tag, null)
+            said(container.edits.renameTag(tag, null))
 
             if (container.shownTag.value?.let(MapTags::key) == MapTags.key(tag)) {
                 container.shownTag.value = null
@@ -153,15 +175,58 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun duplicate(id: String) {
-        viewModelScope.launch { added({ maps.duplicate(id) }) {} }
+        viewModelScope.launch {
+            val copy = try {
+                container.edits.duplicate(id)
+            } catch (failed: IOException) {
+                problemMessages.send(maps.whyNotAdded())
+                return@launch
+            }
+
+            said(copy.result)
+        }
     }
 
     fun rename(id: String, title: String) {
-        viewModelScope.launch { maps.rename(id, title) }
+        viewModelScope.launch { said(container.edits.rename(id, title)) }
+    }
+
+    /** Says why a change from Home left a map as it was, when it did: [problems] says it. */
+    private suspend fun said(result: MapEditResult) {
+        val words = container.words
+
+        val why = when (result) {
+            MapEditResult.Newer -> words.string(R.string.home_map_from_newer_orbit)
+            MapEditResult.Unreadable -> words.string(R.string.home_map_unreadable)
+            MapEditResult.KeptChanging -> words.string(R.string.home_map_kept_changing)
+            MapEditResult.Refused -> maps.whyNotChanged()
+            MapEditResult.NotWritten -> maps.whyNotWritten()
+            MapEditResult.Written, MapEditResult.Missing -> null
+        }
+
+        why?.let { problemMessages.send(it) }
+    }
+
+    /** Says when a tag stayed on maps Orbit can only show. */
+    private suspend fun said(renamed: TagRename) {
+        if (renamed.left > 0) {
+            problemMessages.send(container.words.plural(R.plurals.home_tag_left_on_maps, renamed.left, renamed.left))
+        }
     }
 
     fun setPinned(id: String, pinned: Boolean) {
-        viewModelScope.launch { maps.setPinned(id, pinned) }
+        viewModelScope.launch {
+            try {
+                maps.setPinned(id, pinned)
+            } catch (failed: IOException) {
+                problemMessages.send(maps.whyNotWritten())
+            }
+        }
+    }
+
+    /** Locks every private map now. */
+    fun lockPrivateMaps() {
+        container.privateMaps.lock.lock()
     }
 
     /** Moves a map to the trash, for [restore] to bring back. */
@@ -171,7 +236,13 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun restore(item: TrashedMap) {
-        viewModelScope.launch { maps.restore(item) }
+        viewModelScope.launch {
+            try {
+                maps.restore(item)
+            } catch (failed: IOException) {
+                problemMessages.send(maps.whyNotWritten())
+            }
+        }
     }
 
     fun sort(order: SortOrder) {
@@ -180,46 +251,96 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
 }
 
 /**
- * Home as the maps, the search, the settings and the picked tag make it, from the latest of each,
- * in order. Sorting, grouping and searching every map takes a while on a big library, so it runs
- * on `dispatcher`, never on the main thread, where it would hold up each letter typed.
+ * Home as the maps, the search, the settings, the picked tag and private maps make it, from the
+ * latest of each, in order. Sorting, grouping and searching every map takes a while on a big
+ * library, so it runs on `dispatcher`, never on the main thread, where it would hold up each
+ * letter typed.
  */
 internal fun homeStates(
     maps: Flow<List<MapSummary>?>,
     query: Flow<String>,
     settings: Flow<AppSettings>,
     tag: Flow<String?>,
+    privacy: Flow<PrivateView>,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
-): Flow<HomeState> = combine(maps, query, settings, tag, ::homeState).flowOn(dispatcher)
+): Flow<HomeState> {
+    val home = combine(privacy, hidingPrivateMaps(privacy)) { view, hiding -> view to hiding }
 
-/** Home with these maps: the pinned ones and the others in the chosen order, only the picked tag's, and the ones that match `query`. */
-internal fun homeState(list: List<MapSummary>?, query: String, settings: AppSettings, tag: String?): HomeState {
-    if (list == null) {
+    return combine(maps, query, settings, tag, home) { list, searched, chosen, picked, (view, hiding) ->
+        homeState(list, searched, chosen, picked, view, hiding)
+    }.flowOn(dispatcher)
+}
+
+/** How long private maps that lock on screen stay in their place, locked, before they go: long enough to see them lock. */
+internal const val PRIVATE_MAPS_GO_AFTER = 320L
+
+/**
+ * Whether private maps that Settings hides while locked are gone from Home now. Locking while Home
+ * shows, they lock where they are first, and go [PRIVATE_MAPS_GO_AFTER] later; Home's first look,
+ * and one after they locked while Orbit was away, has them gone already. Unlocked, they're back at once.
+ */
+internal fun hidingPrivateMaps(privacy: Flow<PrivateView>): Flow<Boolean> = flow {
+    var first = true
+
+    emitAll(
+        privacy.distinctUntilChangedBy { it.locked }.transformLatest { view ->
+            if (view.locked && !first && !view.lockedAway) {
+                delay(PRIVATE_MAPS_GO_AFTER)
+            }
+
+            first = false
+            emit(view.locked)
+        },
+    )
+}
+
+/**
+ * Home with these maps: the pinned ones and the others in the chosen order, only the picked tag's,
+ * and the ones that match `query`. Private maps that are locked keep their place, but give nothing
+ * away: their tags aren't among Home's, a picked tag leaves them out, and searches never find them.
+ * Or, when Settings hides them, they aren't on Home at all until they're unlocked: not in the list,
+ * searches, tags or counts, once they're `hiding` (see [hidingPrivateMaps]).
+ */
+internal fun homeState(
+    maps: List<MapSummary>?,
+    query: String,
+    settings: AppSettings,
+    tag: String?,
+    privacy: PrivateView = PrivateView(locked = false),
+    hiding: Boolean = privacy.locked,
+): HomeState {
+    if (maps == null) {
         return HomeState()
     }
 
-    val tags = tagCounts(list)
+    val list = if (settings.hideLockedPrivateMaps && hiding) maps.filterNot(privacy::hides) else maps
+    val open = list.filterNot(privacy::hides)
+    val tags = tagCounts(open)
     val shown = shownTag(tags, tag)
 
     val ordered = when (settings.sortOrder) {
         SortOrder.Edited -> list.sortedByDescending { it.modified }
         SortOrder.Opened -> list.sortedByDescending { maxOf(it.metadata.opened, it.metadata.created) }
         SortOrder.Created -> list.sortedByDescending { it.metadata.created }
-        SortOrder.Title -> list.sortedBy { it.title.lowercase() }
+        // Locked private maps go after the others, by when they were made: placed by their titles, they'd hint at them.
+        SortOrder.Title -> list.sortedWith(compareBy<MapSummary> { privacy.hides(it) }.thenBy { if (privacy.hides(it)) "" else it.title.lowercase() }.thenBy { it.metadata.created })
     }
 
-    val sorted = if (shown == null) ordered else ordered.filter { it.hasTag(shown) }
+    val sorted = if (shown == null) ordered else ordered.filter { it.hasTag(shown) && !privacy.hides(it) }
 
     val words = searchWords(query)
     return HomeState(
         loading = false,
         pinned = sorted.filter { it.metadata.pinned },
         others = sorted.filterNot { it.metadata.pinned },
-        results = if (words.isEmpty()) null else search(sorted, words),
+        results = if (words.isEmpty()) null else search(sorted.filterNot(privacy::hides), words),
         searched = query,
         sortOrder = settings.sortOrder,
         tags = tags,
         tag = shown,
+        locked = sorted.filter(privacy::hides).mapTo(mutableSetOf()) { it.id },
+        canLock = privacy.lockable && list.any { it.metadata.isPrivate && !privacy.hides(it) },
+        canShowPrivate = privacy.conceals(settings.hideLockedPrivateMaps),
     )
 }
 

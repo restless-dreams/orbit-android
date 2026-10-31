@@ -1,9 +1,13 @@
 package com.hyuchia.orbit.map
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -28,7 +32,12 @@ class SourceEditingTest {
 
     private val waiting = mutableListOf<CompletableDeferred<Unit>>()
 
-    /** Orbit's conversions, faked: YAML is the markdown with [YAML] in front, and text with "broken" in it can't be read. */
+    /**
+     * Orbit's conversions, faked: YAML is the markdown with [YAML] in front,
+     * and text with "broken" in it can't be read. Markdown written from YAML
+     * is in Orbit's own form, as the real one is: without comments, and its
+     * lists with dashes.
+     */
     private suspend fun convert(text: String, to: String): String? {
         if (holding) {
             CompletableDeferred<Unit>().also { waiting += it }.await()
@@ -37,7 +46,7 @@ class SourceEditingTest {
         return when {
             "broken" in text -> null
             to == "yaml" -> YAML + text.removePrefix(YAML)
-            else -> text.removePrefix(YAML)
+            else -> text.removePrefix(YAML).lines().filterNot { it.startsWith("<!--") }.joinToString("\n") { it.replace(Regex("^\\* "), "- ") }
         }
     }
 
@@ -137,6 +146,42 @@ class SourceEditingTest {
     }
 
     @Test
+    fun aFlushSavesTheTypingAtOnceAndOnlyOnce() = runTest {
+        val editing = editing
+        editing.flush()
+        assertTrue(kept.isEmpty())
+        editing.edit("$trip\n- Tram")
+        editing.flush()
+        assertEquals(listOf("$trip\n- Tram"), kept)
+
+        // Saved, it isn't saved again once the pause is over.
+        advanceTimeBy(300)
+        assertEquals(listOf("$trip\n- Tram"), kept)
+        assertTrue(drawn.isEmpty())
+    }
+
+    @Test
+    fun aFlushSavesYamlStillConvertingOnceTheScreensWorkHasStopped() = runTest {
+        inYaml()
+        val screen = CoroutineScope(StandardTestDispatcher(testScheduler))
+        val editing = SourceEditing(screen, ui, draw = { drawn += it }, convert = ::convert, keep = { kept += it })
+        holding = true
+        editing.edit("$YAML$trip\n- Tram")
+        advanceTimeBy(300)
+        assertEquals(1, waiting.size)
+
+        // The map closes as the typing converts: the screen's work stops, that conversion with it, and the map asks
+        // for the typing while its page is still there.
+        screen.cancel()
+        val flushing = launch { editing.flush() }
+        runCurrent()
+        waiting.last().complete(Unit)
+        runCurrent()
+        assertTrue(flushing.isCompleted)
+        assertEquals(listOf("$trip\n- Tram"), kept)
+    }
+
+    @Test
     fun typingWhileTheTextSwitchesIsConvertedToo() = runTest {
         val editing = editing
         holding = true
@@ -153,6 +198,49 @@ class SourceEditingTest {
         waiting.removeFirst().complete(Unit)
         runCurrent()
         assertEquals(SourceState("$YAML$trip\n- Tram", yaml = true), source)
+    }
+
+    @Test
+    fun switchingBackWithoutAYamlEditGivesTheMarkdownBackAsWritten() = runTest {
+        val written = "# Trip\n<!-- Booked in May -->\n* Food"
+        ui.update { it.copy(source = SourceState(written)) }
+        val editing = editing
+        editing.setYaml(true)
+        runCurrent()
+        assertEquals(SourceState("$YAML$written", yaml = true), source)
+        editing.setYaml(false)
+        runCurrent()
+        assertEquals(SourceState(written), source)
+        assertTrue(kept.isEmpty())
+    }
+
+    @Test
+    fun switchingBackAfterAYamlEditShowsOrbitsOwnMarkdown() = runTest {
+        ui.update { it.copy(source = SourceState("# Trip\n<!-- Booked in May -->\n* Food")) }
+        val editing = editing
+        editing.setYaml(true)
+        runCurrent()
+        editing.edit("$YAML# Trip\n<!-- Booked in May -->\n* Food\n* Tram")
+        advanceTimeBy(300)
+        editing.setYaml(false)
+        runCurrent()
+        assertEquals(SourceState("# Trip\n- Food\n- Tram"), source)
+        assertEquals(listOf("# Trip\n- Food\n- Tram"), kept)
+    }
+
+    @Test
+    fun switchingBackAfterTheMapChangedShowsTheMapAsItIsNow() = runTest {
+        ui.update { it.copy(source = SourceState("# Trip\n<!-- Booked in May -->\n* Food")) }
+        val editing = editing
+        editing.setYaml(true)
+        runCurrent()
+
+        // An undo, or an edit on the map beside the text.
+        editing.follow("# Trip\n* Food\n* Museums")
+        runCurrent()
+        editing.setYaml(false)
+        runCurrent()
+        assertEquals(SourceState("# Trip\n- Food\n- Museums"), source)
     }
 
     @Test
@@ -242,6 +330,63 @@ class SourceEditingTest {
         // Saved, it isn't saved again.
         advanceTimeBy(300)
         assertEquals(listOf("$trip\n- Tram"), kept)
+    }
+
+    @Test
+    fun undosWhileTypedYamlConvertsComeAfterIt() = runTest {
+        inYaml()
+        val editing = editing
+        holding = true
+        val undone = mutableListOf<List<String>>()
+        editing.edit("$YAML$trip\n- Tram")
+        editing.afterTyping { undone += kept.toList() }
+        editing.afterTyping { undone += kept.toList() }
+        runCurrent()
+
+        // Both wait for the typing to be converted and saved, then come in turn.
+        assertTrue(undone.isEmpty())
+        waiting.removeFirst().complete(Unit)
+        runCurrent()
+        assertEquals(listOf(listOf("$trip\n- Tram"), listOf("$trip\n- Tram")), undone)
+    }
+
+    @Test
+    fun typedYamlStillConvertingIsntSavedOverAChangeMadeSince() = runTest {
+        inYaml()
+        val editing = editing
+        holding = true
+        var closed = false
+        editing.edit("$YAML$trip\n- Tram")
+        editing.close { closed = true }
+        runCurrent()
+
+        // An edit on the map, an undo or the file changed elsewhere, while the typing converts.
+        editing.follow("# Trip\n- Museums")
+        waiting.removeFirst().complete(Unit)
+        runCurrent()
+        assertTrue(kept.isEmpty())
+        assertTrue(closed)
+    }
+
+    @Test
+    fun anOlderConversionNeverLandsAfterANewerOne() = runTest {
+        inYaml()
+        val editing = editing
+        holding = true
+        editing.edit("$YAML$trip\n- Tram")
+        // An undo asked for: the typing converts first.
+        editing.afterTyping { }
+        runCurrent()
+        editing.edit("$YAML$trip\n- Tram 28")
+        advanceTimeBy(300)
+
+        // The newer text's conversion comes back first.
+        while (waiting.isNotEmpty()) {
+            waiting.removeLast().complete(Unit)
+            runCurrent()
+        }
+
+        assertEquals("$trip\n- Tram 28", kept.last())
     }
 
     @Test

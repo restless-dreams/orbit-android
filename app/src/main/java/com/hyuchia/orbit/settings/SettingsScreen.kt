@@ -2,47 +2,28 @@ package com.hyuchia.orbit.settings
 
 import android.os.Build
 import androidx.annotation.StringRes
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Switch
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,12 +36,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -73,16 +54,14 @@ import com.hyuchia.orbit.data.AppSettings
 import com.hyuchia.orbit.data.ThemeMode
 import com.hyuchia.orbit.nearby.SENDER_NAME_LENGTH
 import com.hyuchia.orbit.nearby.senderName
+import com.hyuchia.orbit.study.NewCardsADayChoice
 import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.theme.MapStyles
+import com.hyuchia.orbit.ui.ChoiceChips
+import com.hyuchia.orbit.ui.ConnectedChoice
 import com.hyuchia.orbit.ui.EscapeCloses
-import com.hyuchia.orbit.ui.ListRow
-import com.hyuchia.orbit.ui.LocalShortcuts
-import com.hyuchia.orbit.ui.ToggleRow
-import com.hyuchia.orbit.ui.hasHardwareKeyboard
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(onAbout: () -> Unit, onTrash: () -> Unit, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -94,20 +73,9 @@ fun SettingsScreen(onAbout: () -> Unit, onTrash: () -> Unit, onBack: () -> Unit)
         scope.launch { repository.update(update) }
     }
 
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val snackbars = remember { SnackbarHostState() }
 
-    Scaffold(
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        topBar = {
-            LargeFlexibleTopAppBar(
-                title = { Text(stringResource(R.string.common_settings)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back)) }
-                },
-                scrollBehavior = scrollBehavior,
-            )
-        },
-    ) { padding ->
+    SettingsScaffold(stringResource(R.string.common_settings), onBack, BarSize.Large, snackbars) { padding ->
         Column(
             Modifier
                 .fillMaxSize()
@@ -116,10 +84,16 @@ fun SettingsScreen(onAbout: () -> Unit, onTrash: () -> Unit, onBack: () -> Unit)
                 .padding(bottom = 32.dp)
                 // On a tablet, lines as long as the screen is wide are hard to read: the settings keep to a column.
                 .wrapContentWidth(Alignment.CenterHorizontally)
-                .widthIn(max = 720.dp),
+                .widthIn(max = ReadingWidth),
         ) {
             Heading(stringResource(R.string.settings_appearance))
-            ThemeModeChoice(settings.themeMode) { mode -> change { it.copy(themeMode = mode) } }
+            ConnectedChoice(
+                choices = ThemeMode.entries,
+                selected = settings.themeMode,
+                onPick = { mode -> change { it.copy(themeMode = mode) } },
+                label = { stringResource(it.label) },
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 Toggle(stringResource(R.string.settings_wallpaper_colors), stringResource(R.string.settings_wallpaper_colors_description), settings.dynamicColor) { on ->
@@ -128,7 +102,7 @@ fun SettingsScreen(onAbout: () -> Unit, onTrash: () -> Unit, onBack: () -> Unit)
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                LanguageSetting(Modifier.padding(horizontal = 8.dp))
+                LanguageSetting()
             }
 
             Heading(stringResource(R.string.settings_new_maps))
@@ -139,18 +113,13 @@ fun SettingsScreen(onAbout: () -> Unit, onTrash: () -> Unit, onBack: () -> Unit)
                 modifier = Modifier.padding(horizontal = 24.dp),
             )
 
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ChoiceChips(
+                choices = MapStyles,
+                selected = MapStyles.firstOrNull { it.name == settings.newMapStyle },
+                onPick = { style -> change { it.copy(newMapStyle = style.name) } },
+                label = { it.label },
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-            ) {
-                MapStyles.forEach { style ->
-                    FilterChip(
-                        selected = settings.newMapStyle == style.name,
-                        onClick = { change { it.copy(newMapStyle = style.name) } },
-                        label = { Text(style.label) },
-                    )
-                }
-            }
+            )
 
             Heading(stringResource(R.string.settings_on_the_map))
 
@@ -170,26 +139,34 @@ fun SettingsScreen(onAbout: () -> Unit, onTrash: () -> Unit, onBack: () -> Unit)
                 modifier = Modifier.padding(horizontal = 24.dp),
             )
 
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ChoiceChips(
+                choices = listOf(0, 5, 8, 12, 20),
+                selected = settings.presentationSeconds,
+                onPick = { seconds -> change { it.copy(presentationSeconds = seconds) } },
+                label = { seconds ->
+                    if (seconds == 0) {
+                        stringResource(R.string.settings_presentation_only_when_i_tap)
+                    } else {
+                        pluralStringResource(R.plurals.settings_presentation_seconds, seconds, seconds)
+                    }
+                },
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-            ) {
-                listOf(0, 5, 8, 12, 20).forEach { seconds ->
-                    FilterChip(
-                        selected = settings.presentationSeconds == seconds,
-                        onClick = { change { it.copy(presentationSeconds = seconds) } },
-                        label = {
-                            Text(
-                                if (seconds == 0) {
-                                    stringResource(R.string.settings_presentation_only_when_i_tap)
-                                } else {
-                                    pluralStringResource(R.plurals.settings_presentation_seconds, seconds, seconds)
-                                },
-                            )
-                        },
-                    )
-                }
-            }
+            )
+
+            Heading(stringResource(R.string.settings_studying))
+            Text(
+                stringResource(R.string.settings_new_cards_a_day),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 24.dp),
+            )
+
+            NewCardsADayChoice(
+                selected = settings.newCardsADay,
+                onPick = { count -> change { it.copy(newCardsADay = count) } },
+                // On a tablet, five numbers as wide as the column read as one long bar: they keep to a phone's width.
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).widthIn(max = 420.dp).fillMaxWidth(),
+            )
 
             Heading(stringResource(R.string.settings_nearby_devices))
 
@@ -203,17 +180,28 @@ fun SettingsScreen(onAbout: () -> Unit, onTrash: () -> Unit, onBack: () -> Unit)
 
             val nearby = LocalContext.current.container.nearby
             var naming by remember { mutableStateOf(false) }
-            ListRow(
-                headline = { Text(stringResource(R.string.settings_your_name_on_nearby_devices)) },
-                supporting = {
+            val changeIt = stringResource(R.string.settings_change_it)
+
+            ListItem(
+                onClick = { naming = true },
+                supportingContent = {
                     Column {
                         Text(nearby.nameFor(settings.nearbyName))
                         Text(stringResource(R.string.settings_your_name_on_nearby_devices_description))
                     }
                 },
-                trailing = { Icon(Icons.Outlined.Edit, contentDescription = null) },
-                modifier = Modifier.padding(horizontal = 8.dp).clickable(onClickLabel = stringResource(R.string.settings_change_it)) { naming = true },
-            )
+                trailingContent = { Icon(Icons.Outlined.Edit, contentDescription = null) },
+                modifier = Modifier
+                    .padding(horizontal = 8.dp)
+                    .semantics {
+                        onClick(changeIt) {
+                            naming = true
+                            true
+                        }
+                    },
+            ) {
+                Text(stringResource(R.string.settings_your_name_on_nearby_devices))
+            }
 
             if (naming) {
                 NearbyNameDialog(
@@ -247,7 +235,10 @@ fun SettingsScreen(onAbout: () -> Unit, onTrash: () -> Unit, onBack: () -> Unit)
             }
 
             Heading(stringResource(R.string.common_your_maps))
-            MapSafety(onTrash)
+            MapSafety(onTrash, snackbars)
+
+            Heading(stringResource(R.string.private_settings_heading))
+            PrivateMapsSettings(settings, ::change)
 
             Heading(stringResource(R.string.settings_folder))
             FolderSettings()
@@ -258,19 +249,6 @@ fun SettingsScreen(onAbout: () -> Unit, onTrash: () -> Unit, onBack: () -> Unit)
             if (context.container.updates.available) {
                 Toggle(stringResource(R.string.settings_check_for_updates), stringResource(R.string.settings_check_for_updates_description), settings.checkForUpdates) { on ->
                     change { it.copy(checkForUpdates = on) }
-                }
-            }
-
-            val shortcuts = LocalShortcuts.current
-
-            if (shortcuts != null && hasHardwareKeyboard()) {
-                ListItem(
-                    onClick = { shortcuts.listOpen = true },
-                    supportingContent = { Text(stringResource(R.string.settings_keyboard_shortcuts_description)) },
-                    leadingContent = { Icon(Icons.Outlined.Keyboard, contentDescription = null) },
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                ) {
-                    Text(stringResource(R.string.common_keyboard_shortcuts))
                 }
             }
 
@@ -312,7 +290,11 @@ private fun NearbyNameDialog(chosen: String?, deviceName: String, onSave: (Strin
             // Short, so the field and the buttons fit above the keyboard on a phone on its side.
             OutlinedTextField(
                 value = name,
-                onValueChange = { typed -> if (typed.text.codePointCount(0, typed.text.length) <= SENDER_NAME_LENGTH) name = typed },
+                onValueChange = { typed ->
+                    if (typed.text.codePointCount(0, typed.text.length) <= SENDER_NAME_LENGTH) {
+                        name = typed
+                    }
+                },
                 placeholder = { Text(deviceName) },
                 supportingText = { Text(stringResource(R.string.settings_nearby_name_empty_hint)) },
                 singleLine = true,
@@ -332,55 +314,22 @@ private fun Heading(text: String) {
         text,
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 4.dp),
+        // A heading to TalkBack, which then jumps from section to section of the longest screen.
+        modifier = Modifier
+            .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 4.dp)
+            .semantics { heading() },
     )
 }
 
 @Composable
 private fun Toggle(title: String, description: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    ToggleRow(title, description, checked, onChange, Modifier.padding(horizontal = 8.dp))
+    SettingToggle(title, description, checked, onChange)
 }
 
 @get:StringRes
 private val ThemeMode.label: Int
     get() = when (this) {
-        ThemeMode.System -> R.string.settings_theme_like_the_phone
+        ThemeMode.System -> R.string.settings_theme_system
         ThemeMode.Light -> R.string.settings_theme_light
         ThemeMode.Dark -> R.string.settings_theme_dark
     }
-
-/** Light, dark or like the phone: segments, or a list once text is large enough to crowd them. */
-@Composable
-private fun ThemeModeChoice(selected: ThemeMode, onPick: (ThemeMode) -> Unit) {
-    if (LocalDensity.current.fontScale < 1.5f) {
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
-            ThemeMode.entries.forEachIndexed { index, mode ->
-                SegmentedButton(
-                    selected = selected == mode,
-                    onClick = { onPick(mode) },
-                    shape = SegmentedButtonDefaults.itemShape(index, ThemeMode.entries.size),
-                ) {
-                    Text(stringResource(mode.label))
-                }
-            }
-        }
-
-        return
-    }
-
-    Column(Modifier.selectableGroup().padding(vertical = 4.dp)) {
-        ThemeMode.entries.forEach { mode ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .selectable(selected = selected == mode, role = Role.RadioButton) { onPick(mode) }
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
-            ) {
-                RadioButton(selected = selected == mode, onClick = null)
-                Text(stringResource(mode.label), style = MaterialTheme.typography.bodyLarge)
-            }
-        }
-    }
-}

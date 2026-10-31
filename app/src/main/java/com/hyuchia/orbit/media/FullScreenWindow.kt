@@ -1,7 +1,5 @@
 package com.hyuchia.orbit.media
 
-import android.graphics.Color as AndroidColor
-import android.os.Build
 import android.view.KeyEvent
 import android.view.Window
 import androidx.activity.BackEventCompat
@@ -205,17 +203,13 @@ fun FullScreenWindow(
     }
 }
 
-/** No dimming, no window animation (the content fades itself), and system bars for a dark screen. */
+/**
+ * No dimming, no window animation (the content fades itself), and system
+ * bars for a dark screen. The bars are see-through from the app's theme.
+ */
 private fun prepare(window: Window) {
     window.setDimAmount(0f)
     window.setWindowAnimations(0)
-
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-        @Suppress("DEPRECATION")
-        window.statusBarColor = AndroidColor.TRANSPARENT
-        @Suppress("DEPRECATION")
-        window.navigationBarColor = AndroidColor.TRANSPARENT
-    }
 
     val controller = WindowCompat.getInsetsController(window, window.decorView)
     controller.isAppearanceLightStatusBars = false

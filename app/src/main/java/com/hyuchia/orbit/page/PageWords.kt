@@ -1,8 +1,8 @@
 package com.hyuchia.orbit.page
 
 import android.content.Context
-import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.Words
 import kotlinx.serialization.Serializable
 import java.util.Locale
 

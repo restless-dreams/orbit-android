@@ -1,9 +1,6 @@
 package com.hyuchia.orbit.settings
 
 import android.content.res.Resources
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -13,7 +10,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Sync
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -40,23 +36,26 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
 import com.hyuchia.orbit.data.DocumentFolder
+import com.hyuchia.orbit.data.FolderNotes
 import com.hyuchia.orbit.data.FolderSyncState
 import com.hyuchia.orbit.data.MAP_MEDIA_LIMIT
+import com.hyuchia.orbit.data.MAP_TEXT_LIMIT
 import com.hyuchia.orbit.data.VIDEO_SIZE_LIMIT
 import com.hyuchia.orbit.data.megabytes
 import com.hyuchia.orbit.home.timeAgo
+import com.hyuchia.orbit.privacy.PrivateOnScreen
+import com.hyuchia.orbit.privacy.conceals
+import com.hyuchia.orbit.privacy.coverTitle
 import com.hyuchia.orbit.rememberWords
-import com.hyuchia.orbit.ui.EscapeCloses
+import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.ui.Hint
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** A folder just chosen that has markdown files already, waiting for a yes before they become maps. */
-private class FolderOffer(val tree: Uri, val name: String, val files: Int)
-
 /**
  * Keeping the maps in a folder: choosing one (its markdown files become
- * maps, after asking), how it's going, and stopping.
+ * maps, after asking), how it's going, the other devices that keep their
+ * maps there, and stopping.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -68,27 +67,8 @@ internal fun FolderSettings() {
     val folderSync = container.folderSync
     val sync by folderSync.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    var offer by remember { mutableStateOf<FolderOffer?>(null) }
     var pickProblem by remember { mutableStateOf<String?>(null) }
-
-    fun keep(tree: Uri) {
-        val resolver = context.contentResolver
-
-        if (runCatching { DocumentFolder.keepAccess(resolver, tree) }.isFailure) {
-            pickProblem = resources.getString(R.string.settings_folder_access_refused)
-            return
-        }
-
-        val previous = sync.folder
-
-        scope.launch {
-            container.settings.update { it.copy(syncFolder = tree.toString()) }
-
-            if (previous != null && previous != tree.toString()) {
-                DocumentFolder.releaseAccess(resolver, previous)
-            }
-        }
-    }
+    val choose = rememberFolderChooser { pickProblem = it }
 
     fun stop() {
         val folder = sync.folder ?: return
@@ -99,29 +79,11 @@ internal fun FolderSettings() {
         }
     }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
-        pickProblem = null
-
-        when {
-            tree == null -> Unit
-            tree.toString() == sync.folder -> folderSync.request()
-            else -> scope.launch {
-                val inspected = runCatching { folderSync.inspect(tree.toString()) }.getOrNull()
-
-                when {
-                    inspected == null -> pickProblem = resources.getString(R.string.settings_folder_could_not_open)
-                    inspected.second == 0 -> keep(tree)
-                    else -> offer = FolderOffer(tree, inspected.first, inspected.second)
-                }
-            }
-        }
-    }
-
     val folder = sync.folder
 
     if (folder == null) {
         ListItem(
-            onClick = { picker.launch(null) },
+            onClick = choose,
             supportingContent = {
                 Text(stringResource(R.string.settings_keep_maps_in_folder_description))
             },
@@ -159,69 +121,98 @@ internal fun FolderSettings() {
         )
         Note(stringResource(R.string.settings_folder_how_it_works))
         val notes = sync.notes
-        // The maps a note is about: “Trip”, “Groceries”.
-        fun titles(maps: List<String>): String = maps.joinToString { resources.getString(R.string.settings_quoted_map_title, it) }
+        // While private maps are locked, the notes don't name them, nor their pictures and videos: they're counted instead.
+        val privacy by container.privateMaps.view.collectAsStateWithLifecycle()
+        val summaries by container.maps.maps.collectAsStateWithLifecycle()
+        val trash by container.maps.trash.collectAsStateWithLifecycle()
 
-        if (notes.keptBoth.isNotEmpty()) {
-            Note(pluralStringResource(R.plurals.settings_folder_kept_both, notes.keptBoth.size, titles(notes.keptBoth)))
+        val privateTitles = remember(summaries, trash) {
+            summaries.orEmpty().filter { it.metadata.isPrivate }.mapTo(mutableSetOf()) { it.title } + trash.filter { it.isPrivate }.map { it.title }
         }
 
-        if (notes.removed.isNotEmpty()) {
-            Note(pluralStringResource(R.plurals.settings_folder_removed, notes.removed.size, titles(notes.removed)))
+        // A locked private map whose owner chose a cover is named by it, rather than counted.
+        val privateCovers = remember(summaries, trash) {
+            summaries.orEmpty().filter { it.metadata.isPrivate }.mapNotNull { map -> map.metadata.cover?.let { map.title to it } }.toMap() +
+                trash.filter { it.isPrivate }.mapNotNull { map -> map.cover?.let { map.title to it } }
         }
 
-        if (notes.restored.isNotEmpty()) {
-            Note(pluralStringResource(R.plurals.settings_folder_restored, notes.restored.size, titles(notes.restored)))
+        fun quoted(title: String): String = resources.getString(R.string.settings_quoted_map_title, title)
+
+        fun hiddenMap(title: String): Boolean = privacy.locked && (title in notes.private || title in privateTitles)
+
+        fun coveredOrQuoted(title: String): String = quoted(privateCovers[title]?.takeIf { hiddenMap(title) }?.let(resources::coverTitle) ?: title)
+
+        fun hiddenFile(entry: String): Boolean = privacy.locked && (entry in notes.private || privateTitles.any { entry.endsWith(quoted(it)) })
+
+        // A file too big to be a map is named by its file, which a private map's would give away.
+        fun hiddenLarge(file: String): Boolean = privacy.locked && file in notes.private
+
+        // The maps a note is about: “Trip”, “Groceries”, and while they're locked, “📓 Journal” and 2 private maps.
+        fun titles(maps: List<String>): String =
+            noteEntries(maps, { hiddenMap(it) && it !in privateCovers }, ::coveredOrQuoted) { count -> resources.getQuantityString(R.plurals.private_maps_in_a_note, count, count) }
+
+        // While private maps hide, the notes about them aren't there at all, rather than counted.
+        val shown = notes.shown(privacy.conceals(LocalAppSettings.current.hideLockedPrivateMaps), ::hiddenMap, ::hiddenFile, ::hiddenLarge)
+        // Unlocked, the notes name private maps, their pictures and videos: Recents gets no picture of Settings then, as of the maps.
+        PrivateOnScreen(!privacy.locked && shown.namesPrivateMaps(notes.private, privateTitles, ::quoted))
+
+        if (shown.keptBoth.isNotEmpty()) {
+            Note(pluralStringResource(R.plurals.settings_folder_kept_both, shown.keptBoth.size, titles(shown.keptBoth)))
         }
 
-        if (notes.tooBig.isNotEmpty()) {
+        if (shown.removed.isNotEmpty()) {
+            Note(pluralStringResource(R.plurals.settings_folder_removed, shown.removed.size, titles(shown.removed)))
+        }
+
+        if (shown.restored.isNotEmpty()) {
+            Note(pluralStringResource(R.plurals.settings_folder_restored, shown.restored.size, titles(shown.restored)))
+        }
+
+        if (shown.tooBig.isNotEmpty()) {
             Note(
                 pluralStringResource(
                     R.plurals.settings_folder_too_big,
-                    notes.tooBig.size,
-                    notes.tooBig.joinToString("; "),
+                    shown.tooBig.size,
+                    noteEntries(shown.tooBig, ::hiddenFile, { it }, separator = "; ") { count ->
+                        resources.getQuantityString(R.plurals.private_files_in_a_note, count, count)
+                    },
                     megabytes(VIDEO_SIZE_LIMIT, words),
                     megabytes(MAP_MEDIA_LIMIT, words),
                 ),
             )
         }
 
-        if (!notes.isEmpty) {
+        if (shown.large.isNotEmpty()) {
+            Note(
+                pluralStringResource(
+                    R.plurals.settings_folder_too_large,
+                    shown.large.size,
+                    noteEntries(shown.large, ::hiddenLarge, ::quoted) { count -> resources.getQuantityString(R.plurals.private_files_in_a_note, count, count) },
+                    megabytes(MAP_TEXT_LIMIT, words),
+                ),
+            )
+        }
+
+        if (shown.newer.isNotEmpty()) {
+            Note(pluralStringResource(R.plurals.settings_folder_newer_format, shown.newer.size, titles(shown.newer)))
+        }
+
+        if (!shown.isEmpty) {
             TextButton(onClick = folderSync::dismissNotes, modifier = Modifier.padding(horizontal = 16.dp)) { Text(stringResource(R.string.settings_got_it)) }
         }
+
+        FolderDevices(sync, now)
 
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
         ) {
-            OutlinedButton(onClick = { picker.launch(null) }) { Text(stringResource(R.string.settings_change_folder)) }
+            OutlinedButton(onClick = choose) { Text(stringResource(R.string.settings_change_folder)) }
             TextButton(onClick = ::stop) { Text(stringResource(R.string.settings_stop_keeping_maps_there)) }
         }
     }
 
     pickProblem?.let { Note(it, color = MaterialTheme.colorScheme.error) }
-
-    offer?.let { chosen ->
-        AlertDialog(
-            onDismissRequest = { offer = null },
-            title = {
-                EscapeCloses { offer = null }
-                Text(stringResource(R.string.settings_keep_maps_in_named_folder, chosen.name))
-            },
-            text = {
-                Text(pluralStringResource(R.plurals.settings_folder_has_markdown_files, chosen.files, chosen.files))
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        keep(chosen.tree)
-                        offer = null
-                    },
-                ) { Text(stringResource(R.string.settings_keep_maps_here)) }
-            },
-            dismissButton = { TextButton(onClick = { offer = null }) { Text(stringResource(R.string.common_cancel)) } },
-        )
-    }
 }
 
 @Composable
@@ -247,4 +238,55 @@ private fun status(resources: Resources, sync: FolderSyncState, now: Long): Stri
         }
         else -> resources.getString(R.string.settings_folder_checking)
     }
+}
+
+/**
+ * Whether these notes name a private map, one of `privateTitles` or of the
+ * notes' own `private` ones, or a picture or video too big for one, which
+ * an entry gives `quoted` after its name.
+ */
+internal fun FolderNotes.namesPrivateMaps(private: List<String>, privateTitles: Set<String>, quoted: (String) -> String): Boolean {
+    fun privateMap(title: String): Boolean = title in private || title in privateTitles
+
+    return (keptBoth + removed + restored).any(::privateMap) ||
+        tooBig.any { entry -> entry in private || privateTitles.any { entry.endsWith(quoted(it)) } } ||
+        large.any { it in private }
+}
+
+/**
+ * The notes as Settings shows them: while private maps hide (`concealing`), without the entries about
+ * them (`hiddenMap` for maps, `hiddenFile` for pictures and videos too big for one), so a note only
+ * about them isn't there at all. Otherwise, all of them.
+ */
+internal fun FolderNotes.shown(concealing: Boolean, hiddenMap: (String) -> Boolean, hiddenFile: (String) -> Boolean, hiddenLarge: (String) -> Boolean = { false }): FolderNotes =
+    if (concealing) {
+        copy(
+            keptBoth = keptBoth.filterNot(hiddenMap),
+            removed = removed.filterNot(hiddenMap),
+            restored = restored.filterNot(hiddenMap),
+            tooBig = tooBig.filterNot(hiddenFile),
+            large = large.filterNot(hiddenLarge),
+            newer = newer.filterNot(hiddenMap),
+        )
+    } else {
+        this
+    }
+
+/**
+ * What a folder note lists: each entry `named`, but the ones `hidden` (a
+ * locked private map's, and its pictures and videos) only `counted`, together,
+ * at the end. The entries are joined by `separator`, the last as `last` puts
+ * it after the others.
+ */
+internal fun <T> noteEntries(
+    entries: List<T>,
+    hidden: (T) -> Boolean,
+    named: (T) -> String,
+    separator: String = ", ",
+    last: (String, String) -> String = { before, end -> before + separator + end },
+    counted: (Int) -> String,
+): String {
+    val privateCount = entries.count(hidden)
+    val names = entries.filterNot(hidden).map(named) + listOfNotNull(privateCount.takeIf { it > 0 }?.let(counted))
+    return if (names.size < 2) names.joinToString(separator) else last(names.dropLast(1).joinToString(separator), names.last())
 }

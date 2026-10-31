@@ -4,13 +4,16 @@ import android.content.Context
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalRippleThemeConfiguration
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MotionScheme
+import androidx.compose.material3.RippleDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -111,6 +114,8 @@ fun OrbitTheme(dark: Boolean = appIsDark(), content: @Composable () -> Unit) {
         colorScheme = orbitColorScheme(LocalContext.current, dark, LocalAppSettings.current.dynamicColor),
         motionScheme = MotionScheme.expressive(),
         typography = OrbitTypography,
-        content = content,
-    )
+    ) {
+        // What has the keyboard's focus shows Material's ring around it, rather than a tint too faint to find on a card.
+        CompositionLocalProvider(LocalRippleThemeConfiguration provides RippleDefaults.InsetFocusRingThemeConfiguration, content = content)
+    }
 }

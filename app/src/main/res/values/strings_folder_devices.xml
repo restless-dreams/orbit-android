@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings, under the folder maps are kept in: the other devices that keep their maps there, as their records in the folder say. -->
+    <string name="folder_devices_title">Devices using this folder</string>
+    <string name="folder_devices_this_device">%1$s · this device</string>
+    <string name="folder_devices_version">Orbit %1$s</string>
+    <string name="folder_devices_synced_today">Orbit %1$s · synced today</string>
+    <!-- %2$s is home_yesterday or home_days_ago. -->
+    <string name="folder_devices_synced">Orbit %1$s · synced %2$s</string>
+    <string name="folder_devices_synced_on">Orbit %1$s · synced on %2$s</string>
+    <string name="folder_devices_newer">Has a newer Orbit than this device</string>
+    <string name="folder_devices_older">Has an older Orbit than this device</string>
+    <!-- %1$s is a list of file types, such as “.mp3 and .ogg”. -->
+    <string name="folder_devices_cannot_open">Can\'t open the %1$s files here</string>
+    <string name="folder_devices_this_cannot_open">This device can\'t open the %1$s files it adds</string>
+    <string name="folder_devices_shows_only">Opens maps saved by a newer Orbit read-only</string>
+    <string name="folder_devices_saves_newer">Saves maps this device can only show</string>
+    <string name="folder_devices_note">Devices show here once they sync with this version of Orbit or a later one.</string>
+    <string name="folder_devices_only_this_one">Other devices that keep their maps in this folder show here once they sync with this version of Orbit or a later one.</string>
+
+    <!-- Home, once, when another device in the folder matters to this one. -->
+    <string name="folder_notice_newer_title">“%1$s” has a newer Orbit</string>
+    <string name="folder_notice_newer_files">It adds %1$s files to your folder, which this Orbit can\'t open yet. Update Orbit here to open everything.</string>
+    <string name="folder_notice_newer_format">It saves maps this Orbit can only show. Update Orbit here to change them here too.</string>
+    <string name="folder_notice_older_title">“%1$s” has an older Orbit</string>
+    <string name="folder_notice_older_files">It can\'t open the %1$s files in your folder, so it shows your maps without them. Update Orbit there to see everything.</string>
+    <string name="folder_notice_older_format">It opens the maps this device saves read-only. Update Orbit there to change them there too.</string>
+</resources>

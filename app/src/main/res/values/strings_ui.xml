@@ -24,7 +24,7 @@
     <!-- When the phone's WebView is too old to draw maps. %1$s is its name, such as Android System WebView. -->
     <string name="ui_web_view_update_to_see_maps">Update %1$s to see your maps</string>
     <!-- %1$s is the WebView's name, %2$d its Chromium version, %3$d the version Orbit needs. -->
-    <string name="ui_web_view_too_old">Orbit draws maps with %1$s, and this phone\'s is too old: Chromium %2$d, where Orbit needs %3$d or later. Update it from your app store, or with a system update, and your maps will show. They\'re all still here.</string>
+    <string name="ui_web_view_too_old">Orbit draws maps with %1$s, and this device\'s is too old: Chromium %2$d, where Orbit needs %3$d or later. Update it from your app store, or with a system update, and your maps will show. They\'re all still here.</string>
     <string name="ui_web_view_update">Update %1$s</string>
 
     <!-- A button's name with the keys that do the same, as a hint shows them: Undo (Ctrl+Z). -->

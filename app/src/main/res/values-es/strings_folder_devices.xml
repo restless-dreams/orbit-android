@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="folder_devices_title">Dispositivos que usan esta carpeta</string>
+    <string name="folder_devices_this_device">%1$s · este dispositivo</string>
+    <string name="folder_devices_version">Orbit %1$s</string>
+    <string name="folder_devices_synced_today">Orbit %1$s · se sincronizó hoy</string>
+    <string name="folder_devices_synced">Orbit %1$s · se sincronizó %2$s</string>
+    <string name="folder_devices_synced_on">Orbit %1$s · se sincronizó el %2$s</string>
+    <string name="folder_devices_newer">Tiene un Orbit más nuevo que este dispositivo</string>
+    <string name="folder_devices_older">Tiene un Orbit más antiguo que este dispositivo</string>
+    <string name="folder_devices_cannot_open">No puede abrir los archivos %1$s de aquí</string>
+    <string name="folder_devices_this_cannot_open">Este dispositivo no puede abrir los archivos %1$s que agrega</string>
+    <string name="folder_devices_shows_only">Abre en solo lectura los mapas guardados por un Orbit más nuevo</string>
+    <string name="folder_devices_saves_newer">Guarda mapas que este dispositivo solo puede mostrar</string>
+    <string name="folder_devices_note">Los dispositivos aparecen aquí cuando se sincronizan con esta versión de Orbit o una posterior.</string>
+    <string name="folder_devices_only_this_one">Los otros dispositivos que guarden sus mapas en esta carpeta aparecerán aquí cuando se sincronicen con esta versión de Orbit o una posterior.</string>
+
+    <string name="folder_notice_newer_title">“%1$s” tiene un Orbit más nuevo</string>
+    <string name="folder_notice_newer_files">Agrega a tu carpeta archivos %1$s que este Orbit aún no puede abrir. Actualiza Orbit aquí para abrirlo todo.</string>
+    <string name="folder_notice_newer_format">Guarda mapas que este Orbit solo puede mostrar. Actualiza Orbit aquí para poder cambiarlos también aquí.</string>
+    <string name="folder_notice_older_title">“%1$s” tiene un Orbit más antiguo</string>
+    <string name="folder_notice_older_files">No puede abrir los archivos %1$s de tu carpeta, así que muestra tus mapas sin ellos. Actualiza Orbit allí para verlo todo.</string>
+    <string name="folder_notice_older_format">Abre en solo lectura los mapas que guarda este dispositivo. Actualiza Orbit allí para poder cambiarlos también allí.</string>
+</resources>

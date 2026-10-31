@@ -35,12 +35,13 @@ fun ListRow(
     containerColor: Color = Color.Transparent,
     headlineColor: Color = MaterialTheme.colorScheme.onSurface,
     leadingColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    verticalAlignment: Alignment.Vertical = Alignment.CenterVertically,
 ) {
     val colors = MaterialTheme.colorScheme
     val typography = MaterialTheme.typography
 
     Row(
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = verticalAlignment,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         modifier = modifier
             .background(containerColor)

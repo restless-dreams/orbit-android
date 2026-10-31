@@ -5,7 +5,7 @@
     <string name="share_new_map">Mapa nuevo de Orbit</string>
     <string name="share_add_to_map">Agregar a un mapa de Orbit</string>
     <string name="capture_label">Agregar una idea</string>
-    <string name="tile_capture">Agregar una idea</string>
+    <string name="tile_capture">Nueva idea</string>
     <string name="widget_label">Mapa de Orbit</string>
     <string name="widget_description">Un mapa en tu pantalla de inicio: su imagen, su avance y + para agregar una idea</string>
 </resources>

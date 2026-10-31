@@ -18,13 +18,48 @@ private const val NAME_BYTES_LIMIT = 1024
 
 internal val offerJson = Json { ignoreUnknownKeys = true }
 
-/** What `GET /key` answers: the key maps sent here are sealed to, for this launch, and the version they're sealed with. */
+/**
+ * What `GET /key` answers: the key maps sent here are sealed to, for this
+ * launch, and the version they're sealed with; and what of a map this
+ * device opens, as its answer to a hello says ([OfferAnswer]), for a sender
+ * that wants to know before it offers anything.
+ */
 @Serializable
-internal class KeyAnswer(val version: Int, val key: String)
+internal class KeyAnswer(val version: Int, val key: String, val mapFormat: Int? = null, val mediaTypes: List<String>? = null)
 
-/** What `POST /offer` answers once the offer is open: its id, and the receiver's half of the check code. */
+/**
+ * What `POST /offer` answers once the offer is open: its id, and the
+ * receiver's half of the check code; and what of a map this device opens,
+ * so the sender can say what won't open there before it goes: the newest
+ * map format its Orbit reads (`MAP_FORMAT`), and the extensions of the
+ * files it keeps in a map (`carriedMediaTypes`). Orbit 0.3.0 says neither
+ * ([DeviceReads.RELEASE_0_3_0]).
+ */
 @Serializable
-internal class OfferAnswer(val id: String, val nonce: String)
+internal class OfferAnswer(val id: String, val nonce: String, val mapFormat: Int? = null, val mediaTypes: List<String>? = null)
+
+/**
+ * What of a map a device taking maps opens: the newest map format its
+ * Orbit reads, and the extensions of the files it keeps in a map, in lower
+ * case. Answers only ever gain fields, so what one leaves unsaid is as
+ * Orbit 0.3.0 had it: the only release that takes offers of this version
+ * and says neither.
+ */
+internal data class DeviceReads(val mapFormat: Int, val mediaTypes: Set<String>) {
+    companion object {
+        /** What Orbit 0.3.0 opens: maps of format 1, with their pictures and videos. It plays no sounds, but keeps a voice memo, an `.mp4`. */
+        val RELEASE_0_3_0 = DeviceReads(
+            mapFormat = 1,
+            mediaTypes = setOf("png", "jpg", "jpeg", "gif", "webp", "avif", "heic", "heif", "bmp", "svg", "mp4", "m4v", "webm", "mov"),
+        )
+
+        /** What a device's answer says it opens, with what it leaves unsaid as Orbit 0.3.0 had it. */
+        fun of(mapFormat: Int?, mediaTypes: List<String>?): DeviceReads = DeviceReads(
+            mapFormat = mapFormat ?: RELEASE_0_3_0.mapFormat,
+            mediaTypes = mediaTypes?.map { it.lowercase() }?.toSet() ?: RELEASE_0_3_0.mediaTypes,
+        )
+    }
+}
 
 /** What the sender sends to `POST /offer/<id>` once it has the receiver's half of the check code: its own half. */
 @Serializable

@@ -308,3 +308,8 @@ body {
   height: 1.3em;
   fill: currentColor;
 }
+
+/* A ring's words where its idea is drawn too small to read them: Orbit marks the idea's box. */
+[data-orbit-small] .ring__words {
+  display: none;
+}

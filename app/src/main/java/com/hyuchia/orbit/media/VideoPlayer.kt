@@ -31,6 +31,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.automirrored.rounded.VolumeOff
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material3.FilledTonalButton
@@ -45,8 +47,10 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,7 +75,6 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -80,27 +83,23 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.util.Log
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.compose.ContentFrame
 import androidx.media3.ui.compose.SURFACE_TYPE_TEXTURE_VIEW
-import androidx.media3.ui.compose.material3.buttons.MuteButton
 import androidx.media3.ui.compose.material3.buttons.PlayPauseButton
 import androidx.media3.ui.compose.material3.buttons.SeekBackButton
 import androidx.media3.ui.compose.material3.buttons.SeekForwardButton
-import androidx.media3.ui.compose.material3.indicator.DurationText
-import androidx.media3.ui.compose.material3.indicator.PositionText
-import androidx.media3.ui.compose.material3.indicator.ProgressSlider
 import coil3.compose.AsyncImage
-import com.hyuchia.orbit.BuildConfig
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.cleanLink
+import com.hyuchia.orbit.ui.controlsLinger
 import com.hyuchia.orbit.ui.linkScheme
 import com.hyuchia.orbit.ui.openLink
+import com.hyuchia.orbit.ui.sharedFileUri
 import kotlinx.coroutines.delay
 
 /** How long the controls stay after a touch or a key while the video plays. */
@@ -108,6 +107,9 @@ private const val CONTROLS_LINGER_MILLISECONDS = 3_000L
 
 /** The buttons and the arrow keys go this far back or on. */
 private const val SEEK_MILLISECONDS = 10_000L
+
+/** How often the time and the slider follow the video as it plays. */
+private const val PROGRESS_TICK_MILLISECONDS = 250L
 
 /**
  * The idea's video, full screen, played by the player for where it's from:
@@ -164,11 +166,6 @@ fun VideoPlayer(
     val context = LocalContext.current
 
     val player = remember {
-        // Media3 logs its errors, which can name a map's folder or a video's site: not in release builds.
-        if (!BuildConfig.DEBUG) {
-            Log.setLogLevel(Log.LOG_LEVEL_OFF)
-        }
-
         ExoPlayer.Builder(context)
             .setSeekBackIncrementMs(SEEK_MILLISECONDS)
             .setSeekForwardIncrementMs(SEEK_MILLISECONDS)
@@ -205,9 +202,15 @@ fun VideoPlayer(
         }
     }
 
-    LaunchedEffect(controls, playing, touched) {
-        if (controls && playing) {
-            delay(CONTROLS_LINGER_MILLISECONDS)
+    // A screen reader can't tap hidden controls back: while one explores the screen, they stay.
+    val linger = controlsLinger(CONTROLS_LINGER_MILLISECONDS)
+    val lingering by rememberUpdatedState(linger)
+
+    LaunchedEffect(controls, playing, touched, linger) {
+        if (linger == null) {
+            controls = true
+        } else if (controls && playing) {
+            delay(linger)
             controls = false
         }
     }
@@ -282,7 +285,7 @@ fun VideoPlayer(
                     .background(Color.Black)
                     .pointerInput(Unit) {
                         detectTapGestures(onTap = {
-                            controls = !controls
+                            controls = !controls || lingering == null
                             touched += 1
                         })
                     }
@@ -348,7 +351,6 @@ fun VideoPlayer(
 }
 
 /** Closing, the video's name, its sound, and opening it in another app, over a shade. */
-@OptIn(UnstableApi::class)
 @Composable
 private fun PlayerTopBar(player: Player, title: String, onClose: () -> Unit, onElsewhere: (() -> Unit)?) {
     Row(
@@ -366,7 +368,7 @@ private fun PlayerTopBar(player: Player, title: String, onClose: () -> Unit, onE
         }
 
         Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
-        MuteButton(player)
+        PlayerMuteButton(player)
 
         if (onElsewhere != null) {
             val elsewhere = stringResource(R.string.media_open_in_another_app)
@@ -378,23 +380,65 @@ private fun PlayerTopBar(player: Player, title: String, onClose: () -> Unit, onE
     }
 }
 
-/** Where the video is, to drag, between the time it's at and how long it is, over a shade. */
-@OptIn(UnstableApi::class)
+/** The video's sound on or off, as a sound's own page turns it: the same button and words. */
+@Composable
+private fun PlayerMuteButton(player: Player) {
+    var muted by remember(player) { mutableStateOf(player.volume == 0f) }
+
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onVolumeChanged(volume: Float) {
+                muted = volume == 0f
+            }
+        }
+
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
+
+    val switch = stringResource(if (muted) R.string.audio_unmute else R.string.audio_mute)
+
+    Hint(switch) {
+        IconButton(onClick = { player.volume = if (muted) 1f else 0f }) {
+            Icon(if (muted) Icons.AutoMirrored.Rounded.VolumeOff else Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = switch)
+        }
+    }
+}
+
+/**
+ * Where the video is, to drag, with the time it's at and how long it is,
+ * over a shade: a sound's own timeline, so both read and sound the same,
+ * screen readers included.
+ */
 @Composable
 private fun PlayerProgress(player: Player) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    var position by remember(player) { mutableLongStateOf(player.currentPosition) }
+    var duration by remember(player) { mutableStateOf<Long?>(null) }
+
+    LaunchedEffect(player) {
+        while (true) {
+            position = player.currentPosition
+            duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
+            delay(PROGRESS_TICK_MILLISECONDS)
+        }
+    }
+
+    MediaTimeline(
+        position,
+        duration,
+        onSeek = { at ->
+            player.seekTo(at)
+            position = at
+        },
+        color = Color.White,
+        trackColor = Color.White.copy(alpha = 0.24f),
+        textColor = Color.White.copy(alpha = 0.78f),
         modifier = Modifier
             .fillMaxWidth()
             .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f))))
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal).union(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)))
             .padding(start = 20.dp, end = 20.dp, top = 32.dp, bottom = 12.dp),
-    ) {
-        PositionText(player, color = Color.White)
-        ProgressSlider(player, modifier = Modifier.weight(1f))
-        DurationText(player, color = Color.White)
-    }
+    )
 }
 
 /** Why the video doesn't play, on a shade that keeps it readable over the poster, and what to do when the phone can't play it: another app may. */
@@ -426,7 +470,7 @@ private fun PlayerProblem(message: String, onElsewhere: (() -> Unit)?, modifier:
 fun openVideoElsewhere(context: Context, source: VideoSource) {
     val address = when (source) {
         is VideoSource.InMap -> {
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", source.file)
+            val uri = sharedFileUri(context, source.file) ?: return
             val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "video/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
             try {

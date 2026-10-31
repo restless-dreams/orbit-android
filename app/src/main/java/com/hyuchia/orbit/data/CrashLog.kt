@@ -1,6 +1,9 @@
 package com.hyuchia.orbit.data
 
 import java.io.File
+import java.io.FileDescriptor
+import java.io.FileOutputStream
+import java.io.PrintStream
 import java.time.Instant
 import java.util.IdentityHashMap
 import kotlin.system.exitProcess
@@ -19,12 +22,15 @@ private const val SEEN = "seen"
 /** Packages whose exceptions say what went wrong in their own words: Orbit's own, and others', can carry what people wrote. */
 private val PLATFORM = listOf("java.", "javax.", "kotlin.", "kotlinx.", "android.", "androidx.", "dalvik.", "libcore.")
 
+/** Platform exceptions whose messages quote what they read, such as a map's JSON or a typed pattern: kept without them. */
+private val QUOTING = listOf("kotlinx.serialization.", "java.util.regex.")
+
 /** Links and addresses of any kind: content://, https://, file://. */
 private val ADDRESS = Regex("""\b[A-Za-z][A-Za-z0-9+.-]*://\S+""")
 /** Paths to files: /data/user/0/…/maps/trip/map.md. */
 private val PATH = Regex("""(?:/[^\s/:'"“”]+){2,}/?""")
-/** Text in double or curly quotes: a title, a line of a map. */
-private val QUOTED = Regex(""""[^"]*"|“[^”]*”|«[^»]*»""")
+/** Text in double, curly or single quotes: a title, a line of a map. An apostrophe inside a word, as in "can't", isn't one. */
+private val QUOTED = Regex(""""[^"]*"|“[^”]*”|«[^»]*»|‘[^’]*’|(?<![\p{L}\p{N}])'[^'\n]*'(?![\p{L}\p{N}])""")
 
 /** A crash kept on the phone: when it was, and its report. */
 class CrashReport(val time: Long, val file: File) {
@@ -59,6 +65,12 @@ class CrashLog(
             if (previous != null) {
                 previous.uncaughtException(thread, error)
             } else {
+                // Only a plain JVM gets here, such as the unit tests': Android always has a handler before this one. The
+                // process would end without a word, so the error goes to its standard error first, past any test runner
+                // that takes over System.err, for whoever runs it to see why.
+                val standardError = PrintStream(FileOutputStream(FileDescriptor.err), true)
+                standardError.println("Exception in thread \"${thread.name}\"")
+                error.printStackTrace(standardError)
                 exitProcess(10)
             }
         }
@@ -135,7 +147,7 @@ class CrashLog(
     private fun message(error: Throwable, masked: Collection<String>): String? {
         val message = error.message?.takeIf { it.isNotBlank() } ?: return null
 
-        if (PLATFORM.none { error.javaClass.name.startsWith(it) }) {
+        if (PLATFORM.none { error.javaClass.name.startsWith(it) } || QUOTING.any { error.javaClass.name.startsWith(it) }) {
             return null
         }
 
@@ -149,7 +161,8 @@ class CrashLog(
          * titles) are replaced with "…".
          */
         fun maskMessage(message: String, masked: Collection<String>): String {
-            var text = ADDRESS.replace(message, "…")
+            // What a parser read follows "JSON input": whatever quotes it has, it's left out whole.
+            var text = ADDRESS.replace(message.substringBefore("JSON input"), "…")
             text = PATH.replace(text, "…")
             text = QUOTED.replace(text, "\"…\"")
 

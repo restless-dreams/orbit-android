@@ -1,5 +1,8 @@
 package com.hyuchia.orbit.nearby
 
+import com.hyuchia.orbit.data.carriedMediaTypes
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,6 +14,14 @@ import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.nio.ByteBuffer
 import java.util.UUID
+
+/** What Orbit 0.3.0 reads of the answer to `GET /key` (OfferProtocol.kt at 4db0723). */
+@Serializable
+private class KeyAnswerIn030(val version: Int, val key: String)
+
+/** What Orbit 0.3.0 reads of the answer to a hello. */
+@Serializable
+private class OfferAnswerIn030(val id: String, val nonce: String)
 
 class OfferProtocolTest {
     private val key = DeviceKey.of(newKeyPair())
@@ -68,6 +79,25 @@ class OfferProtocolTest {
         val tooLong = ByteBuffer.allocate(2).putShort(5_000).array()
         assertThrows(UnreadableOfferException::class.java) { OfferHead.read(ByteArrayInputStream(tooLong + ByteArray(5_100))) }
         assertNotNull(OfferHead.read(ByteArrayInputStream(OfferHead("", commitment).bytes())))
+    }
+
+    @Test
+    fun `answers say what of a map a device opens, which the release before reads past, and its own answers are read as it opens`() {
+        val key = offerJson.encodeToString(KeyAnswer.serializer(), KeyAnswer(OFFER_VERSION, "key", mapFormat = 2, mediaTypes = listOf("jpg", "mp3")))
+        val offer = offerJson.encodeToString(OfferAnswer.serializer(), OfferAnswer("id", "nonce", mapFormat = 2, mediaTypes = listOf("jpg", "mp3")))
+        assertTrue(offer, offer.contains("\"mapFormat\":2") && offer.contains("\"mediaTypes\":[\"jpg\",\"mp3\"]"))
+
+        // Orbit 0.3.0 reads them as it always has, leaving out what it doesn't know.
+        val orbit030 = Json { ignoreUnknownKeys = true }
+        assertEquals(OFFER_VERSION, orbit030.decodeFromString(KeyAnswerIn030.serializer(), key).version)
+        assertEquals("nonce", orbit030.decodeFromString(OfferAnswerIn030.serializer(), offer).nonce)
+
+        // Its own answers say nothing of it: it opens maps of format 1, with their pictures and videos.
+        val fromOrbit030 = offerJson.decodeFromString(OfferAnswer.serializer(), "{\"id\":\"id\",\"nonce\":\"nonce\"}")
+        assertEquals(DeviceReads.RELEASE_0_3_0, DeviceReads.of(fromOrbit030.mapFormat, fromOrbit030.mediaTypes))
+        assertEquals(DeviceReads(2, setOf("jpg", "mp3")), DeviceReads.of(2, listOf("JPG", "mp3")))
+        // Kinds of file are only ever added: every one 0.3.0 keeps, this version keeps too.
+        assertTrue(carriedMediaTypes().containsAll(DeviceReads.RELEASE_0_3_0.mediaTypes))
     }
 
     @Test

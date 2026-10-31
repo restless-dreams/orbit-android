@@ -10,7 +10,9 @@ import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.EaseInOutCubic
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -243,7 +245,7 @@ fun rememberTalk(model: MapViewModel, onMessage: (String, String?, (() -> Unit)?
     return talk
 }
 
-private fun openAppSettings(context: Context) {
+internal fun openAppSettings(context: Context) {
     context.startActivity(
         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -308,6 +310,9 @@ fun Modifier.holdToTalk(talk: Talk, onHold: () -> Unit): Modifier = this
         }
     }
 
+/** How the talk's panel comes and goes: as long as Orbit's glide for a short move (240 ms), with its easing. */
+private val TalkMotion = tween<Float>(durationMillis = 240, easing = EaseInOutCubic)
+
 /**
  * The talk as it goes, floating over the map: a microphone that swells with
  * the voice, the words being said, how many ideas joined, and Done when the
@@ -318,10 +323,12 @@ fun TalkPanel(talk: Talk, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     val heard by talk.heard.collectAsState()
 
+    // The map glides to make room for the panel with Orbit's camera (240 ms for a short move, easing in and out): the
+    // panel comes and goes in the same time and easing, so the two read as one motion.
     AnimatedVisibility(
         visible = talk.active,
-        enter = fadeIn() + scaleIn(initialScale = 0.9f),
-        exit = fadeOut() + scaleOut(targetScale = 0.9f),
+        enter = fadeIn(TalkMotion) + scaleIn(TalkMotion, initialScale = 0.9f),
+        exit = fadeOut(TalkMotion) + scaleOut(TalkMotion, targetScale = 0.9f),
         modifier = modifier,
     ) {
         Surface(

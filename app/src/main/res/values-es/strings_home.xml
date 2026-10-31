@@ -9,16 +9,30 @@
     <string name="home_deleted_map">Se eliminó “%1$s”</string>
     <string name="home_add_widget_from_list">Agrega el widget de Orbit desde la lista de widgets de tu pantalla de inicio</string>
     <string name="home_could_not_share_map">Orbit no pudo crear un archivo de ese mapa para compartirlo. ¿Está lleno el almacenamiento de este dispositivo?</string>
+    <string name="home_map_from_newer_orbit">Una versión más reciente de Orbit hizo este mapa, así que esta lo deja como está. Actualiza Orbit para cambiarlo.</string>
+    <string name="home_map_unreadable">Orbit no pudo leer todo este mapa, así que lo deja como está. Ábrelo para corregir su texto.</string>
+    <string name="home_map_kept_changing">El mapa no dejaba de cambiar, así que Orbit lo dejó como estaba. Vuelve a intentarlo.</string>
+    <plurals name="home_tag_left_on_maps">
+        <item quantity="one">La etiqueta se queda en %1$d mapa que Orbit solo puede mostrar: lo hizo una versión más reciente o no puede leerlo todo.</item>
+        <item quantity="many">La etiqueta se queda en %1$d mapas que Orbit solo puede mostrar: los hizo una versión más reciente o no puede leerlos todos.</item>
+        <item quantity="other">La etiqueta se queda en %1$d mapas que Orbit solo puede mostrar: los hizo una versión más reciente o no puede leerlos todos.</item>
+    </plurals>
     <string name="home_pinned_maps">Fijados</string>
     <string name="home_everything_else">Todo lo demás</string>
     <string name="home_clear_the_search">Borrar la búsqueda</string>
     <string name="home_no_maps_match">Ningún mapa coincide con “%1$s”</string>
+    <string name="home_no_maps_match_said">Ningún mapa coincide</string>
     <string name="home_search_looks_in">Se busca en los títulos, las ideas y las notas.</string>
-    <string name="home_sort_last_edited">Última edición</string>
-    <string name="home_sort_last_opened">Última apertura</string>
+    <plurals name="home_maps_match">
+        <item quantity="one">%1$d mapa coincide</item>
+        <item quantity="many">%1$d mapas coinciden</item>
+        <item quantity="other">%1$d mapas coinciden</item>
+    </plurals>
+    <string name="home_sort_last_edited">Últimos editados</string>
+    <string name="home_sort_last_opened">Últimos abiertos</string>
     <string name="home_sort_newest_first">Más nuevos primero</string>
     <string name="home_sort_by_title">Por título</string>
-    <string name="home_sort_current">Actual</string>
+    <string name="home_sorted_by">Orden: %1$s</string>
     <string name="home_empty_title">Tus ideas, en órbita</string>
     <string name="home_empty_body">Empieza con un mapa en blanco o una plantilla. En un mapa, toca + para agregar ideas y mantén presionada cualquier idea para cambiarla.</string>
     <string name="home_templates">Plantillas</string>
@@ -27,7 +41,6 @@
     <string name="home_from_a_template">Desde una plantilla</string>
     <string name="home_menu_open">Abierto</string>
     <string name="home_menu_closed">Cerrado</string>
-    <string name="home_close_the_menu">Cerrar el menú</string>
 
     <string name="home_what_is_it_about">¿De qué se trata?</string>
     <string name="home_create">Crear</string>
@@ -95,13 +108,13 @@
     </plurals>
 
     <string name="home_start_a_map">Empezar un mapa</string>
-    <string name="home_templates_drawn_live">Orbit dibuja las plantillas en vivo, cada una con su estilo</string>
+    <string name="home_start_a_map_subtitle">Empieza con un mapa en blanco, un archivo o una plantilla</string>
     <string name="home_blank_map_description">Solo un título y espacio para ideas</string>
     <string name="home_open_a_file_description">Markdown, YAML, un archivo zip con imágenes, OPML, FreeMind o XMind</string>
     <string name="home_start_a_map_from_template">Empezar un mapa con esta plantilla</string>
 
     <string name="home_crash_title">Orbit se cerró inesperadamente la última vez</string>
-    <string name="home_crash_body">En este teléfono hay un informe de lo que falló: las versiones de Orbit y de Android y en qué parte de Orbit pasó, nada de tus mapas. Compartirlo ayuda a corregirlo.</string>
+    <string name="home_crash_body">En este dispositivo hay un informe de lo que falló: las versiones de Orbit y de Android y en qué parte de Orbit pasó, nada de tus mapas. Compartirlo ayuda a corregirlo.</string>
     <string name="home_dismiss">Descartar</string>
     <string name="home_share_report">Compartir informe</string>
     <string name="home_share_the_crash_report">Compartir el informe del fallo</string>
@@ -113,8 +126,9 @@
 
     <string name="home_edit_tags">Editar etiquetas</string>
     <string name="home_rename_tag">Cambiar nombre de la etiqueta</string>
+    <string name="home_rename_named_tag">Cambiar nombre de “%1$s”</string>
     <string name="home_tag">Etiqueta</string>
-    <string name="home_remove_tag">Quitar de todos los mapas</string>
+    <string name="home_remove_named_tag">Quitar “%1$s” de todos los mapas</string>
     <plurals name="home_remove_tag_question">
         <item quantity="one">¿Quitar “%1$s” de %2$d mapa?</item>
         <item quantity="many">¿Quitar “%1$s” de %2$d mapas?</item>
@@ -122,4 +136,37 @@
     </plurals>
     <string name="home_remove_tag_body">Los mapas quedan como están, sin esta etiqueta.</string>
     <string name="home_show_only_its_maps">Mostrar solo sus mapas</string>
+    <string name="home_folder_problem_title">Tus mapas no están sincronizados con su carpeta</string>
+    <string name="home_folder_problem_try_again">Intentar de nuevo</string>
+    <plurals name="home_private_maps_not_restored_title">
+        <item quantity="one">Tu mapa privado no estaba en la copia de seguridad</item>
+        <item quantity="many">Tus %1$d mapas privados no estaban en la copia de seguridad</item>
+        <item quantity="other">Tus %1$d mapas privados no estaban en la copia de seguridad</item>
+    </plurals>
+    <string name="home_private_maps_not_restored_folder">La copia de seguridad de Android deja fuera los mapas privados si no va cifrada. Cuando Orbit vuelva a acceder a tu carpeta, volverán de ella como mapas comunes: vuelve a hacerlos privados.</string>
+    <string name="home_private_maps_not_restored_export">La copia de seguridad de Android deja fuera los mapas privados si no va cifrada. Si exportaste tus mapas, Importar mapas, en Configuración, los trae de vuelta, todavía privados.</string>
+    <plurals name="home_folder_files_gone_title">
+        <item quantity="one">El archivo de un mapa salió de la carpeta</item>
+        <item quantity="many">Los archivos de %1$d mapas salieron de la carpeta</item>
+        <item quantity="other">Los archivos de %1$d mapas salieron de la carpeta</item>
+    </plurals>
+    <plurals name="home_folder_files_gone">
+        <item quantity="one">%1$s ya no está en “%2$s”. Si se eliminó allí, aquí también va a la papelera. Si se movió, o una app de sincronización lo perdió, consérvalo y Orbit lo vuelve a escribir.</item>
+        <item quantity="many">%1$s ya no están en “%2$s”. Si se eliminaron allí, aquí también van a la papelera. Si se movieron, o una app de sincronización los perdió, consérvalos y Orbit los vuelve a escribir.</item>
+        <item quantity="other">%1$s ya no están en “%2$s”. Si se eliminaron allí, aquí también van a la papelera. Si se movieron, o una app de sincronización los perdió, consérvalos y Orbit los vuelve a escribir.</item>
+    </plurals>
+    <string name="home_folder_files_gone_keep">Conservar y volver a escribir</string>
+    <string name="home_folder_files_gone_remove">Mover a la papelera</string>
+    <plurals name="home_folder_removed_title">
+        <item quantity="one">Un mapa pasó a la papelera</item>
+        <item quantity="many">%1$d mapas pasaron a la papelera</item>
+        <item quantity="other">%1$d mapas pasaron a la papelera</item>
+    </plurals>
+    <plurals name="home_folder_removed">
+        <item quantity="one">Su archivo se eliminó de “%2$s”: %1$s. Espera en la papelera, y sus 30 días allí empiezan cuando hayas visto esto.</item>
+        <item quantity="many">Sus archivos se eliminaron de “%2$s”: %1$s. Esperan en la papelera, y sus 30 días allí empiezan cuando hayas visto esto.</item>
+        <item quantity="other">Sus archivos se eliminaron de “%2$s”: %1$s. Esperan en la papelera, y sus 30 días allí empiezan cuando hayas visto esto.</item>
+    </plurals>
+    <string name="home_folder_open_trash">Abrir la papelera</string>
+    <string name="home_list_last">%1$s y %2$s</string>
 </resources>

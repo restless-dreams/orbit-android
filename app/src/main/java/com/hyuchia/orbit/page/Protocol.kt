@@ -1,12 +1,28 @@
 package com.hyuchia.orbit.page
 
 import com.hyuchia.orbit.media.MediaKind
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.doubleOrNull
+import kotlin.math.ceil
+
+/** The version of a goal's fields this app reads; a change older apps would misread raises it (`goal@2`). */
+const val GOAL_VERSION = 1
+
+/** The version of what a Progress idea counts that this app reads, as [GOAL_VERSION] is a goal's. */
+const val PROGRESS_VERSION = 1
 
 /**
  * The Material colors maps take on when they don't pick a style: Orbit's
@@ -31,7 +47,14 @@ data class Media(
     val caption: String? = null,
     val provider: String? = null,
     val thumbnail: String? = null,
+
+    /** A picture's motion, when it's a live photo's: the few seconds of video around it. */
+    val motion: MediaMotion? = null,
 )
+
+/** A live photo's motion: its video's address, and where in it the still was taken, in seconds, when that's known. */
+@Serializable
+data class MediaMotion(val src: String, val still: Double? = null)
 
 /** A node of the map, as the outline, search and editor see it. */
 @Serializable
@@ -54,10 +77,14 @@ data class MapNode(
     val drawnColor: String? = null,
 
     val status: String? = null,
-    val priority: Int? = null,
+    @Serializable(with = MapWholeNumberSerializer::class) val priority: Int? = null,
     val tags: List<String> = emptyList(),
     val collapsed: Boolean = false,
     val type: String? = null,
+
+    /** The version of its type's fields it was written for (`goal@2`), when it says. */
+    @Serializable(with = MapWholeNumberSerializer::class) val typeVersion: Int? = null,
+
     val link: String? = null,
     val note: String? = null,
     val noteFormat: String? = null,
@@ -67,31 +94,44 @@ data class MapNode(
 
     /** Attributes Orbit doesn't use itself, as they were read: a goal's numbers, or another app's. */
     val attrs: JsonObject? = null,
+
+    /** Its sound: a voice memo, music or a recording. */
+    val audio: Media? = null,
 ) {
     val isRoot: Boolean get() = parentId == null
 
-    /** A goal idea, which tracks a number toward a target (see `map/Goal.kt`). */
-    val isGoal: Boolean get() = type?.trim().equals("goal", ignoreCase = true)
+    /**
+     * A goal idea, which tracks a number toward a target (see `map/Goal.kt`):
+     * one written for this version of a goal's fields (`GOAL_VERSION`, as the
+     * page's `web/goal.ts` says) or an older one. A goal for a newer one may
+     * mean its numbers another way, so it's an idea like any other here.
+     */
+    val isGoal: Boolean get() = type?.trim().equals("goal", ignoreCase = true) && (typeVersion ?: 1) <= GOAL_VERSION
 
     /** The node's text with its icon, as the map shows it, with `untitled` for text it doesn't have. */
     fun label(untitled: String): String = listOfNotNull(icon, text.ifBlank { untitled }).joinToString(" ")
 
     /** Whether the details sheet has something to show beyond the title. */
     val hasDetails: Boolean
-        get() = !note.isNullOrBlank() || image != null || video != null || embed != null || link != null ||
+        get() = !note.isNullOrBlank() || image != null || video != null || audio != null || embed != null || link != null ||
             tags.isNotEmpty() || status != null || priority != null || isGoal
 }
 
-/** The map's frontmatter options the app shows and changes. */
+/** The map's frontmatter options the app shows and changes, by the names Orbit and the file give them. */
 @Serializable
 data class MapOptions(
     val theme: String? = null,
     val palette: List<String>? = null,
     val showRings: Boolean? = null,
-    val orbitAnimation: Boolean? = null,
-    val orbitSpeed: Double? = null,
-    val maxDepth: Int? = null,
-    val viewMode: String? = null,
+
+    /** Whether the orbit drifts by itself, one turn every [speed] seconds. */
+    val animation: Boolean? = null,
+
+    val speed: Double? = null,
+    @Serializable(with = MapWholeNumberSerializer::class) val maxDepth: Int? = null,
+
+    /** The view the map opens in: `focus` or `all`. */
+    val view: String? = null,
 
     /** The app's own: `false` when ideas with to-dos or goals don't show progress rings by themselves. */
     val progressRings: Boolean? = null,
@@ -99,6 +139,12 @@ data class MapOptions(
     /** The app's own: the map's tags, which Home groups maps by (see `data/MapTags.kt`). */
     val tags: List<String>? = null,
 )
+
+/** The map's two views, as the page names them (Orbit's `view`): one idea with its orbit around it, or the whole map. */
+object ViewMode {
+    const val FOCUS = "focus"
+    const val OVERVIEW = "all"
+}
 
 /** The whole map, as the page reports it after every change. */
 @Serializable
@@ -113,8 +159,8 @@ data class MapState(
     /** Ids from the root to the node in focus. */
     val path: List<String> = emptyList(),
 
-    /** `focus` or `all`. */
-    val mode: String = "focus",
+    /** `focus` or `all` ([ViewMode]). */
+    val mode: String = ViewMode.FOCUS,
 
     /** The style the map picks, when Orbit knows it. */
     val style: String? = null,
@@ -135,10 +181,6 @@ data class MapState(
     val root: MapNode? get() = nodes.firstOrNull()
 }
 
-/** An idea caught on the go: its text, and the whole of it as its note when the text was cut short. */
-@Serializable
-data class CapturedIdea(val text: String, val note: String? = null)
-
 /** A node that got a new id from new text. */
 @Serializable
 data class Renamed(val from: String, val to: String)
@@ -152,6 +194,14 @@ data class Diagnostic(val message: String, val line: Int? = null, val severity: 
 /** What a file someone opens makes, before it becomes a map. */
 @Serializable
 data class CheckedMap(val title: String, val nodes: Int, val diagnostics: List<Diagnostic>, val markdown: String)
+
+/**
+ * A map's text with a change made from outside its screen ([MapCommand.EditMap]),
+ * or null, with why it was `refused`: Orbit can only show the map, which a
+ * newer Orbit made (`newer`) or it can't read all of (`unreadable`).
+ */
+@Serializable
+data class EditedMap(val markdown: String? = null, val refused: String? = null)
 
 /** What a file from another app makes: its maps (one, or one for each sheet of an XMind workbook), or why it makes none. */
 @Serializable
@@ -181,7 +231,8 @@ sealed interface MapMessage {
 
     /**
      * The map changed: an edit, new options, or an earlier version drawn again
-     * (`restore`). `renamed` says when the app's change gave a node a new id.
+     * (`restore`). `renamed` says when the change gave a node a new id: one
+     * the app asked for, or text typed on the map.
      */
     @Serializable @SerialName("saved")
     data class Saved(
@@ -193,6 +244,9 @@ sealed interface MapMessage {
 
         /** The text of an idea removed on the page itself, by its Delete key, for the app's Undo. */
         val removed: String? = null,
+
+        /** The revision of the text the page last drew whole (`Load`, `Restore`) when it made this save; null from a page before revisions. */
+        val revision: Int? = null,
     ) : MapMessage
 
     /** The map's state changed without anything to save, such as its colors. */
@@ -253,6 +307,10 @@ sealed interface MapMessage {
     @Serializable @SerialName("error")
     data class Error(val message: String) : MapMessage
 
+    /** Orbit didn't make a change the app asked for (`add`, `update` or `options`): a value in it can't be read. The map is as it was. */
+    @Serializable @SerialName("declined")
+    data class Declined(val change: String, val message: String) : MapMessage
+
     /** The system stopped the page's process (to free memory, say): the map has to load again. */
     @Serializable @SerialName("stopped")
     data object Stopped : MapMessage
@@ -271,6 +329,14 @@ sealed interface MapMessage {
         val ended: Boolean = false,
         val muted: Boolean = false,
     ) : MapMessage
+
+    /** Something dragged onto the map from another app would go into idea `id` now, lit up; none when it's off the map. */
+    @Serializable @SerialName("dropTarget")
+    data class DropTarget(val id: String? = null) : MapMessage
+
+    /** Idea `id`, dragged on the map, went out of the window: it goes on as a drag another app can take. */
+    @Serializable @SerialName("dragOut")
+    data class DragOut(val id: String) : MapMessage
 }
 
 /** Commands for the page. */
@@ -290,6 +356,9 @@ sealed interface MapCommand {
         val focus: String? = null,
         val view: String? = null,
         val mapId: String? = null,
+
+        /** The app's revision of this text, which the page's saves say until the next `load` or `restore`. */
+        val revision: Int = 0,
     ) : MapCommand
 
     /** Clears the page for the next map. */
@@ -302,8 +371,9 @@ sealed interface MapCommand {
     @Serializable @SerialName("settings")
     data class Settings(val settings: MapSettings) : MapCommand
 
+    /** The map's controls moved: with `glide`, a fitted map glides to its new place, for a change made once. */
     @Serializable @SerialName("insets")
-    data class Insets(val insets: MapInsets) : MapCommand
+    data class Insets(val insets: MapInsets, val glide: Boolean = false) : MapCommand
 
     /** Types a node's text where it is, on the map. */
     @Serializable @SerialName("edit")
@@ -360,7 +430,12 @@ sealed interface MapCommand {
      * saves that very text itself.
      */
     @Serializable @SerialName("restore")
-    data class Restore(val markdown: String) : MapCommand
+    data class Restore(
+        val markdown: String,
+
+        /** The app's revision of this text: the same as before for its own undo, a new one for a change from elsewhere. */
+        val revision: Int = 0,
+    ) : MapCommand
 
     /**
      * Keeps the map from any change, for `reason` (`deleted`: the map went to
@@ -404,7 +479,7 @@ sealed interface MapCommand {
         /** Another style to draw the map in; empty draws it in the app's colors. */
         val style: String? = null,
 
-        val viewMode: String? = null,
+        val view: String? = null,
         val focus: String? = null,
         val baseUrl: String? = null,
     ) : MapCommand
@@ -425,12 +500,22 @@ sealed interface MapCommand {
     data class Check(val job: Int, val text: String) : MapCommand
 
     /**
-     * Adds `ideas` to a map's text, under `parentId` or its top, and answers
-     * with the text as Orbit writes it. Fails for a map Orbit can't read all
-     * of, or one a newer Orbit made.
+     * Adds the ideas in `text` to a map's text, under `parentId` or its top:
+     * a line each, nested as pasting nests them, a long one named by its
+     * start and kept whole as its note. Answers with the text as Orbit writes
+     * it. Fails for a map Orbit can't read all of, or one a newer Orbit made.
      */
     @Serializable @SerialName("addIdeas")
-    data class AddIdeas(val job: Int, val markdown: String, val ideas: List<CapturedIdea>, val parentId: String? = null) : MapCommand
+    data class AddIdeas(val job: Int, val markdown: String, val text: String, val parentId: String? = null) : MapCommand
+
+    /**
+     * A map's text with a new `title` or new `tags`, or both (null leaves
+     * one as it is), made as the map's screen makes them, through Orbit's
+     * reading of it, markdown or YAML (web/map-edits.ts). Answered with an
+     * [EditedMap]: the text as Orbit writes it, or why it's left as it is.
+     */
+    @Serializable @SerialName("editMap")
+    data class EditMap(val job: Int, val markdown: String, val title: String? = null, val tags: List<String>? = null) : MapCommand
 
     /** An idea and everything under it, answered as a [CopiedIdea]. */
     @Serializable @SerialName("copy")
@@ -442,7 +527,52 @@ sealed interface MapCommand {
      */
     @Serializable @SerialName("paste")
     data class Paste(val job: Int, val parentId: String, val text: String) : MapCommand
+
+    /**
+     * Something dragged from another app is over the map, at (`x`, `y`) dp
+     * from its top left: the idea it would go into lights up, and the page
+     * says which ([MapMessage.DropTarget]).
+     */
+    @Serializable @SerialName("dropOver")
+    data class DropOver(val x: Float, val y: Float) : MapCommand
+
+    /** The drag from another app left the map, or ended: the idea lit up for it goes out. */
+    @Serializable @SerialName("dropLeave")
+    data object DropLeave : MapCommand
+
+    /** Where something let go at (`x`, `y`) dp goes, answered as a [DropPlace]; the light goes out. */
+    @Serializable @SerialName("dropAt")
+    data class DropAt(val job: Int, val x: Float, val y: Float) : MapCommand
+
+    /**
+     * Ideas the app made, each its text and attributes (pictures dropped from
+     * another app, say), under `parentId` after its last: one change, one step
+     * to undo. Answered with [PastedIdeas].
+     */
+    @Serializable @SerialName("addNodes")
+    data class AddNodes(val job: Int, val parentId: String, val nodes: List<JsonObject>) : MapCommand
+
+    /**
+     * A new map's orbit-md from text indented as an outline, nested as
+     * pasting nests it (web/paste.ts `mapFromText`): one line with everything
+     * else under it in the middle, otherwise the first line, or `subject`
+     * when the text came with one. Answers with the map's text.
+     */
+    @Serializable @SerialName("mapFromText")
+    data class MapFromText(val job: Int, val text: String, val subject: String? = null) : MapCommand
+
+    /** Keeps the ideas under each of `ids` out of view until they're revealed, for study mode: how the map looks, never what's saved. */
+    @Serializable @SerialName("hideChildren")
+    data class HideChildren(val ids: List<String>) : MapCommand
+
+    /** Shows the ideas hidden under `ids` again, growing out of their ideas; null shows every hidden idea. */
+    @Serializable @SerialName("revealChildren")
+    data class RevealChildren(val ids: List<String>? = null) : MapCommand
 }
+
+/** The idea something dropped from another app goes into: the one under it, or the one in focus. None on a map that can't change. */
+@Serializable
+data class DropPlace(val id: String? = null)
 
 /** An idea copied with everything under it: as orbit-md, for Orbit to paste, and as an outline for other apps. */
 @Serializable
@@ -483,7 +613,11 @@ sealed interface AudienceCommand {
     @Serializable @SerialName("media")
     data class Media(val id: String, val kind: MediaKind, val playing: Boolean = false, val at: Double = 0.0) : AudienceCommand
 
-    /** Plays the video on screen, or pauses it, where it is. */
+    /**
+     * Plays the video on screen, or pauses it, where it is. Screens from 0.4.0 on play a live photo's
+     * motion through once for it, or settle it back on its picture: the app sends it for a live photo
+     * shown over the map as the presenter plays it again.
+     */
     @Serializable @SerialName("playback")
     data class Playback(val playing: Boolean) : AudienceCommand
 
@@ -498,6 +632,32 @@ sealed interface AudienceCommand {
     /** The presentation ended: the screen goes back to waiting. */
     @Serializable @SerialName("end")
     data object End : AudienceCommand
+}
+
+/**
+ * A whole number a map writes (how many levels it shows, an idea's priority,
+ * the version of a kind of idea), read from any number the page sends. Orbit
+ * takes any number for these (`maxDepth: 1.5`, `priority: 1e12`,
+ * `type: goal@99999999999`), and one an Int can't hold would lose the whole
+ * message: a map that never gets ready, or a save with its edit. The page
+ * sends each as the whole number nearest what it means (web/whole-numbers.ts);
+ * any other is rounded up, as a level or a version past a whole one counts
+ * as the next, and one past an Int's range is the nearest end of it.
+ */
+internal object MapWholeNumberSerializer : KSerializer<Int> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("com.hyuchia.orbit.page.MapWholeNumber", PrimitiveKind.INT)
+
+    override fun deserialize(decoder: Decoder): Int {
+        val json = decoder as? JsonDecoder ?: return decoder.decodeInt()
+        val number = (json.decodeJsonElement() as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull
+            ?: throw SerializationException("A map's whole number is a number")
+        // Double.toInt() takes a number past an Int's range to the nearest end of it.
+        return ceil(number).toInt()
+    }
+
+    override fun serialize(encoder: Encoder, value: Int) {
+        encoder.encodeInt(value)
+    }
 }
 
 /**

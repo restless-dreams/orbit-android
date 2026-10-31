@@ -21,26 +21,31 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.outlined.AddPhotoAlternate
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.FormatBold
 import androidx.compose.material.icons.outlined.FormatItalic
-import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.LinkOff
+import androidx.compose.material.icons.outlined.MotionPhotosOn
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material.icons.outlined.Visibility
-import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ButtonGroupDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
@@ -51,9 +56,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ToggleButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -71,7 +76,10 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
@@ -79,17 +87,20 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.media.LiveMark
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.Media
 import com.hyuchia.orbit.theme.parseCssColor
 import com.hyuchia.orbit.ui.ColorChoices
 import com.hyuchia.orbit.ui.EscapeCloses
+import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.MarkdownNote
-import com.hyuchia.orbit.ui.offeredCustomColors
 import com.hyuchia.orbit.ui.ToggleRow
+import com.hyuchia.orbit.ui.offeredCustomColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
@@ -98,6 +109,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.io.File
 import java.text.NumberFormat
 
 /** A kind of idea, drawn its own way by the map page's node types. */
@@ -130,6 +142,13 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
     val pickPicture = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
             model.addPicture(node.id, uri, context.contentResolver)
+        }
+    }
+
+    // The movie an iPhone took with a picture, which makes it a live photo.
+    val pickMotion = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            model.addMotion(node.id, uri, context.contentResolver)
         }
     }
 
@@ -217,19 +236,16 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
             }
 
             Section(stringResource(R.string.map_section_priority)) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Choice(stringResource(R.string.map_priority_none), node.priority == null) { set("priority", null) }
-
-                    (1..5).forEach { level ->
-                        Choice("$level", node.priority == level) { set("priority", JsonPrimitive(level)) }
-                    }
-                }
+                PriorityChoice(node.priority) { level -> set("priority", level?.let(::JsonPrimitive)) }
             }
 
             Section(stringResource(R.string.map_section_kind)) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     NodeKinds.forEach { kind ->
-                        Choice("${kind.icon}  ${stringResource(kind.label)}", node.type.equals(kind.type, ignoreCase = true) || (kind.type == null && node.type == null)) {
+                        // The emoji shows before the name, and screen readers say the name alone ("Milestone", not "chequered flag, Milestone").
+                        val icon = @Composable { Text(kind.icon, modifier = Modifier.clearAndSetSemantics {}) }
+
+                        Choice(stringResource(kind.label), node.type.equals(kind.type, ignoreCase = true) || (kind.type == null && node.type == null), icon) {
                             val type = kind.type?.let(::JsonPrimitive)
 
                             if (node.isGoal && kind.type != GOAL_TYPE) {
@@ -297,27 +313,46 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
                 val image = node.image
 
                 if (image != null) {
-                    AsyncImage(
-                        model = model.mediaModel(image.src),
-                        contentDescription = image.alt,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(16f / 10f)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                    )
+                    var failed by remember(image.src) { mutableStateOf(false) }
+
+                    // A picture that can't load says so in a line, above the ways to replace or remove it.
+                    if (failed) {
+                        PictureProblem()
+                    } else {
+                        Box {
+                            AsyncImage(
+                                model = model.mediaModel(image.src),
+                                contentDescription = image.alt,
+                                contentScale = ContentScale.Crop,
+                                onError = { failed = true },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(16f / 10f)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                            )
+
+                            if (image.motion != null) {
+                                LiveMark(onPlay = null, modifier = Modifier.align(Alignment.TopStart).padding(12.dp))
+                            }
+                        }
+                    }
+
+                    if (image.motion == null && ui.iphoneStill == node.id) {
+                        IphoneMotionOffer { pickMotion.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }
+                    }
+
                     EditorField(
                         key = "$opened ${image.src}",
                         value = image.alt.orEmpty(),
                         label = stringResource(R.string.map_describe_the_picture),
-                        onCommit = { alt -> set("image", media(image.copy(alt = alt.ifBlank { null }))) },
+                        onCommit = { alt -> set("image", mediaChange("alt", alt.ifBlank { null })) },
                     )
                     EditorField(
                         key = "$opened ${image.src}",
                         value = image.caption.orEmpty(),
                         label = stringResource(R.string.map_caption),
-                        onCommit = { caption -> set("image", media(image.copy(caption = caption.ifBlank { null }))) },
+                        onCommit = { caption -> set("image", mediaChange("caption", caption.ifBlank { null })) },
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -350,7 +385,7 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
 
             Section(stringResource(R.string.map_section_video)) {
                 val video = node.video
-                val fromPhone = video != null && model.mediaModel(video.src) is java.io.File
+                val fromPhone = video != null && model.mediaModel(video.src) is File
                 val chooseVideo = { pickVideo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }
                 VideoPreview(model, video, ui.videoCopy?.takeIf { it.nodeId == node.id }, onPlay = { model.play(node.id) }, onCancel = model::cancelVideo)
 
@@ -384,7 +419,7 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
                         key = "$opened ${video.src}",
                         value = video.caption.orEmpty(),
                         label = stringResource(R.string.map_caption),
-                        onCommit = { caption -> set("video", media(video.copy(caption = caption.ifBlank { null }))) },
+                        onCommit = { caption -> set("video", mediaChange("caption", caption.ifBlank { null })) },
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -394,6 +429,10 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
 
                     MediaProblemText(ui, node, video = true)
                 }
+            }
+
+            Section(stringResource(R.string.audio_section)) {
+                SoundSection(model, ui, node, opened, ::set)
             }
 
             Section(stringResource(R.string.common_web_page)) {
@@ -446,12 +485,14 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
     }
 }
 
+/** A new picture, video or page for an idea: another file, which takes nothing from the one before but what it's given. */
 private fun media(value: Media): JsonElement = buildJsonObject {
     put("src", value.src)
     value.alt?.let { put("alt", it) }
     value.caption?.let { put("caption", it) }
     value.provider?.let { put("provider", it) }
     value.thumbnail?.let { put("thumbnail", it) }
+    value.motion?.let { put("motion", motionValue(it.src, it.still)) }
 }
 
 private fun allTags(ui: MapUi): List<String> = ui.map?.nodes.orEmpty().flatMap { it.tags }.distinct().sorted()
@@ -459,7 +500,7 @@ private fun allTags(ui: MapUi): List<String> = ui.map?.nodes.orEmpty().flatMap {
 /** Why the last picture or video chosen for this idea didn't join it. */
 @Composable
 private fun MediaProblemText(ui: MapUi, node: MapNode, video: Boolean) {
-    val problem = ui.mediaProblem?.takeIf { it.nodeId == node.id && it.video == video } ?: return
+    val problem = ui.mediaProblem?.takeIf { it.nodeId == node.id && it.video == video && !it.sound } ?: return
     Text(
         problem.message.text(),
         style = MaterialTheme.typography.bodyMedium,
@@ -519,6 +560,43 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 private fun Choice(label: String, selected: Boolean, icon: (@Composable () -> Unit)? = null, onClick: () -> Unit) {
     FilterChip(selected = selected, onClick = onClick, label = { Text(label) }, leadingIcon = icon)
 }
+
+/**
+ * An idea's priority, none or 1 to 5, as one connected row: as chips, "5"
+ * wrapped onto a row of its own beside a wider "None" or "Ninguna".
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun PriorityChoice(selected: Int?, onPick: (Int?) -> Unit) {
+    val levels = listOf(null) + (1..5).toList()
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectableGroup(),
+    ) {
+        levels.forEachIndexed { index, level ->
+            ToggleButton(
+                checked = level == selected,
+                onCheckedChange = { onPick(level) },
+                shapes = when (index) {
+                    0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                    levels.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                    else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                },
+                modifier = Modifier
+                    .weight(if (level == null) NO_PRIORITY_WIDTH else 1f)
+                    .semantics { role = Role.RadioButton },
+            ) {
+                Text(level?.toString() ?: stringResource(R.string.map_priority_none), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** How much wider than a number "None" is in the priority's row: room for its word, "Ninguna" too. */
+private const val NO_PRIORITY_WIDTH = 2f
 
 /**
  * A text field that saves a moment after typing stops, when the keyboard's
@@ -683,9 +761,13 @@ private fun NoteEditor(node: MapNode, opened: Int, onNote: (String) -> Unit) {
     }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = { wrap("**") }, enabled = !previewing) { Icon(Icons.Outlined.FormatBold, contentDescription = stringResource(R.string.map_bold)) }
-        IconButton(onClick = { wrap("*") }, enabled = !previewing) { Icon(Icons.Outlined.FormatItalic, contentDescription = stringResource(R.string.map_italic)) }
-        IconButton(onClick = ::bullet, enabled = !previewing) { Icon(Icons.AutoMirrored.Outlined.FormatListBulleted, contentDescription = stringResource(R.string.map_bulleted_list)) }
+        val bold = stringResource(R.string.map_bold)
+        val italic = stringResource(R.string.map_italic)
+        val list = stringResource(R.string.map_bulleted_list)
+
+        Hint(bold) { IconButton(onClick = { wrap("**") }, enabled = !previewing) { Icon(Icons.Outlined.FormatBold, contentDescription = bold) } }
+        Hint(italic) { IconButton(onClick = { wrap("*") }, enabled = !previewing) { Icon(Icons.Outlined.FormatItalic, contentDescription = italic) } }
+        Hint(list) { IconButton(onClick = ::bullet, enabled = !previewing) { Icon(Icons.AutoMirrored.Outlined.FormatListBulleted, contentDescription = list) } }
         Box(Modifier.weight(1f))
         FilterChip(
             selected = previewing,
@@ -769,10 +851,30 @@ fun NodePicker(title: String, nodes: List<MapNode>, onPick: (MapNode) -> Unit, o
 
 /** The small colored disc an idea is drawn as, for lists. */
 @Composable
-fun NodeDot(node: MapNode, size: androidx.compose.ui.unit.Dp = 14.dp) {
+fun NodeDot(node: MapNode, size: Dp = 14.dp) {
     Box(
         Modifier
             .size(size)
-            .background(parseCssColor(node.drawnColor) ?: MaterialTheme.colorScheme.primaryContainer, androidx.compose.foundation.shape.CircleShape),
+            .background(parseCssColor(node.drawnColor) ?: MaterialTheme.colorScheme.primaryContainer, CircleShape),
     )
+}
+
+/**
+ * For a picture that just came from an iPhone: an iPhone keeps a live
+ * photo's motion in a movie of its own, which this offers to add.
+ */
+@Composable
+private fun IphoneMotionOffer(onAdd: () -> Unit) {
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Icon(Icons.Outlined.MotionPhotosOn, contentDescription = null, modifier = Modifier.padding(top = 2.dp).size(20.dp))
+                Text(stringResource(R.string.map_iphone_motion_offer), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).padding(end = 8.dp))
+            }
+
+            TextButton(onClick = onAdd, modifier = Modifier.align(Alignment.End)) {
+                Text(stringResource(R.string.map_add_its_movie))
+            }
+        }
+    }
 }

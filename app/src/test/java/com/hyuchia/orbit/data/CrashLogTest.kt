@@ -41,6 +41,19 @@ class CrashLogTest {
     }
 
     @Test
+    fun `messages that quote what they read are left out, and single quotes are masked too`() {
+        val json = kotlinx.serialization.SerializationException("Unexpected JSON token at offset 12: Expected end of the string. JSON input: {\"text\":\"Call the lawyer")
+        val report = log.record("main", IllegalStateException("Couldn't read 'Call the lawyer'", json)).readText()
+
+        assertTrue(report.contains("java.lang.IllegalStateException: Couldn't read \"…\"\n"))
+        assertTrue(report.contains("Caused by: kotlinx.serialization.SerializationException\n"))
+        assertFalse(report.contains("lawyer"))
+        assertEquals("Can't read \"…\", nor \"…\", nor \"…\"", CrashLog.maskMessage("Can't read 'Call', nor ‘the’, nor \"lawyer\"", emptyList()))
+        // Whatever follows "JSON input" goes, however it's quoted.
+        assertEquals("Unexpected token at 3. ", CrashLog.maskMessage("Unexpected token at 3. JSON input: ...ext\":\"Call the lawyer...", emptyList()))
+    }
+
+    @Test
     fun `an exception of Orbit's own is kept without its message`() {
         val report = log.record("DefaultDispatcher-worker-1", PageException("# Trip\n- Beach day")).readText()
         assertTrue(report.contains("com.hyuchia.orbit.data.CrashLogTest\$PageException\n"))

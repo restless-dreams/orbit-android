@@ -1,7 +1,6 @@
 package com.hyuchia.orbit.settings
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -16,7 +15,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Gavel
@@ -24,16 +22,11 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.PrivacyTip
 import androidx.compose.material.icons.outlined.VolunteerActivism
 import androidx.compose.material.icons.outlined.WavingHand
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -50,8 +43,8 @@ import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.BuildConfig
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
+import com.hyuchia.orbit.data.AssetStarterMaps
 import com.hyuchia.orbit.data.MapText
-import com.hyuchia.orbit.data.openAsset
 import com.hyuchia.orbit.page.OrbitBuild
 import com.hyuchia.orbit.ui.openLink
 import kotlinx.coroutines.Dispatchers
@@ -62,7 +55,6 @@ import java.io.IOException
 /** Where the app's source is published, as the GPL asks. */
 private const val SOURCE_CODE = "https://github.com/restless-dreams/orbit-android"
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: () -> Unit, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -73,17 +65,7 @@ fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: 
         value = withContext(Dispatchers.IO) { OrbitBuild.bundled(context) }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.settings_about)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back)) }
-                },
-            )
-        },
-        snackbarHost = { SnackbarHost(snackbars) },
-    ) { padding ->
+    SettingsScaffold(stringResource(R.string.settings_about), onBack, snackbars = snackbars) { padding ->
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -94,7 +76,7 @@ fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: 
                 .padding(bottom = 32.dp)
                 // On a tablet, lines as long as the screen is wide are hard to read: About keeps to a column.
                 .wrapContentWidth(Alignment.CenterHorizontally)
-                .widthIn(max = 720.dp),
+                .widthIn(max = ReadingWidth),
         ) {
             AppIcon(Modifier.padding(top = 16.dp).size(112.dp))
             Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineSmall)
@@ -111,29 +93,30 @@ fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: 
             )
 
             orbit?.let { build ->
-                // A build of Orbit not released yet has no version of its own, only its commit.
-                val version = listOfNotNull(build.version.takeIf { it != "0.0.0" }, build.commit.takeIf { it.isNotEmpty() }).joinToString(" ")
+                // The library's version; a build of Orbit not released yet has none of its own, only its commit.
+                val version = build.version.takeIf { it != "0.0.0" } ?: build.commit
                 Text(
                     if (version.isEmpty()) {
                         stringResource(R.string.settings_maps_drawn_by_library)
                     } else {
                         stringResource(R.string.settings_maps_drawn_by_library_version, version)
                     },
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
             Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
                 // Only in the copies no store updates: see UPDATES_URL in app/build.gradle.kts.
                 if (context.container.updates.available) {
-                    UpdatesItem()
+                    UpdatesItem(Modifier.padding(horizontal = 8.dp))
                 }
 
                 ListItem(
                     onClick = { openLink(context, BuildConfig.WEBSITE_URL) },
                     supportingContent = { Text(BuildConfig.WEBSITE_URL.removePrefix("https://")) },
                     leadingContent = { Icon(Icons.Outlined.Language, contentDescription = null) },
+                    modifier = Modifier.padding(horizontal = 8.dp),
                 ) {
                     Text(stringResource(R.string.settings_orbit_on_the_web))
                 }
@@ -144,6 +127,7 @@ fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: 
                         onClick = { openLink(context, BuildConfig.SUPPORT_URL) },
                         supportingContent = { Text(stringResource(R.string.settings_support_orbit_description)) },
                         leadingContent = { Icon(Icons.Outlined.VolunteerActivism, contentDescription = null) },
+                        modifier = Modifier.padding(horizontal = 8.dp),
                     ) {
                         Text(stringResource(R.string.settings_support_orbit))
                     }
@@ -153,6 +137,7 @@ fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: 
                     onClick = { openLink(context, "https://orbit.hyuchia.com/docs/format") },
                     supportingContent = { Text(stringResource(R.string.settings_how_maps_are_written_description)) },
                     leadingContent = { Icon(Icons.AutoMirrored.Outlined.MenuBook, contentDescription = null) },
+                    modifier = Modifier.padding(horizontal = 8.dp),
                 ) {
                     Text(stringResource(R.string.settings_how_maps_are_written))
                 }
@@ -161,6 +146,7 @@ fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: 
                     onClick = onPrivacy,
                     supportingContent = { Text(stringResource(R.string.settings_privacy_description)) },
                     leadingContent = { Icon(Icons.Outlined.PrivacyTip, contentDescription = null) },
+                    modifier = Modifier.padding(horizontal = 8.dp),
                 ) {
                     Text(stringResource(R.string.settings_privacy))
                 }
@@ -169,6 +155,7 @@ fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: 
                     onClick = { openLink(context, SOURCE_CODE) },
                     supportingContent = { Text(stringResource(R.string.settings_source_code_description)) },
                     leadingContent = { Icon(Icons.Outlined.Code, contentDescription = null) },
+                    modifier = Modifier.padding(horizontal = 8.dp),
                 ) {
                     Text(stringResource(R.string.settings_source_code))
                 }
@@ -177,6 +164,7 @@ fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: 
                     onClick = onLicenses,
                     supportingContent = { Text(stringResource(R.string.settings_open_source_licenses_description)) },
                     leadingContent = { Icon(Icons.Outlined.Gavel, contentDescription = null) },
+                    modifier = Modifier.padding(horizontal = 8.dp),
                 ) {
                     Text(stringResource(R.string.settings_open_source_licenses))
                 }
@@ -186,12 +174,12 @@ fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: 
                         scope.launch {
                             val container = context.container
                             // The welcome map in the app's language, found by its title, so it opens again rather than being added twice.
-                            val markdown = withContext(Dispatchers.IO) { context.openAsset("welcome.md").bufferedReader().use { it.readText() } }
-                            val title = MapText.outline(markdown, container.words).title
+                            val welcome = withContext(Dispatchers.IO) { AssetStarterMaps(context).welcome() } ?: return@launch
+                            val title = MapText.outline(welcome.markdown, container.words).title
                             val existing = container.maps.maps.value?.firstOrNull { it.title == title }
 
                             val id = existing?.id ?: try {
-                                container.maps.add(markdown, pinned = true)
+                                container.maps.add(welcome.markdown, pinned = true, pictures = welcome.media, path = welcome.metadata.path)
                             } catch (failed: IOException) {
                                 snackbars.showSnackbar(container.maps.whyNotAdded())
                                 return@launch
@@ -202,6 +190,7 @@ fun AboutScreen(onOpenMap: (String) -> Unit, onPrivacy: () -> Unit, onLicenses: 
                     },
                     supportingContent = { Text(stringResource(R.string.settings_welcome_map_description)) },
                     leadingContent = { Icon(Icons.Outlined.WavingHand, contentDescription = null) },
+                    modifier = Modifier.padding(horizontal = 8.dp),
                 ) {
                     Text(stringResource(R.string.settings_welcome_map))
                 }

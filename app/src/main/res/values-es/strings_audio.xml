@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Audios en las ideas: notas de voz grabadas en Orbit, audios del teléfono o de la web, y los reproductores que los reproducen. Consulta TRANSLATING.md. -->
+<resources>
+    <string name="audio_sound">Audio</string>
+    <string name="audio_voice_memo">Nota de voz</string>
+    <string name="audio_sound_of">Audio de %1$s</string>
+
+    <string name="audio_section">Audio</string>
+    <string name="audio_record_a_voice_memo">Grabar una nota de voz</string>
+    <string name="audio_choose_a_sound">Elegir un archivo de audio</string>
+    <string name="audio_or_a_sound_address">O la dirección web de un audio</string>
+    <string name="audio_sound_address">Dirección del audio</string>
+    <string name="audio_record_again">Grabar de nuevo</string>
+    <string name="audio_copying_the_sound">Copiando el audio…</string>
+    <string name="audio_copying_the_sound_percent">Copiando el audio… %1$s</string>
+    <string name="audio_sound_unreadable">No se pudo leer ese audio.</string>
+
+    <string name="audio_play">Reproducir</string>
+    <string name="audio_pause">Pausar</string>
+    <string name="audio_mute">Silenciar</string>
+    <string name="audio_unmute">Activar el sonido</string>
+    <string name="audio_stop">Detener el audio</string>
+    <string name="audio_open_full_screen">Abrir el audio en pantalla completa</string>
+    <string name="audio_share">Compartir el audio</string>
+    <string name="audio_position">Posición</string>
+    <string name="audio_time_of">%1$s de %2$s</string>
+    <string name="audio_unplayable">No se puede reproducir este audio.</string>
+    <string name="audio_missing">Este audio no está en este dispositivo.</string>
+
+    <string name="audio_play_the_sound_in">Reproducir el audio de %1$s</string>
+    <string name="audio_pause_the_sound_in">Pausar el audio de %1$s</string>
+    <string name="audio_play_the_sound">Reproducir el audio</string>
+    <string name="audio_pause_the_sound">Pausar el audio</string>
+    <string name="audio_plays_from_this_phone">Suena desde este dispositivo</string>
+
+    <string name="audio_recorder_for">Para %1$s</string>
+    <string name="audio_tap_to_record">Toca para grabar</string>
+    <string name="audio_recording">Grabando</string>
+    <string name="audio_paused">En pausa</string>
+    <string name="audio_record">Grabar</string>
+    <string name="audio_pause_recording">Pausar la grabación</string>
+    <string name="audio_resume_recording">Seguir grabando</string>
+    <string name="audio_finish_recording">Terminar</string>
+    <string name="audio_discard">Descartar</string>
+    <string name="audio_save">Guardar</string>
+    <string name="audio_saving">Guardando…</string>
+    <string name="audio_discard_title">¿Descartar esta nota de voz?</string>
+    <string name="audio_discard_body">No se conservará lo que grabaste.</string>
+    <string name="audio_keep_it">Conservarla</string>
+    <string name="audio_needs_the_microphone">Orbit necesita el micrófono para grabar una nota de voz. Puedes permitirlo en Configuración.</string>
+    <string name="audio_no_microphone">Este dispositivo no tiene un micrófono con el que Orbit pueda grabar.</string>
+    <string name="audio_recording_failed">La grabación se detuvo. Puede que otra app esté usando el micrófono.</string>
+    <string name="audio_longest_memo">Una nota de voz no puede durar más, así que se detuvo ahí.</string>
+    <string name="audio_map_room_reached">Es todo el espacio que le queda a este mapa, así que la nota se detuvo ahí.</string>
+    <string name="audio_map_full">Las imágenes, los videos y los audios de este mapa suman %1$s, todo lo que un mapa puede llevar cuando se comparte o se respalda. Quita alguno para hacer espacio para una nota de voz.</string>
+    <string name="audio_memo_saved">Se guardó la nota de voz en %1$s</string>
+    <string name="audio_ready_to_save">Lista para guardar</string>
+
+    <string name="data_sound_too_big">Ese audio pesa %1$s, y un mapa guarda audios de hasta %2$s para que pueda seguir llegando a tus otros dispositivos. Recórtalo, o agrégalo como dirección web.</string>
+    <string name="data_sound_past_limit">Ese audio pesa más de %1$s, y un mapa guarda audios de hasta eso para que pueda seguir llegando a tus otros dispositivos. Recórtalo, o agrégalo como dirección web.</string>
+    <string name="data_sound_past_map_room">Las imágenes, los videos y los audios de este mapa ya suman %1$s. Con este audio pasarían de los %2$s que un mapa puede llevar al compartirse o respaldarse. Elige uno más corto, o agrégalo como dirección web.</string>
+    <string name="data_sound_kind_refused">Orbit guarda los audios como archivos MP3, MP4, AAC, Ogg, Opus, WAV, FLAC o WebM, y este es %1$s.</string>
+    <string name="data_sound_kind_unknown">Orbit guarda los audios como archivos MP3, MP4, AAC, Ogg, Opus, WAV, FLAC o WebM, y este es de un tipo que no conoce.</string>
+    <string name="data_no_room_for_sound">No hay espacio en este dispositivo para ese audio.</string>
+</resources>

@@ -5,6 +5,12 @@ import android.os.SystemClock
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.ResourceWords
 import com.hyuchia.orbit.Words
+import com.hyuchia.orbit.data.MEDIA_DIRECTORY
+import com.hyuchia.orbit.data.MediaNames
+import com.hyuchia.orbit.data.OutgoingCopies
+import com.hyuchia.orbit.data.isSoundFile
+import com.hyuchia.orbit.data.mediaType
+import com.hyuchia.orbit.data.soundNamesIn
 import com.hyuchia.orbit.page.AudienceCommand
 import com.hyuchia.orbit.page.PageWords
 import com.hyuchia.orbit.page.escapeHtml
@@ -12,7 +18,6 @@ import com.hyuchia.orbit.page.fill
 import com.hyuchia.orbit.page.htmlIn
 import com.hyuchia.orbit.page.jsonScript
 import com.hyuchia.orbit.page.pageWords
-import com.hyuchia.orbit.page.pictureType
 import com.hyuchia.orbit.page.protocolJson
 import com.hyuchia.orbit.present.Audience
 import com.hyuchia.orbit.present.ShownMedia
@@ -34,8 +39,6 @@ private const val PORT = 8765
 private const val FORM_LIMIT = 4L * 1024
 /** How often people whose browsers stopped following are let go, to free their places. */
 private const val TIDY_MILLISECONDS = 15_000L
-/** A picture's or video's name in a map's media folder: nothing that could step outside it. */
-private val MEDIA_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
 /** What a removed browser hears before its stream ends. */
 private const val REMOVED = """{"type":"removed"}"""
 /** Presentations that ended, kept so their browsers hear it ended rather than count as guessing at the next one's code. */
@@ -55,6 +58,10 @@ private const val ENDED_PRESENTATIONS = 16
  * it listens: the room's, unless a test over this machine's loopback says
  * otherwise. `clock` reads milliseconds, for where a video is when a
  * browser joins: the phone's own clock, which its reckoning uses.
+ * `outgoing` gives the file to send for one of the map's: in the app, a
+ * copy without what its file says beyond what it shows ([OutgoingCopies]),
+ * or the file as it is when it can't go clean and it's among `asTheyAre`,
+ * the files the presenter chose to show as they are.
  */
 class BrowserPresenting internal constructor(
     private val asset: (String) -> String,
@@ -66,8 +73,9 @@ class BrowserPresenting internal constructor(
     policy: ConnectionPolicy = RoomNetworks(),
     private val listenOn: () -> List<InetAddress>? = ::roomAddresses,
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
+    private val outgoing: (File) -> File? = { it },
 ) {
-    constructor(context: Context, mapFolder: File, scope: CoroutineScope, options: JoiningOptions) :
+    constructor(context: Context, mapFolder: File, scope: CoroutineScope, options: JoiningOptions, asTheyAre: () -> Set<String> = { emptySet() }) :
         this(
             { name -> context.assets.open("map/$name").bufferedReader().use { it.readText() } },
             ResourceWords(context),
@@ -75,6 +83,7 @@ class BrowserPresenting internal constructor(
             scope,
             options,
             clock = SystemClock::elapsedRealtime,
+            outgoing = OutgoingCopies(File(context.cacheDir, "outgoing")).let { copies -> { file: File -> copies.of(file, asTheyAre()) } },
         )
 
     val code: String = newCode()
@@ -93,6 +102,18 @@ class BrowserPresenting internal constructor(
     /** The latest of each kind of command, for a browser that joins halfway. */
     private val latest = ConcurrentHashMap<String, String>()
 
+    /** The files the map being presented plays as sounds: they play from the presenter's phone, and stay there. */
+    @Volatile private var sounds: Set<String> = emptySet()
+
+    /**
+     * The files of its media folder the map being presented points at
+     * ([MediaNames.references]): the room gets none but these, as a zip of the
+     * map carries none but these. The folder keeps others for the map's
+     * earlier versions, such as a picture taken off it, which stay on the
+     * phone whatever name a browser guesses.
+     */
+    @Volatile private var shownFiles: Set<String> = emptySet()
+
     /** The picture or video over the map, and where a video is, reckoned from what was sent: a browser that joins halfway opens it there. */
     @Volatile private var shown: ShownMedia? = null
 
@@ -105,6 +126,7 @@ class BrowserPresenting internal constructor(
     private val server = LocalServer(
         bodyLimit = { method, _ -> if (method == "POST") FORM_LIMIT else 0L },
         policy = policy,
+        words = words,
     ) { request -> answer(request) }
 
     val audience: Audience = object : Audience {
@@ -117,6 +139,8 @@ class BrowserPresenting internal constructor(
                 is AudienceCommand.Show -> {
                     latest.clear()
                     latest[SHOW] = json
+                    sounds = soundNamesIn(command.markdown).toSet()
+                    shownFiles = MediaNames.references(command.markdown).toSet()
                 }
                 is AudienceCommand.Captions -> latest[CAPTIONS] = json
                 is AudienceCommand.Step -> latest[STEP] = json
@@ -221,7 +245,7 @@ class BrowserPresenting internal constructor(
         null -> Response.page(200, audiencePage())
         "browser.js" -> Response.Bytes(200, "text/javascript; charset=utf-8", asset("browser.js").toByteArray())
         "events" -> Response.Events(follow(member))
-        "media" -> media(rest.getOrNull(1))
+        MEDIA_DIRECTORY -> media(rest.getOrNull(1))
         else -> Response.notFound()
     }
 
@@ -253,21 +277,47 @@ class BrowserPresenting internal constructor(
         return stream
     }
 
-    /** A picture or video of the map; a video in the parts the browser asks for, as it plays and seeks. */
+    /** A picture or video the map points at; a video in the parts the browser asks for, as it plays and seeks. */
     private fun media(name: String?): Response {
-        if (name == null || !MEDIA_NAME.matches(name)) {
+        if (name == null || !MediaNames.NAME.matches(name)) {
             return Response.notFound()
         }
 
-        // Only what a map's media folder keeps: pictures and videos, by their types.
-        val type = pictureType(name)
-
-        if (!type.startsWith("image/") && !type.startsWith("video/")) {
+        // Only while the map is shown. Once the presentation ended, nothing of it goes: as when a private map locks
+        // with the phone's screen off, and the room hears the end before Orbit is back on screen to stop listening.
+        if (!latest.containsKey(SHOW)) {
             return Response.notFound()
         }
 
-        val file = File(File(mapFolder, "media"), name)
-        return if (file.isFile) Response.FromFile(type, file) else Response.notFound()
+        // Only what the map shows: its pictures, a video's poster, a live photo's motion, the pictures in its notes.
+        if (name !in shownFiles) {
+            return Response.notFound()
+        }
+
+        // Only what a map's media folder keeps: pictures and videos, by their types. Its sounds play from the
+        // presenter's phone, and a voice memo is an `.mp4` too: what Orbit named a sound, or the map plays as one, stays.
+        val type = mediaType(name)
+
+        if ((!type.startsWith("image/") && !type.startsWith("video/")) || isSoundFile(name) || name in sounds) {
+            return Response.notFound()
+        }
+
+        val file = File(File(mapFolder, MEDIA_DIRECTORY), name)
+
+        if (!file.isFile) {
+            return Response.notFound()
+        }
+
+        // The room gets it as it would in a zip, without where it was taken; one that can't be read through doesn't go.
+        val sent = outgoing(file) ?: return Response.notFound()
+
+        // A big video's copy takes a while: a presentation that ended meanwhile, as when a private map locks, gives out
+        // nothing of it.
+        if (!latest.containsKey(SHOW)) {
+            return Response.notFound()
+        }
+
+        return Response.FromFile(type, sent)
     }
 
     private fun encode(command: AudienceCommand): String = protocolJson.encodeToString(AudienceCommand.serializer(), command)

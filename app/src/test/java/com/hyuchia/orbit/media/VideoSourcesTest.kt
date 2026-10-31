@@ -115,8 +115,9 @@ class VideoSourcesTest {
     }
 
     @Test
-    fun `the players' page frames only the player, and keeps the video's name as text`() {
-        val page = playerPage(VideoSource.YouTube("aqz-KE-bpKQ"), "Bunny <b>&</b> \"friends\"", origin)!!
+    fun `the players' page frames only the player, and keeps the video's name as text, in the app's language`() {
+        val page = playerPage(VideoSource.YouTube("aqz-KE-bpKQ"), "Bunny <b>&</b> \"friends\"", origin, "es")!!
+        assertTrue(page.contains("<html lang=\"es\">"))
         assertTrue(page.contains("<iframe id=\"player\" src=\"https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ?"))
         assertTrue(page.contains("frame-src https://www.youtube-nocookie.com;"))
         assertTrue(page.contains("default-src 'none'"))
@@ -124,12 +125,12 @@ class VideoSourcesTest {
         assertTrue(page.contains("allowfullscreen"))
         assertTrue(page.contains("window.orbitPlayer"))
         assertTrue(page.contains("event: 'listening'"))
-        val vimeo = playerPage(VideoSource.Vimeo("76979871"), "Office", origin)!!
+        val vimeo = playerPage(VideoSource.Vimeo("76979871"), "Office", origin, "en")!!
         assertTrue(vimeo.contains("frame-src https://player.vimeo.com;"))
         assertTrue(vimeo.contains("const origin = 'https://player.vimeo.com';"))
         assertTrue(vimeo.contains("call('getPaused')"))
         assertTrue(vimeo.contains("window.orbitPlayer"))
-        assertNull(playerPage(VideoSource.Elsewhere("https://example.com"), "Page", origin))
+        assertNull(playerPage(VideoSource.Elsewhere("https://example.com"), "Page", origin, "en"))
     }
 
     @Test

@@ -5,7 +5,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.padding
@@ -93,34 +92,29 @@ fun ColorChoices(
     val gap = max(0.dp, size + 10.dp - target)
     val currentColor = parseCssColor(current)
 
-    // One choice, for screen readers too: the swatches are its options.
-    Column(modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(gap)) {
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(gap),
-            verticalArrangement = Arrangement.spacedBy(gap),
-        ) {
-            Swatch(automatic, stringResource(R.string.ui_color_automatic), current == null, size, target, automatic = true) { onPick(null) }
+    // One choice, for screen readers too: the swatches are its options. They flow as one, so the map's own colors and
+    // the wheel follow the palette, rather than leaving it a swatch alone on a row.
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(gap),
+        verticalArrangement = Arrangement.spacedBy(gap),
+        modifier = modifier.selectableGroup(),
+    ) {
+        Swatch(automatic, stringResource(R.string.ui_color_automatic), current == null, size, target, automatic = true) { onPick(null) }
 
-            (OrbitPalette + StrongPalette).forEachIndexed { index, color ->
-                val hex = color.hex()
-                val name = ColorNames.getOrNull(index)?.let { stringResource(it) } ?: stringResource(R.string.ui_color_numbered, index + 1)
-                Swatch(color, name, current.equals(hex, ignoreCase = true), size, target) { onPick(hex) }
-            }
+        (OrbitPalette + StrongPalette).forEachIndexed { index, color ->
+            val hex = color.hex()
+            val name = ColorNames.getOrNull(index)?.let { stringResource(it) } ?: stringResource(R.string.ui_color_numbered, index + 1)
+            Swatch(color, name, current.equals(hex, ignoreCase = true), size, target) { onPick(hex) }
         }
 
         if (onCustom != null) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(gap),
-                verticalArrangement = Arrangement.spacedBy(gap),
-            ) {
-                mapColors.forEach { written ->
-                    val color = parseCssColor(written) ?: return@forEach
-                    val name = stringResource(R.string.ui_color_custom_named, colorNameText(colorName(color.toArgb())))
-                    Swatch(color, name, currentColor != null && currentColor == color, size, target) { onPick(written) }
-                }
-
-                CustomSwatch(size, target, onCustom)
+            mapColors.forEach { written ->
+                val color = parseCssColor(written) ?: return@forEach
+                val name = stringResource(R.string.ui_color_custom_named, colorNameText(colorName(color.toArgb())))
+                Swatch(color, name, currentColor != null && currentColor == color, size, target) { onPick(written) }
             }
+
+            CustomSwatch(size, target, onCustom)
         }
     }
 }

@@ -1,39 +1,47 @@
 package com.hyuchia.orbit.map
 
-import android.content.ClipData
-import android.content.ClipboardManager
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.webkit.MimeTypeMap
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.annotation.StringRes
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Notes
 import androidx.compose.material.icons.outlined.AccountTree
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DataObject
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.LocationOff
 import androidx.compose.material.icons.outlined.Polyline
 import androidx.compose.material.icons.outlined.Print
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,45 +50,78 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.Words
+import com.hyuchia.orbit.container
+import com.hyuchia.orbit.data.MediaSummary
+import com.hyuchia.orbit.data.OutgoingMedia
+import com.hyuchia.orbit.data.Uncleaned
 import com.hyuchia.orbit.page.MapPrinter
 import com.hyuchia.orbit.page.PictureRequest
 import com.hyuchia.orbit.page.PrintRequest
+import com.hyuchia.orbit.page.ViewMode
 import com.hyuchia.orbit.page.findActivity
+import com.hyuchia.orbit.rememberWords
 import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.theme.mapTheme
 import com.hyuchia.orbit.theme.orbitColorScheme
+import com.hyuchia.orbit.ui.ConnectedChoice
 import com.hyuchia.orbit.ui.ListRow
-import com.hyuchia.orbit.ui.exportFile
+import com.hyuchia.orbit.ui.MediaWords
+import com.hyuchia.orbit.ui.WhatGoes
 import com.hyuchia.orbit.ui.exportName
-import com.hyuchia.orbit.ui.shareFile
+import com.hyuchia.orbit.ui.rememberAsTheyAre
+import com.hyuchia.orbit.ui.shareMapExport
+import com.hyuchia.orbit.ui.thisDeviceIcon
+import com.hyuchia.orbit.ui.uncleanedLines
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 
-/** A way to take the map out of the app. */
-private enum class Format(@StringRes val label: Int, @StringRes val description: Int, val extension: String, val mimeType: String, val icon: ImageVector) {
-    WebPage(R.string.common_web_page, R.string.export_web_page_description, "html", "text/html", Icons.Outlined.Language),
+/**
+ * The system's save screen, with the type Android knows for the name's
+ * extension: asked for a file of any type, it took a name already there to
+ * be all name, and numbered it after the extension, "Map.svg (1)", so the
+ * file no longer opened as what it is. Now it's "Map (1).svg".
+ */
+private class SaveDocument : ActivityResultContracts.CreateDocument("application/octet-stream") {
+    override fun createIntent(context: Context, input: String): Intent = super.createIntent(context, input).setType(savedType(input.substringAfterLast('.', "")))
+}
+
+/** The type Android gives files ending in `extension`, which keeps it when a name is taken; for one it doesn't know, any file's. */
+private fun savedType(extension: String): String = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase()) ?: "application/octet-stream"
+
+/** A way to take the map out of the app; `named` is how a sentence names it, after Save, Share or Copy ("Save the web page"). */
+private enum class Format(@StringRes val label: Int, @StringRes val description: Int, @StringRes val named: Int, val extension: String, val mimeType: String, val icon: ImageVector) {
+    WebPage(R.string.common_web_page, R.string.export_web_page_description, R.string.export_web_page_named, "html", "text/html", Icons.Outlined.Language),
 
     /** Printed through Android's print dialog, which saves it as a PDF too: it has no file of its own to save or share. */
-    Pdf(R.string.export_pdf, R.string.export_pdf_description, "pdf", "application/pdf", Icons.Outlined.Print),
+    Pdf(R.string.export_pdf, R.string.export_pdf_description, R.string.export_pdf_named, "pdf", "application/pdf", Icons.Outlined.Print),
 
-    Png(R.string.export_picture, R.string.export_picture_description, "png", "image/png", Icons.Outlined.Image),
-    Svg(R.string.export_drawing, R.string.export_drawing_description, "svg", "image/svg+xml", Icons.Outlined.Polyline),
-    Markdown(R.string.export_markdown, R.string.export_markdown_description, "md", "text/markdown", Icons.Outlined.Description),
-    Yaml(R.string.export_yaml, R.string.export_yaml_description, "yaml", "application/yaml", Icons.Outlined.DataObject),
-    Opml(R.string.export_opml, R.string.export_opml_description, "opml", "text/x-opml", Icons.Outlined.AccountTree),
-    Zip(R.string.export_zip, R.string.export_zip_description, "zip", "application/zip", Icons.Outlined.FolderZip),
+    Png(R.string.export_picture, R.string.export_picture_description, R.string.export_picture_named, "png", "image/png", Icons.Outlined.Image),
+    Svg(R.string.export_drawing, R.string.export_drawing_description, R.string.export_drawing_named, "svg", "image/svg+xml", Icons.Outlined.Polyline),
+    Markdown(R.string.export_markdown, R.string.export_markdown_description, R.string.export_markdown_named, "md", "text/markdown", Icons.Outlined.Description),
+    Yaml(R.string.export_yaml, R.string.export_yaml_description, R.string.export_yaml_named, "yaml", "application/yaml", Icons.Outlined.DataObject),
+    Opml(R.string.export_opml, R.string.export_opml_description, R.string.export_opml_named, "opml", "text/x-opml", Icons.Outlined.AccountTree),
+    Zip(R.string.export_zip, R.string.export_zip_description, R.string.export_zip_named, "zip", "application/zip", Icons.Outlined.FolderZip),
 }
 
 /** Which part of the map a picture shows. */
@@ -102,17 +143,28 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
     var saving by remember { mutableStateOf<Pair<Format, ByteArray>?>(null) }
     // Why the last file in a format couldn't be made, saved or copied, said in its row until the next try.
     var problem by rememberSaveable { mutableStateOf<Pair<Format, Int>?>(null) }
+    // The format last copied, said in its row before Android 13, which says so itself from then on.
+    var copied by rememberSaveable { mutableStateOf<Format?>(null) }
     val title = ui.map?.title ?: stringResource(R.string.export_default_title)
     val dynamicColor = LocalAppSettings.current.dynamicColor
     // Paper is white: the app's colors in light, whatever mode the phone is in.
     val printTheme = remember(dynamicColor) { orbitColorScheme(context, dark = false, dynamicColor = dynamicColor).mapTheme() }
-    // Whether there's a zip to offer: finding out reads the map's file, so not while the panel draws.
-    val hasPictures by produceState(false, ui.revision) { value = model.hasPictures() }
+    val words = rememberWords()
+    val device = thisDeviceIcon()
+    // Files that can't go clean stay on this device unless the person chooses, as a way out starts, to share them as they are.
+    val asTheyAre = rememberAsTheyAre()
+    val chosen = asTheyAre.chosen
+    // What goes with each way out, and whether there's a zip to offer: finding out reads the map's file, so not while the panel draws.
+    val uncleaned by produceState(Uncleaned(), ui.revision) { value = model.uncleaned() }
+    val media by produceState(MediaSummary(), ui.revision, uncleaned, chosen) { value = model.mediaSummary(leavingOut = uncleaned.names - chosen) }
+    val clean by produceState(MediaSummary(), ui.revision, uncleaned) { value = model.mediaSummary(leavingOut = uncleaned.names) }
+    val soundsInPage by produceState(0, ui.revision, chosen) { value = model.soundsInPage(chosen) }
+    val motionsInPage by produceState(0, ui.revision, chosen) { value = model.motionsInPage(chosen) }
 
-    suspend fun bytes(format: Format): ByteArray? = when (format) {
+    suspend fun bytes(format: Format, names: Set<String>): ByteArray? = when (format) {
         Format.Png, Format.Svg -> {
             val markdown = if (framing == Framing.View) null else model.currentMarkdown()
-            model.picture(
+            val drawn = model.picture(
                 PictureRequest(
                     markdown = markdown,
                     format = format.extension,
@@ -120,18 +172,25 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
                     height = if (framing == Framing.Whole) 1100 else 1200,
                     scale = if (framing == Framing.View) 3.0 else 2.0,
                     transparent = !background,
-                    viewMode = if (framing == Framing.Whole) "all" else "focus",
+                    view = if (framing == Framing.Whole) ViewMode.OVERVIEW else ViewMode.FOCUS,
                 ),
             )
+
+            // A drawing carries its pictures inside it, so they go as they would in a zip.
+            if (format == Format.Svg && drawn != null) {
+                withContext(Dispatchers.Default) { OutgoingMedia.drawing(drawn.decodeToString(), names.isNotEmpty()).toByteArray() }
+            } else {
+                drawn
+            }
         }
-        Format.WebPage -> model.webPage(context)?.toByteArray()
+        Format.WebPage -> model.webPage(context, names)?.toByteArray()
         Format.Pdf -> null
         Format.Markdown -> model.currentMarkdown().toByteArray()
         Format.Yaml -> model.yaml()?.toByteArray()
         Format.Opml -> model.opml()?.toByteArray()
         Format.Zip -> withContext(Dispatchers.IO) {
-            val output = java.io.ByteArrayOutputStream()
-            model.writeZip(output)
+            val output = ByteArrayOutputStream()
+            model.writeZip(output, names)
             output.toByteArray()
         }
     }
@@ -139,11 +198,12 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
     /**
      * The map in `format`, or null, with its row saying so, when it couldn't
      * be made: a picture or video that went as it was read, a file that
-     * can't be read, a page that couldn't convert it.
+     * can't be read, a page that couldn't convert it. Those of the map's
+     * files that can't go clean that are in `names` go as they are.
      */
-    suspend fun made(format: Format): ByteArray? {
+    suspend fun made(format: Format, names: Set<String> = emptySet()): ByteArray? {
         val data = try {
-            bytes(format)
+            bytes(format, names)
         } catch (failed: IOException) {
             Logs.warn("OrbitExport", "Couldn't make the map's ${format.extension}", failed)
             problem = format to R.string.export_could_not_make
@@ -158,7 +218,7 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
         return data
     }
 
-    val saver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri: Uri? ->
+    val saver = rememberLauncherForActivityResult(SaveDocument()) { uri: Uri? ->
         val (format, data) = saving ?: return@rememberLauncherForActivityResult
         saving = null
 
@@ -171,29 +231,59 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
         }
     }
 
-    fun run(format: Format, share: Boolean) {
+    fun run(format: Format, share: Boolean) = asTheyAre.then(uncleaned.carried(format)) { names ->
         scope.launch {
             problem = null
+            copied = null
             working = format
-            val data = made(format)
+            val data = made(format, names)
             working = null
             data ?: return@launch
             val name = exportName(context, title, format.extension)
 
             if (share) {
-                // The app it goes to reads it from the phone's storage, which may have no room for it.
-                val uri = try {
-                    exportFile(context, name) { it.write(data) }
+                // The app it goes to reads it from the phone's storage, which may have no room for it. A private map that
+                // locked while its file was made opens nothing.
+                try {
+                    shareMapExport(context, model.id, name, format.mimeType, title) { it.write(data) }
                 } catch (failed: IOException) {
                     Logs.warn("OrbitExport", "Couldn't keep the ${format.extension} to share", failed)
                     problem = format to R.string.export_no_room_to_share
-                    return@launch
                 }
-
-                shareFile(context, uri, format.mimeType, title)
-            } else {
+            } else if (!context.container.privateMaps.hidesNow(model.id)) {
+                // The save screen shows the file's name, the map's: not for a private map that locked while its file was made.
                 saving = format to data
                 saver.launch(name)
+            }
+        }
+    }
+
+    /** Lays the map out for paper with the pictures of `names` as they are, and opens Android's print dialog. */
+    fun startPrinting(activity: Activity, request: PrintRequest, names: Set<String>) {
+        scope.launch {
+            working = Format.Pdf
+            val page = model.printPage(context, printTheme, request, names)
+
+            if (page == null) {
+                working = null
+                model.printFailed()
+                return@launch
+            }
+
+            // Android's print dialog shows the map: not for a private map that locked while its page was laid out.
+            val goes = { !context.container.privateMaps.hidesNow(model.id) }
+
+            if (!goes()) {
+                working = null
+                return@launch
+            }
+
+            MapPrinter.print(activity, model.pageTitle(context), page, goes) { printing ->
+                working = null
+
+                if (!printing && goes()) {
+                    model.printFailed()
+                }
             }
         }
     }
@@ -203,43 +293,28 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
         val activity = context.findActivity() ?: return
 
         val request = when (framing) {
-            Framing.View -> PrintRequest(viewMode = ui.map?.mode ?: "focus", focus = ui.map?.path?.lastOrNull())
-            Framing.Whole -> PrintRequest(viewMode = "all")
-            Framing.Opening -> PrintRequest(viewMode = "focus")
+            Framing.View -> PrintRequest(view = ui.mode, focus = ui.map?.path?.lastOrNull())
+            Framing.Whole -> PrintRequest(view = ViewMode.OVERVIEW)
+            Framing.Opening -> PrintRequest(view = ViewMode.FOCUS)
         }
 
-        scope.launch {
-            working = Format.Pdf
-            val page = model.printPage(context, printTheme, request)
-
-            if (page == null) {
-                working = null
-                model.printFailed()
-                return@launch
-            }
-
-            MapPrinter.print(activity, model.pageTitle(context), page) { printing ->
-                working = null
-
-                if (!printing) {
-                    model.printFailed()
-                }
-            }
-        }
+        asTheyAre.then(uncleaned.carried(Format.Pdf)) { names -> startPrinting(activity, request, names) }
     }
 
     fun copy(format: Format) {
         scope.launch {
             problem = null
-            val data = made(format) ?: return@launch
-            val clipboard = context.getSystemService(ClipboardManager::class.java)
+            copied = null
+            working = format
+            val data = made(format)
+            working = null
+            data ?: return@launch
 
-            try {
-                clipboard?.setPrimaryClip(ClipData.newPlainText(title, data.decodeToString()))
-            } catch (tooBig: RuntimeException) {
-                // The clipboard crosses processes: a map past its transaction's size doesn't get there.
-                Logs.warn("OrbitExport", "Couldn't copy ${data.size} bytes of ${format.extension}", tooBig)
+            // A private map's text is marked sensitive, as its ideas are when they're copied.
+            if (!context.container.clipboard.copyText(title, data.decodeToString(), sensitive = model.isPrivate())) {
                 problem = format to R.string.export_too_much_to_copy
+            } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                copied = format
             }
         }
     }
@@ -250,53 +325,179 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 32.dp),
         ) {
-            Column(Modifier.padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(R.string.export_pictures_show), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Framing.entries.forEach { option ->
-                        FilterChip(selected = framing == option, onClick = { framing = option }, label = { Text(stringResource(option.label)) })
-                    }
-
-                    FilterChip(selected = background, onClick = { background = !background }, label = { Text(stringResource(R.string.export_background)) })
-                }
+            Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    stringResource(R.string.export_pictures_show),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .padding(horizontal = 24.dp)
+                        .semantics { heading() },
+                )
+                // One of three, as connected buttons; the background is on or off beside them, so it stays a chip.
+                ConnectedChoice(Framing.entries, framing, onPick = { framing = it }, label = { stringResource(it.label) })
+                FilterChip(
+                    selected = background,
+                    onClick = { background = !background },
+                    label = { Text(stringResource(R.string.export_background)) },
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                )
             }
 
-            Format.entries.filter { it != Format.Zip || hasPictures }.forEach { format ->
+            // A zip is offered for a map with files of its own, even when none of them can go clean: they may yet go as they are.
+            Format.entries.filter { it != Format.Zip || !media.isEmpty || !uncleaned.isEmpty }.forEach { format ->
                 val label = stringResource(format.label)
+                val named = stringResource(format.named)
                 val failure = problem?.takeIf { it.first == format }?.second
+                val busy = working == format
                 ListRow(
                     headline = { Text(label) },
                     supporting = {
-                        if (failure != null) {
-                            Text(stringResource(failure), color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                        } else {
+                        Column {
                             Text(stringResource(format.description))
-                        }
-                    },
-                    leading = { Icon(format.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                    trailing = {
-                        if (working == format) {
-                            LoadingIndicator(Modifier.size(40.dp))
-                        } else {
-                            Row {
-                                if (format == Format.Pdf) {
-                                    IconButton(onClick = ::print) { Icon(Icons.Outlined.Print, contentDescription = stringResource(R.string.export_print)) }
-                                } else {
-                                    if (format == Format.Markdown || format == Format.Yaml || format == Format.Opml) {
-                                        IconButton(onClick = { copy(format) }) { Icon(Icons.Outlined.ContentCopy, contentDescription = stringResource(R.string.export_copy_format, label)) }
+                            carries(format, media, !uncleaned.isEmpty, soundsInPage, motionsInPage, words, device).forEach { line -> WhatGoes(line.text, line.icon, line.goes, Modifier.padding(top = 4.dp)) }
+                            uncleanedLines(uncleaned.carried(format), chosen, words, device).forEach { line -> WhatGoes(line.text, line.icon, line.goes, Modifier.padding(top = 4.dp)) }
+
+                            // What the last try came to, under what the format is: why it didn't work, or that it was copied.
+                            val said = failure ?: R.string.export_copied.takeIf { copied == format }
+
+                            if (said != null) {
+                                Text(
+                                    stringResource(said),
+                                    color = if (failure != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(top = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                                )
+                            }
+
+                            // Its buttons, named, on a line of their own, so the words keep the row's width. While its file is
+                            // made, they wait beside an indicator. Their first icon, or word, lines up with the words above.
+                            BoxWithConstraints(Modifier.padding(top = 4.dp)) {
+                                val icons = buttonsKeepIcons(maxWidth)
+
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(ExportButtonsSpace),
+                                    itemVerticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.offset(x = (-12).dp),
+                                ) {
+                                    if (format == Format.Pdf) {
+                                        ExportButton(R.string.export_print_button, Icons.Outlined.Print.takeIf { icons }, stringResource(R.string.export_print), enabled = !busy, onClick = ::print)
+                                    } else {
+                                        if (format == Format.Markdown || format == Format.Yaml || format == Format.Opml) {
+                                            ExportButton(R.string.export_copy, Icons.Outlined.ContentCopy.takeIf { icons }, stringResource(R.string.export_copy_format, named), enabled = !busy) { copy(format) }
+                                        }
+
+                                        ExportButton(R.string.export_save, Icons.Outlined.Save.takeIf { icons }, stringResource(R.string.export_save_format, named), enabled = !busy) { run(format, share = false) }
+                                        ExportButton(R.string.export_share, Icons.Outlined.Share.takeIf { icons }, stringResource(R.string.export_share_format, named), enabled = !busy) { run(format, share = true) }
                                     }
 
-                                    IconButton(onClick = { run(format, share = false) }) { Icon(Icons.Outlined.Save, contentDescription = stringResource(R.string.export_save_format, label)) }
-                                    IconButton(onClick = { run(format, share = true) }) { Icon(Icons.Outlined.Share, contentDescription = stringResource(R.string.export_share_format, label)) }
+                                    if (busy) {
+                                        LoadingIndicator(Modifier.size(32.dp))
+                                    }
                                 }
                             }
                         }
                     },
+                    leading = { Icon(format.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                    // The icon stays by the way's name, above its words and buttons.
+                    verticalAlignment = Alignment.Top,
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
             }
+
+            if (clean.pictures > 0 || clean.videos > 0 || clean.audio > 0) {
+                WhatGoes(
+                    // Once some files that couldn't go clean go as they are, this speaks of the others.
+                    stringResource(if (chosen.isEmpty()) R.string.sharing_without_where else R.string.sharing_others_without_where),
+                    Icons.Outlined.LocationOff,
+                    goes = false,
+                    Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
+    }
+}
+
+/** Between a way out's buttons. */
+private val ExportButtonsSpace = 4.dp
+
+/**
+ * Whether a way out's buttons keep their icons: while the most any way out
+ * has, Copy, Save and Share, fit on one line of `width` with them. Otherwise
+ * every way out's go without, alike, and keep to one line, as they wouldn't
+ * in Spanish on a narrow phone.
+ */
+@Composable
+private fun buttonsKeepIcons(width: Dp): Boolean {
+    val labels = listOf(R.string.export_copy, R.string.export_save, R.string.export_share).map { stringResource(it) }
+    val style = MaterialTheme.typography.labelLarge
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+
+    val needed = remember(labels, style, density) {
+        val buttons = labels.map { label ->
+            val word = with(density) { measurer.measure(label, style, maxLines = 1, softWrap = false).size.width.toDp() }
+            // As Material pads a text button with an icon: 12 dp before the icon, 16 dp after the word.
+            maxOf(ButtonDefaults.MinWidth, 12.dp + ButtonDefaults.IconSize + ButtonDefaults.IconSpacing + word + 16.dp)
+        }
+
+        buttons.fold(ExportButtonsSpace * (buttons.size - 1)) { total, button -> total + button }
+    }
+
+    return needed <= width
+}
+
+/** One of a way out's buttons: a word, and its icon when there's room, saying the whole of it to TalkBack, as "Share Web page". */
+@Composable
+private fun ExportButton(@StringRes text: Int, icon: ImageVector?, said: String, enabled: Boolean, onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        enabled = enabled,
+        contentPadding = if (icon != null) ButtonDefaults.TextButtonWithIconContentPadding else ButtonDefaults.TextButtonContentPadding,
+        modifier = Modifier.semantics { contentDescription = said },
+    ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+        }
+
+        Text(stringResource(text), modifier = Modifier.clearAndSetSemantics {})
+    }
+}
+
+/** A line under a way out that says what goes with the map (`goes`), or what doesn't. */
+private class Carried(val text: String, val goes: Boolean, val icon: ImageVector)
+
+/** The files that can't go clean that a map in `format` would carry: all of them in a zip, the pictures, sounds and motions in a page, the pictures on paper or in a drawing. */
+private fun Uncleaned.carried(format: Format): Uncleaned = when (format) {
+    Format.Zip -> this
+    Format.WebPage -> inPage
+    Format.Pdf, Format.Svg -> inPictures
+    Format.Png, Format.Markdown, Format.Yaml, Format.Opml -> Uncleaned()
+}
+
+/**
+ * What goes with the map in `format`, beyond its description, when it has
+ * pictures, videos or audio of its own: all of it in a zip; in a page, the
+ * pictures, with the live photos' motions (`motionsInPage`) and the sounds
+ * (`soundsInPage`) that fit; the pictures in a print; and only the text in
+ * markdown, YAML and OPML. `media` counts what goes clean or as it is; the
+ * map's other files (`uncleaned`) have lines of their own.
+ */
+private fun carries(format: Format, media: MediaSummary, uncleaned: Boolean, soundsInPage: Int, motionsInPage: Int, words: Words, device: ImageVector): List<Carried> {
+    if (media.isEmpty && !uncleaned) {
+        return emptyList()
+    }
+
+    return when (format) {
+        Format.Zip -> listOfNotNull(MediaWords.with(media, words)?.let { Carried(it, goes = true, Icons.Outlined.AttachFile) })
+        Format.WebPage -> listOfNotNull(
+            MediaWords.inside(media.copy(videos = 0, audio = soundsInPage, motions = motionsInPage.coerceAtMost(media.motions)), words)?.let { Carried(it, goes = true, Icons.Outlined.AttachFile) },
+            MediaWords.staysHere(media.copy(pictures = 0, motions = 0, audio = media.audio - soundsInPage), words, motions = (media.motions - motionsInPage).coerceAtLeast(0))?.let { Carried(it, goes = false, device) },
+        )
+        Format.Pdf -> listOfNotNull(MediaWords.printed(media, words)?.let { Carried(it, goes = true, Icons.Outlined.AttachFile) })
+        Format.Markdown, Format.Yaml, Format.Opml -> listOf(Carried(words.string(R.string.sharing_just_the_text), goes = false, Icons.AutoMirrored.Outlined.Notes))
+        Format.Png, Format.Svg -> emptyList()
     }
 }
 

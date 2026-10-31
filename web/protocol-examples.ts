@@ -11,6 +11,8 @@
 
 import type { AudienceCommand, MediaReport } from './audience';
 import type { Command, MapState, Message } from './bridge';
+import { RECEIVER_PROTOCOL } from './receiver-protocol';
+import { LARGEST_WHOLE, SMALLEST_WHOLE } from './whole-numbers';
 import { ENGLISH_WORDS } from './words';
 
 /** An example of each kind of message in `Union`, by its `type`. */
@@ -27,7 +29,7 @@ const STATE: MapState = {
       parentId: null,
       depth: 0,
       index: 0,
-      childCount: 1,
+      childCount: 2,
       icon: null,
       color: null,
       drawnColor: 'var(--_orbit-color-0)',
@@ -36,6 +38,7 @@ const STATE: MapState = {
       tags: [],
       collapsed: false,
       type: null,
+      typeVersion: null,
       link: null,
       note: null,
       noteFormat: null,
@@ -43,6 +46,7 @@ const STATE: MapState = {
       video: null,
       embed: null,
       attrs: null,
+      audio: null,
     },
     {
       id: 'tokyo',
@@ -59,16 +63,44 @@ const STATE: MapState = {
       tags: ['city'],
       collapsed: true,
       type: 'goal',
+      typeVersion: null,
       link: 'https://example.com/tokyo',
       note: 'Book the **ryokan**',
       noteFormat: 'markdown',
-      image: { src: 'media/tokyo.jpg', alt: 'The tower at night', caption: 'Tokyo Tower', provider: null, thumbnail: null },
-      video: { src: 'https://www.youtube.com/watch?v=abc', alt: null, caption: null, provider: 'youtube', thumbnail: 'https://i.ytimg.com/vi/abc/hqdefault.jpg' },
+      image: { src: 'media/tokyo.jpg', alt: 'The tower at night', caption: 'Tokyo Tower', provider: null, thumbnail: null, motion: { src: 'media/tokyo-motion.mp4', still: 1.2 } },
+      video: { src: 'https://www.youtube.com/watch?v=abc', alt: null, caption: null, provider: 'youtube', thumbnail: 'https://i.ytimg.com/vi/abc/hqdefault.jpg', motion: null },
       embed: null,
       attrs: { target: 3000, current: 1250, unit: 'USD' },
+      audio: { src: 'media/memo-mf2k1x.mp4', alt: null, caption: 'Where to stay', provider: null, thumbnail: null, motion: null },
+    },
+    {
+      // Numbers past what the app holds, as the page sends them (whole-numbers.ts): `type: goal@99999999999`, `priority: -1e21`.
+      id: 'someday',
+      text: 'Someday',
+      parentId: 'trip-to-japan',
+      depth: 1,
+      index: 1,
+      childCount: 0,
+      icon: null,
+      color: null,
+      drawnColor: 'var(--_orbit-color-1)',
+      status: null,
+      priority: SMALLEST_WHOLE,
+      tags: [],
+      collapsed: false,
+      type: 'goal',
+      typeVersion: LARGEST_WHOLE,
+      link: null,
+      note: null,
+      noteFormat: null,
+      image: null,
+      video: null,
+      embed: null,
+      attrs: null,
+      audio: null,
     },
   ],
-  options: { theme: 'night', palette: ['#e91e63', '#3f51b5'], showRings: true, orbitAnimation: false, orbitSpeed: 1.5, maxDepth: 3, viewMode: 'focus', progressRings: false, tags: ['travel'] },
+  options: { theme: 'night', palette: ['#e91e63', '#3f51b5'], showRings: true, animation: false, speed: 1.5, maxDepth: 3, view: 'focus', progressRings: false, tags: ['travel'] },
   path: ['trip-to-japan', 'tokyo'],
   mode: 'focus',
   style: 'night',
@@ -76,6 +108,9 @@ const STATE: MapState = {
   readOnly: 'newer',
   problem: 'This map is written for version 2 of the format, and this version of Orbit reads up to 1.',
 };
+
+/** The map with more levels to show than the app holds (`maxDepth: 1e12`), as the page sends it (whole-numbers.ts). */
+const DEEPEST_STATE: MapState = { ...STATE, options: { ...STATE.options, maxDepth: LARGEST_WHOLE } };
 
 /** What the app tells the map's page. */
 export const MAP_COMMANDS: OneOfEach<Command> = {
@@ -90,8 +125,9 @@ export const MAP_COMMANDS: OneOfEach<Command> = {
     focus: 'tokyo',
     view: 'all',
     mapId: 'trip',
+    revision: 2,
   },
-  insets: { type: 'insets', insets: { top: 0, right: 80, bottom: 0, left: 0 } },
+  insets: { type: 'insets', insets: { top: 0, right: 80, bottom: 0, left: 0 }, glide: true },
   unload: { type: 'unload' },
   theme: { type: 'theme', theme: { dark: true, tokens: {}, seed: null } },
   settings: { type: 'settings', settings: { haptics: false, snap: true, longPressDelay: 500 } },
@@ -108,7 +144,7 @@ export const MAP_COMMANDS: OneOfEach<Command> = {
   view: { type: 'view', mode: 'all' },
   zoom: { type: 'zoom', factor: 1.25 },
   fit: { type: 'fit' },
-  restore: { type: 'restore', markdown: '# Trip to Japan\n' },
+  restore: { type: 'restore', markdown: '# Trip to Japan\n', revision: 2 },
   preview: { type: 'preview', markdown: '# Trip to Japan\n- Osaka\n', editable: false },
   source: { type: 'source', text: 'title: Trip\nnodes:\n  - text: Tokyo\n' },
   options: { type: 'options', options: { theme: 'cosmos', palette: null, progressRings: null, tags: ['travel', 'family'] } },
@@ -125,23 +161,39 @@ export const MAP_COMMANDS: OneOfEach<Command> = {
     theme: THEME,
     transparent: true,
     style: '',
-    viewMode: 'all',
+    view: 'all',
     focus: null,
     baseUrl: 'https://appassets.androidplatform.net/maps/trip/',
   },
   convert: { type: 'convert', job: 4, text: '# Trip to Japan\n', to: 'opml' },
   check: { type: 'check', job: 5, text: 'nodes:\n  - text: Tokyo\n' },
   importFile: { type: 'importFile', job: 6, data: 'PG9wbWw+PC9vcG1sPg==', name: 'Trip.opml' },
-  addIdeas: { type: 'addIdeas', job: 7, markdown: '# Trip to Japan\n', ideas: [{ text: 'Call the hotel', note: null }, { text: 'Pack the adapter', note: 'Type A, two of them' }], parentId: null },
+  addIdeas: { type: 'addIdeas', job: 7, markdown: '# Trip to Japan\n', text: 'Call the hotel\nPack\n  - [ ] The adapter\n  - [x] Passports', parentId: null },
   copy: { type: 'copy', job: 8, id: 'tokyo' },
   paste: { type: 'paste', job: 9, parentId: 'tokyo', text: '- Shibuya\n- Asakusa' },
+  dropOver: { type: 'dropOver', x: 182.5, y: 410 },
+  dropLeave: { type: 'dropLeave' },
+  dropAt: { type: 'dropAt', job: 10, x: 182.5, y: 412.25 },
+  addNodes: {
+    type: 'addNodes',
+    job: 11,
+    parentId: 'tokyo',
+    nodes: [
+      { text: 'Shibuya crossing', image: { src: 'media/shibuya.jpg' } },
+      { text: 'Night walk', video: { src: 'media/night-walk.mp4', provider: 'native', thumbnail: 'media/night-walk-poster.jpg' } },
+    ],
+  },
+  mapFromText: { type: 'mapFromText', job: 12, text: 'Trip to Japan\n\tTokyo\n\t\tShibuya\n\tKyoto', subject: null },
+  editMap: { type: 'editMap', job: 13, markdown: '# Trip to Japan\n', title: 'Japan in spring', tags: ['travel', 'Plans'] },
+  hideChildren: { type: 'hideChildren', ids: ['trip-to-japan', 'tokyo'] },
+  revealChildren: { type: 'revealChildren', ids: null },
 };
 
 /** What the map's page tells the app. */
 export const MAP_MESSAGES: OneOfEach<Message> = {
   hello: { type: 'hello' },
   ready: { type: 'ready', state: STATE },
-  saved: { type: 'saved', kind: 'update', markdown: '# Trip to Japan\n- Tokyo\n', state: STATE, added: null, renamed: { from: 'tokio', to: 'tokyo' }, removed: null },
+  saved: { type: 'saved', kind: 'update', markdown: '# Trip to Japan\n- Tokyo\n', state: DEEPEST_STATE, added: null, renamed: { from: 'tokio', to: 'tokyo' }, removed: null, revision: 2 },
   state: { type: 'state', state: STATE },
   focus: { type: 'focus', path: ['trip-to-japan', 'tokyo'], mode: 'all' },
   context: { type: 'context', id: 'tokyo', x: 120.5, y: 340 },
@@ -156,6 +208,9 @@ export const MAP_MESSAGES: OneOfEach<Message> = {
   result: { type: 'result', job: 4, value: '<opml version="2.0"></opml>' },
   clipboard: { type: 'clipboard', action: 'paste', id: 'tokyo' },
   error: { type: 'error', message: 'Orbit couldn\'t draw this map.' },
+  declined: { type: 'declined', change: 'update', message: 'A node\'s image is its address, or { src, alt, caption, motion }, like { image: \'summit.jpg\' }, but got 42.' },
+  dropTarget: { type: 'dropTarget', id: 'tokyo' },
+  dragOut: { type: 'dragOut', id: 'tokyo' },
 };
 
 /** What the app tells an audience's page, on a second screen or a TV. */
@@ -181,7 +236,8 @@ export const AUDIENCE_MESSAGES: { hello: { type: 'hello' }; mediaState: MediaRep
 export const protocolExamples = (): string => {
   const examples = {
     map: { commands: Object.values(MAP_COMMANDS), messages: Object.values(MAP_MESSAGES) },
-    audience: { commands: Object.values(AUDIENCE_COMMANDS), messages: Object.values(AUDIENCE_MESSAGES) },
+    // The protocol of TVs and browsers the audience's page speaks, which the app's own has to match.
+    audience: { protocol: RECEIVER_PROTOCOL, commands: Object.values(AUDIENCE_COMMANDS), messages: Object.values(AUDIENCE_MESSAGES) },
   };
 
   return `${JSON.stringify(examples, null, 2)}\n`;

@@ -30,7 +30,7 @@ data class PictureRequest(
     /** Another style to draw the map in; empty draws it in the app's colors. */
     val style: String? = null,
 
-    val viewMode: String? = null,
+    val view: String? = null,
     val focus: String? = null,
     val baseUrl: String? = null,
 )
@@ -95,7 +95,7 @@ class MapPictures(private val pool: PagePool, cache: File, private val orbit: St
     suspend fun draw(request: PictureRequest): ByteArray = pool.work { page -> draw(page, request) }
 
     /** Draws a picture on `page`: of the map on it, or of `request.markdown`. */
-    suspend fun draw(page: OrbitPage, request: PictureRequest): ByteArray {
+    suspend fun draw(page: MapPage, request: PictureRequest): ByteArray {
         val answer = withContext(Dispatchers.Main) {
             page.request(String.serializer()) { job ->
                 MapCommand.Snapshot(
@@ -108,7 +108,7 @@ class MapPictures(private val pool: PagePool, cache: File, private val orbit: St
                     theme = request.theme,
                     transparent = request.transparent,
                     style = request.style,
-                    viewMode = request.viewMode,
+                    view = request.view,
                     focus = request.focus,
                     baseUrl = request.baseUrl,
                 )

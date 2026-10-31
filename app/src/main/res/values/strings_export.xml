@@ -27,14 +27,30 @@
     <string name="export_opml" translatable="false">OPML</string>
     <string name="export_opml_description">The outline, for outliners and other mind map apps</string>
     <string name="export_zip">Zip</string>
-    <string name="export_zip_description">The markdown with the pictures and videos it shows</string>
+    <string name="export_zip_description">The markdown with the pictures, videos and sounds it holds</string>
 
-    <!-- What TalkBack reads for each way's buttons. %1$s is one of the ways above: "Picture". -->
+    <!-- Each way out as a sentence names it, after Save, Share or Copy: “Save the web page”. -->
+    <string name="export_web_page_named">the web page</string>
+    <string name="export_pdf_named">the PDF</string>
+    <string name="export_picture_named">the picture</string>
+    <string name="export_drawing_named">the drawing</string>
+    <string name="export_markdown_named">the markdown</string>
+    <string name="export_yaml_named">the YAML</string>
+    <string name="export_opml_named">the OPML</string>
+    <string name="export_zip_named">the zip</string>
+    <!-- What TalkBack reads for each way's buttons. %1$s is a way as a sentence names it, from above: "the picture". -->
     <string name="export_copy_format">Copy %1$s</string>
     <string name="export_save_format">Save %1$s</string>
     <string name="export_share_format">Share %1$s</string>
     <!-- What TalkBack reads for the PDF way's button, which opens Android's print dialog. -->
     <string name="export_print">Print or save as PDF</string>
+    <!-- The words on each way's buttons, under its description. -->
+    <string name="export_copy">Copy</string>
+    <string name="export_save">Save</string>
+    <string name="export_share">Share</string>
+    <string name="export_print_button">Print</string>
+    <!-- Under a way, once it's copied, on Android 12 and earlier, which don't say so themselves. -->
+    <string name="export_copied">Copied</string>
 
     <!-- When a map couldn't be laid out to print. -->
     <string name="export_print_failed">The map couldn’t be laid out for printing</string>

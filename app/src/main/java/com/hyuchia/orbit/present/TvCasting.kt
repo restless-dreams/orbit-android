@@ -14,6 +14,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.ui.Hint
 import kotlinx.coroutines.CoroutineScope
 import java.io.File
 
@@ -21,8 +22,12 @@ private const val TAG = "TvCasting"
 
 /** A TV the phone is casting to. */
 fun interface Tv {
-    /** An audience on the TV for a presentation of the map in `mapFolder`: a new one each time a presentation starts on it. */
-    fun audience(mapFolder: File, scope: CoroutineScope): Audience
+    /**
+     * An audience on the TV for a presentation of the map in `mapFolder`: a
+     * new one each time a presentation starts on it. It gets the map's
+     * pictures that can't go clean only when they're among `asTheyAre`.
+     */
+    fun audience(mapFolder: File, scope: CoroutineScope, asTheyAre: () -> Set<String>): Audience
 }
 
 /**
@@ -78,16 +83,20 @@ internal fun ScreenCastButton(modifier: Modifier = Modifier) {
         return
     }
 
-    IconButton(
-        onClick = {
-            try {
-                context.startActivity(intent)
-            } catch (missing: ActivityNotFoundException) {
-                Logs.warn(TAG, "This phone has no screen casting", missing)
-            }
-        },
-        modifier = modifier,
-    ) {
-        Icon(Icons.Outlined.Cast, contentDescription = stringResource(R.string.present_show_on_a_tv))
+    val name = stringResource(R.string.present_show_on_a_tv)
+
+    Hint(name) {
+        IconButton(
+            onClick = {
+                try {
+                    context.startActivity(intent)
+                } catch (missing: ActivityNotFoundException) {
+                    Logs.warn(TAG, "This phone has no screen casting", missing)
+                }
+            },
+            modifier = modifier,
+        ) {
+            Icon(Icons.Outlined.Cast, contentDescription = name)
+        }
     }
 }

@@ -45,11 +45,20 @@ fun hearing(context: Context): Hearing = when {
     else -> Hearing.None
 }
 
-/** Another app's screen that listens once and answers with what it heard, asking for ideas in the language of `context`. */
+/** Another app's screen that listens once and answers with what it heard, asking for ideas in the language of `context`, and hearing them in it. */
 fun listeningScreen(context: Context): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+    putExtra(RecognizerIntent.EXTRA_LANGUAGE, listeningLanguage(context))
     putExtra(RecognizerIntent.EXTRA_PROMPT, context.getString(R.string.voice_say_your_ideas))
 }
+
+/**
+ * The language ideas are heard in: Orbit's, as `context` has it, which
+ * Settings can make other than the phone's (Android 13 and later). Someone
+ * who chose Spanish for Orbit on an English phone says their ideas in
+ * Spanish, as Orbit asks for them.
+ */
+internal fun listeningLanguage(context: Context): String = context.resources.configuration.locales[0].toLanguageTag()
 
 /**
  * The ideas in what was said: one for each sentence, starting with a
@@ -75,8 +84,9 @@ data class Heard(
 )
 
 /**
- * Listens through the phone's speech service until [stop]. A pause ends
- * each idea, and its sentences come out through `onIdeas`. Speech services
+ * Listens through the phone's speech service until [stop], in Orbit's
+ * language ([listeningLanguage]). A pause ends each idea, and its
+ * sentences come out through `onIdeas`. Speech services
  * stop listening at a pause, so it starts again at once while it's wanted.
  * `onFinished` hears when listening is over, with the reason when something
  * went wrong. Everything happens on the main thread, as speech services need.
@@ -134,6 +144,7 @@ class Listening(
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, listeningLanguage(context))
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)

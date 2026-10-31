@@ -3,7 +3,7 @@
 // first with `bun run build` there. tsconfig.json's `paths` finds them in
 // the default checkout; this finds them at ORBIT_PATH.
 //
-//   ORBIT_PATH=../orbit bun run typecheck
+//   ORBIT_PATH=../../orbit bun run typecheck
 //
 // tsconfig.json's `lib` is ES2022 with the DOM, so the pages can't use a
 // newer part of JavaScript than WebViews from Chromium 99 on have; the build

@@ -86,13 +86,19 @@ internal fun mapIdOf(baseUrl: String?): String? {
  * the answer says which part it is, and holds the whole file, as WebView
  * itself skips to the part a request asks for, and reads no further than
  * its end, in any stream an app answers with.
+ *
+ * With `stills`, an animated picture goes as its first frame, a PNG: the
+ * map's planets stand still, as its thumbnails do. A HEIC or HEIF picture
+ * goes as a JPEG, which the page draws.
  */
-internal class MapFiles(directory: File) {
+internal class MapFiles(directory: File, private val stills: FirstFrames? = null) {
     private val root: File by lazy { directory.canonicalFile }
 
     /** The answer to a request for `url`, with the Range header `range` if it has one: the file, part of it, or not found. */
     fun answer(url: Uri, range: String?, mayRead: (String) -> Boolean): WebResourceResponse {
-        val file = file(url, mayRead) ?: return notFound()
+        val found = file(url, mayRead) ?: return notFound()
+        val still = stills?.of(found)
+        val file = still ?: found
         val length = file.length()
         val type = mediaType(file.name)
         val part = byteRange(range, length)

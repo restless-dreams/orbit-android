@@ -1,12 +1,13 @@
 package com.hyuchia.orbit.nearby
 
 import com.hyuchia.orbit.Logs
+import com.hyuchia.orbit.R
+import com.hyuchia.orbit.Words
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.runBlocking
 import java.io.BufferedInputStream
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -15,10 +16,6 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.net.URLDecoder
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
-import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledThreadPoolExecutor
@@ -29,10 +26,6 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
-/** The longest request line and headers the server reads, together. */
-private const val HEADERS_LIMIT = 16 * 1024
-/** A body bigger than this goes to a file instead of memory, when the server has a folder for them. */
-private const val IN_MEMORY_BODY = 256 * 1024
 /**
  * The stack each of the server's threads gets. They read requests, answer
  * and write; what a handler does that's heavy runs on the app's own
@@ -41,6 +34,9 @@ private const val IN_MEMORY_BODY = 256 * 1024
 private const val THREAD_STACK_BYTES = 256L * 1024
 /** Threads beyond one for each connection, for one connection's last moments overlapping the next one's first. */
 private const val SPARE_THREADS = 8
+
+/** How long stopping waits, at most and for them all, for the threads taking connections to let go of their sockets. */
+private const val ACCEPT_EXIT_MILLISECONDS = 500L
 /** Writes go out in pieces this big, so a reader that stopped reading is noticed between them. */
 private const val WRITE_PIECE = 8 * 1024
 /**
@@ -49,33 +45,16 @@ private const val WRITE_PIECE = 8 * 1024
  * the answer down with it before the other side reads it.
  */
 private const val LINGER_MILLISECONDS = 500
-/**
- * Events one stream may have waiting to be written. A reader further behind
- * is dropped: it reconnects, and catches up from the latest show, captions
- * and step.
- */
-internal const val EVENT_BACKLOG = 64
 private const val TAG = "LocalServer"
 
 /**
- * What every answer carries, unless its handler says otherwise: no guessing
- * types, no referrer, no framing, no caching.
+ * How many connections the server holds at once. Past either, it answers 503
+ * at once and hangs up. A device with many addresses, as an IPv6 network can
+ * give one, takes `perAddress` at each: the room's devices share the
+ * network's prefix, so connections can't be counted by it, and one device on
+ * the Wi-Fi can fill `connections` and keep the rest out while it does, as on
+ * any network it's on.
  */
-private val SAFETY_HEADERS = listOf(
-    "X-Content-Type-Options" to "nosniff",
-    "Referrer-Policy" to "no-referrer",
-    "X-Frame-Options" to "DENY",
-    "Cache-Control" to "no-store",
-)
-
-/**
- * The content policy of every answer that isn't a page: a picture or video
- * opened on its own, an SVG with a script inside say, runs nothing, loads
- * nothing and stays apart from the phone's pages.
- */
-internal const val FILE_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
-
-/** How many connections the server holds at once. Past either, it answers 503 at once and hangs up. */
 data class ServerLimits(val connections: Int = 128, val perAddress: Int = 8)
 
 /** The server's clocks, in milliseconds. */
@@ -112,201 +91,6 @@ data class ServerTimings(
     val addresses: Long = 5_000,
 )
 
-/** A request from a device on the local network. */
-class Request(
-    val method: String,
-    val path: String,
-    val query: Map<String, String>,
-
-    /** Header names in lower case. */
-    val headers: Map<String, String>,
-
-    /** The body, when it's small enough to keep in memory; a bigger one is in [bodyFile]. */
-    val body: ByteArray,
-
-    /** The address the request came from. */
-    val from: String,
-
-    /**
-     * A body too big for memory, in a file: deleted once the request is
-     * answered, unless the handler moves it somewhere of its own.
-     */
-    val bodyFile: File? = null,
-) {
-    /** The body, wherever it is. */
-    fun bodyStream(): InputStream = bodyFile?.inputStream() ?: body.inputStream()
-
-    /** Every value the request's cookies give `name`. */
-    fun cookies(name: String): List<String> =
-        headers["cookie"].orEmpty().split(';').map { it.trim() }.filter { it.substringBefore('=') == name }.map { it.substringAfter('=') }
-}
-
-/** A request before its body is read: enough to refuse it without taking the body. */
-class RequestHead(
-    val method: String,
-    val path: String,
-
-    /** Header names in lower case. */
-    val headers: Map<String, String>,
-
-    /** The address the request came from. */
-    val from: String,
-
-    /** How long its body says it is. */
-    val length: Long,
-)
-
-/** What the server does with a request before reading its body. */
-sealed interface Admission {
-    /** Reads the body and answers the request; `release` runs once it's done with, whether or not the body arrived whole. */
-    class Read(val release: () -> Unit = {}) : Admission
-
-    /** Answers at once, without reading any of the body. */
-    class Refuse(val response: Response) : Admission
-}
-
-sealed interface Response {
-    class Bytes(val status: Int, val type: String, val body: ByteArray, val headers: Map<String, String> = emptyMap()) : Response {
-        fun withHeaders(more: Map<String, String>) = Bytes(status, type, body, headers + more)
-    }
-
-    /**
-     * A file, read as it's written, never all at once. The server answers
-     * a request for part of it, as a video asks, with that part (see [byteRange]).
-     * A `temporary` file, made for this answer alone, goes whole, and is
-     * deleted once it's written, or once writing it fails.
-     */
-    class FromFile(val type: String, val file: File, val headers: Map<String, String> = emptyMap(), val temporary: Boolean = false) : Response
-
-    /** Server-sent events: the connection stays open and gets each event as it's sent, until either side closes. */
-    class Events(val stream: EventStream) : Response
-
-    companion object {
-        fun text(status: Int, text: String, type: String = "text/plain; charset=utf-8") = Bytes(status, type, text.toByteArray())
-        fun page(status: Int, html: String, headers: Map<String, String> = emptyMap()) = Bytes(status, "text/html; charset=utf-8", html.toByteArray(), headers)
-        fun json(status: Int, json: String) = Bytes(status, "application/json", json.toByteArray())
-        fun notFound() = text(404, "Not found")
-        fun redirect(location: String) = Bytes(302, "text/plain; charset=utf-8", "Moved to $location".toByteArray(), mapOf("Location" to location))
-    }
-}
-
-/**
- * Where a request for a page at a code goes first, if anywhere: the page at
- * `/1634` is the folder `/1634/`, whose script and files its links name
- * relative to it, so an address typed without the last slash gets it added.
- */
-internal fun folderRedirect(path: String): String? {
-    val parts = path.trim('/').split('/').filter { it.isNotEmpty() }
-    return if (parts.size == 1 && !path.endsWith("/")) "/${parts.single()}/" else null
-}
-
-/**
- * One browser's event stream: what's sent arrives in order, and closing it
- * ends the connection once what was sent before is written. `onClose` hears
- * once that it's over, whichever side ended it. A reader that falls more
- * than [EVENT_BACKLOG] events behind is dropped.
- */
-class EventStream(private val onClose: () -> Unit = {}) {
-    /** The connection writing a stream. */
-    internal interface Pump {
-        /** There's something to write. */
-        fun wake()
-
-        /** End the connection now, written or not. */
-        fun hangUp()
-    }
-
-    private val lock = Any()
-    private val waiting = ArrayDeque<String>()
-    private var closing = false
-    private var over = false
-    private var pump: Pump? = null
-
-    /** Whether it's closed, or closing once what was sent is written: nothing more goes out. */
-    val isClosed: Boolean get() = synchronized(lock) { closing }
-
-    fun send(data: String) {
-        val behind: Boolean
-        val attached: Pump?
-
-        synchronized(lock) {
-            if (closing) {
-                return
-            }
-
-            behind = waiting.size >= EVENT_BACKLOG
-
-            if (behind) {
-                waiting.clear()
-                closing = true
-            } else {
-                waiting.addLast(data)
-            }
-
-            attached = pump
-        }
-
-        when {
-            behind && attached != null -> attached.hangUp()
-            behind -> finish()
-            else -> attached?.wake()
-        }
-    }
-
-    fun close() {
-        val attached = synchronized(lock) {
-            if (closing) {
-                return
-            }
-
-            closing = true
-            pump
-        }
-
-        if (attached != null) {
-            attached.wake()
-        } else {
-            finish()
-        }
-    }
-
-    /** A connection starts writing it; false when it closed first. */
-    internal fun attach(pump: Pump): Boolean = synchronized(lock) {
-        if (closing) {
-            false
-        } else {
-            this.pump = pump
-            true
-        }
-    }
-
-    /** Everything waiting to be written, or null once it's closing with nothing left, when its connection ends. */
-    internal fun take(): List<String>? = synchronized(lock) {
-        when {
-            waiting.isNotEmpty() -> ArrayList(waiting).also { waiting.clear() }
-            closing -> null
-            else -> emptyList()
-        }
-    }
-
-    internal val hasWork: Boolean get() = synchronized(lock) { waiting.isNotEmpty() || closing }
-
-    /** Its connection ended, for whatever reason. */
-    internal fun finish() {
-        val first = synchronized(lock) {
-            closing = true
-            waiting.clear()
-            val first = !over
-            over = true
-            first
-        }
-
-        if (first) {
-            onClose()
-        }
-    }
-}
-
 /**
  * A small web server on the local network, for the devices in the room: a
  * browser following a presentation, or another device sending a map. Each
@@ -327,6 +111,10 @@ class LocalServer(
     private val policy: ConnectionPolicy = RoomNetworks(),
     private val limits: ServerLimits = ServerLimits(),
     private val timings: ServerTimings = ServerTimings(),
+
+    /** What it says in plain text to a browser it can't serve, in the phone's language; in English without. */
+    private val words: Words? = null,
+
     private val admit: (RequestHead) -> Admission = { Admission.Read() },
     private val handle: suspend (Request) -> Response,
 ) {
@@ -444,8 +232,6 @@ class LocalServer(
         listeningNow.value = false
     }
 
-    private class TooBigException : Exception()
-
     /** Where a connection is: its clocks run differently in each. */
     private enum class Phase { Head, Body, Answering, Streaming }
 
@@ -465,16 +251,38 @@ class LocalServer(
         private val perAddress = HashMap<String, Int>()
         private var open = 0
 
+        /** The threads waiting for connections, one for each socket. */
+        private val accepting = ArrayList<Thread>()
+
         fun start() {
             clock.scheduleWithFixedDelay({ runCatching { tick() } }, timings.tick, timings.tick, TimeUnit.MILLISECONDS)
 
             sockets.forEach { socket ->
-                threads("$name accepting").newThread { accept(socket) }.start()
+                accepting += threads("$name accepting").newThread { accept(socket) }.also { it.start() }
             }
         }
 
+        /**
+         * Stops taking connections, and ends the ones it has. A socket closed
+         * while a thread waits on it is let go of only once that thread is out,
+         * and until then its port still takes connections: so stopping waits
+         * for them, and nothing listens once it's done.
+         */
         fun stop() {
             sockets.forEach { runCatching { it.close() } }
+            // One deadline for them all: stopping can run on the main thread, which mustn't wait long.
+            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(ACCEPT_EXIT_MILLISECONDS)
+
+            for (thread in accepting.filter { it != Thread.currentThread() }) {
+                val left = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
+
+                if (left <= 0) {
+                    break
+                }
+
+                runCatching { thread.join(left) }
+            }
+
             clock.shutdownNow()
             connections.forEach { it.close() }
             workers.shutdown()
@@ -552,9 +360,9 @@ class LocalServer(
         /** Too many connections: a short answer on a fresh connection, which can't keep the accepting thread waiting. */
         private fun refuse(socket: Socket) {
             runCatching {
-                val body = "Too many connections. Try again in a moment.".toByteArray()
+                val body = (words?.string(R.string.nearby_server_busy) ?: "Too many connections. Try again in a moment.").toByteArray()
                 val output = socket.getOutputStream()
-                output.write(head(503, "text/plain; charset=utf-8", body.size.toLong(), mapOf("Retry-After" to "5")))
+                output.write(answerHead(503, "text/plain; charset=utf-8", body.size.toLong(), mapOf("Retry-After" to "5")))
                 output.write(body)
                 output.flush()
                 socket.shutdownOutput()
@@ -611,7 +419,7 @@ class LocalServer(
                     val problem = when {
                         parsed.headers["host"] == null -> Response.text(400, "Bad request")
                         !hostMatches(parsed.headers["host"], socket.localAddress, socket.localPort) ->
-                            Response.text(421, "Open this with the address the phone shows.")
+                            Response.text(421, words?.string(R.string.nearby_server_wrong_address) ?: "Open this with the address the phone shows.")
                         else -> null
                     }
 
@@ -641,7 +449,7 @@ class LocalServer(
 
                     bodyTime = timings.body + length * timings.bodyPerMegabyte / 1_000_000
                     moveTo(Phase.Body)
-                    request = readBody(input, parsed, address, length)
+                    request = readBody(input, parsed, address, length, spool)
 
                     if (request == null) {
                         write(Response.text(400, "Bad request"))
@@ -711,6 +519,13 @@ class LocalServer(
             private fun stream(events: EventStream): Boolean {
                 // Kept first, so a connection that fails from here on ends the stream too.
                 stream = events
+
+                // Closed before it was kept, as the server stopped: the stream ends with it.
+                if (closed.get()) {
+                    events.finish()
+                    return false
+                }
+
                 send(eventsHead())
                 moveTo(Phase.Streaming)
 
@@ -784,7 +599,7 @@ class LocalServer(
                             mapOf("Content-Security-Policy" to FILE_POLICY)
                         }
 
-                        send(head(response.status, response.type, response.body.size.toLong(), policy + response.headers))
+                        send(answerHead(response.status, response.type, response.body.size.toLong(), policy + response.headers))
                         send(response.body)
                     }
                     is Response.FromFile -> writeFile(response, request)
@@ -798,7 +613,7 @@ class LocalServer(
 
                 if (response.temporary) {
                     // The next request makes the file again, so no part of this one is offered on its own.
-                    send(head(200, response.type, length, mapOf("Content-Security-Policy" to FILE_POLICY) + response.headers))
+                    send(answerHead(200, response.type, length, mapOf("Content-Security-Policy" to FILE_POLICY) + response.headers))
                     sendFile(response.file.inputStream())
                     return
                 }
@@ -807,14 +622,14 @@ class LocalServer(
 
                 when (val range = byteRange(request?.headers?.get("range"), length, request?.headers?.get("if-range"))) {
                     ByteRange.Whole -> {
-                        send(head(200, response.type, length, ranges))
+                        send(answerHead(200, response.type, length, ranges))
                         sendFile(response.file.inputStream())
                     }
                     is ByteRange.Part -> {
-                        send(head(206, response.type, range.count, ranges + ("Content-Range" to range.contentRange)))
+                        send(answerHead(206, response.type, range.count, ranges + ("Content-Range" to range.contentRange)))
                         sendFile(openRange(response.file, range.first, range.count))
                     }
-                    is ByteRange.Unsatisfiable -> send(head(416, "text/plain; charset=utf-8", 0, ranges + ("Content-Range" to range.contentRange)))
+                    is ByteRange.Unsatisfiable -> send(answerHead(416, "text/plain; charset=utf-8", 0, ranges + ("Content-Range" to range.contentRange)))
                 }
             }
 
@@ -869,204 +684,7 @@ class LocalServer(
         }
     }
 
-    /** The parts of a request before its body. */
-    private class Head(val method: String, val path: String, val query: Map<String, String>, val headers: Map<String, String>)
-
-    /**
-     * The request line and headers, read strictly: a request with control
-     * characters in its target or headers, a target that isn't a path,
-     * folded or nameless headers, or two Hosts or lengths, isn't one.
-     */
-    private fun parseHead(head: String): Head? {
-        val lines = head.split("\r\n")
-        val requestLine = lines.first()
-        val parts = requestLine.split(' ')
-
-        if (parts.size != 3 || !parts[2].startsWith("HTTP/1.")) {
-            return null
-        }
-
-        val (method, target) = parts
-
-        if (method.isEmpty() || !method.all(::isTokenCharacter) || !target.startsWith("/") || !target.all { it in '!'..'~' }) {
-            return null
-        }
-
-        val headers = LinkedHashMap<String, String>()
-
-        for (line in lines.drop(1)) {
-            val colon = line.indexOf(':')
-
-            if (colon <= 0 || line.any { it != '\t' && (it < ' ' || it == '\u007F') }) {
-                return null
-            }
-
-            val name = line.substring(0, colon)
-
-            if (!name.all(::isTokenCharacter)) {
-                return null
-            }
-
-            val key = name.lowercase()
-            val value = line.substring(colon + 1).trim(' ', '\t')
-            val earlier = headers[key]
-
-            headers[key] = when {
-                earlier == null -> value
-                // One request, one address and one length: two of either is a request to refuse.
-                key == "host" || key == "content-length" -> return null
-                key == "cookie" -> "$earlier; $value"
-                else -> "$earlier, $value"
-            }
-        }
-
-        if (headers.containsKey("transfer-encoding")) {
-            return null
-        }
-
-        val path = decode(target.substringBefore('?'))
-
-        val query = target.substringAfter('?', "").split('&').filter { it.isNotEmpty() }.associate { pair ->
-            decode(pair.substringBefore('=')) to decode(pair.substringAfter('=', ""))
-        }
-
-        if (path.any(Char::isISOControl) || query.any { (name, value) -> name.any(Char::isISOControl) || value.any(Char::isISOControl) }) {
-            return null
-        }
-
-        return Head(method, path, query, headers)
-    }
-
-    private fun isTokenCharacter(character: Char): Boolean =
-        character in 'a'..'z' || character in 'A'..'Z' || character in '0'..'9' || character in "!#$%&'*+-.^_`|~"
-
-    /** How long a request's body says it is: none without a length, and null when the length isn't a number. */
-    private fun bodyLength(head: Head): Long? {
-        val lengthText = head.headers["content-length"] ?: "0"
-
-        if (lengthText.isEmpty() || lengthText.length > 18 || !lengthText.all { it in '0'..'9' }) {
-            return null
-        }
-
-        return lengthText.toLong()
-    }
-
-    /** The body of a request within its limit. */
-    private fun readBody(input: InputStream, head: Head, from: String, length: Long): Request? {
-        if (length > IN_MEMORY_BODY && spool != null) {
-            spool.mkdirs()
-            val file = File.createTempFile("body", ".part", spool)
-
-            val complete = try {
-                file.outputStream().use { output -> copyExactly(input, output, length) }
-            } catch (failure: IOException) {
-                file.delete()
-                throw failure
-            }
-
-            if (!complete) {
-                file.delete()
-                return null
-            }
-
-            return Request(head.method, head.path, head.query, head.headers, ByteArray(0), from, file)
-        }
-
-        if (length > IN_MEMORY_BODY) {
-            throw TooBigException()
-        }
-
-        val body = ByteArray(length.toInt())
-        var read = 0
-
-        while (read < body.size) {
-            val count = input.read(body, read, body.size - read)
-
-            if (count < 0) {
-                return null
-            }
-
-            read += count
-        }
-
-        return Request(head.method, head.path, head.query, head.headers, body, from)
-    }
-
-    /** Copies exactly `length` bytes; false when the input ends first. */
-    private fun copyExactly(input: InputStream, output: OutputStream, length: Long): Boolean {
-        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-        var left = length
-
-        while (left > 0) {
-            val count = input.read(buffer, 0, minOf(buffer.size.toLong(), left).toInt())
-
-            if (count < 0) {
-                return false
-            }
-
-            output.write(buffer, 0, count)
-            left -= count
-        }
-
-        return true
-    }
-
-    /** The request line and headers, up to the blank line after them. */
-    private fun readHead(input: InputStream): String? {
-        val head = ByteArrayOutputStream()
-        var matched = 0
-        val end = byteArrayOf('\r'.code.toByte(), '\n'.code.toByte(), '\r'.code.toByte(), '\n'.code.toByte())
-
-        while (matched < end.size) {
-            val byte = input.read()
-
-            if (byte < 0 || head.size() >= HEADERS_LIMIT) {
-                return null
-            }
-
-            head.write(byte)
-            matched = if (byte.toByte() == end[matched]) matched + 1 else if (byte.toByte() == end[0]) 1 else 0
-        }
-
-        return head.toString(StandardCharsets.ISO_8859_1.name()).removeSuffix("\r\n\r\n")
-    }
-
-    private fun eventsHead(): ByteArray = (
-        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\n" +
-            SAFETY_HEADERS.joinToString("") { (name, value) -> "$name: $value\r\n" } + "\r\n"
-        ).toByteArray()
-
-    private fun eventText(event: String): String = event.lines().joinToString("\n", postfix = "\n\n") { "data: $it" }
-
-    private fun head(status: Int, type: String, length: Long, headers: Map<String, String>): ByteArray {
-        val reason = REASONS[status] ?: "OK"
-        val all = LinkedHashMap<String, String>()
-        SAFETY_HEADERS.forEach { (name, value) -> all[name] = value }
-
-        // A header a handler made from something it was sent can't add lines of its own.
-        headers.filter { (name, value) -> name.all(::isTokenCharacter) && value.none { it < ' ' || it == '\u007F' } }.forEach { (name, value) ->
-            all.keys.firstOrNull { it.equals(name, ignoreCase = true) }?.let(all::remove)
-            all[name] = value
-        }
-
-        val lines = all.entries.joinToString("") { (name, value) -> "$name: $value\r\n" }
-        return ("HTTP/1.1 $status $reason\r\nContent-Type: $type\r\nContent-Length: $length\r\nConnection: close\r\n$lines\r\n").toByteArray()
-    }
-
-    private fun decode(text: String): String = try {
-        URLDecoder.decode(text, StandardCharsets.UTF_8.name())
-    } catch (malformed: IllegalArgumentException) {
-        text
-    }
-
     private companion object {
-        val REASONS = mapOf(
-            200 to "OK", 206 to "Partial Content", 302 to "Found", 303 to "See Other", 400 to "Bad Request", 403 to "Forbidden",
-            404 to "Not Found", 405 to "Method Not Allowed", 409 to "Conflict", 410 to "Gone", 413 to "Payload Too Large",
-            416 to "Range Not Satisfiable", 421 to "Misdirected Request", 429 to "Too Many Requests", 500 to "Internal Server Error",
-            503 to "Service Unavailable",
-        )
-
         fun monotonic(): Long = System.nanoTime() / 1_000_000
 
         /** Small daemon threads, named for the server, so a stack trace says whose they are. */
@@ -1078,81 +696,4 @@ class LocalServer(
             }
         }
     }
-}
-
-/**
- * The Content-Security-Policy for a page: scripts only from the phone or
- * inline ones it wrote, by their hashes, so nothing a map's text slips into
- * the page can run; pictures, videos and embeds from the phone, data and
- * https; and never framed, never rebased, forms only to the phone.
- */
-internal fun pagePolicy(html: String): String {
-    val scripts = inlineScripts(html).joinToString("") { " '${scriptHash(it)}'" }
-    return listOf(
-        "default-src 'none'",
-        "script-src 'self'$scripts",
-        "style-src 'self' 'unsafe-inline'",
-        "img-src 'self' data: blob: https:",
-        "media-src 'self' data: blob: https:",
-        "frame-src https:",
-        "font-src 'self' data:",
-        "connect-src 'self'",
-        "form-action 'self'",
-        "frame-ancestors 'none'",
-        "base-uri 'none'",
-    ).joinToString("; ")
-}
-
-/** The text of each script element in a page that runs without a src: its own code, or a module. Data blocks aren't scripts. */
-internal fun inlineScripts(html: String): List<String> {
-    val scripts = ArrayList<String>()
-    var position = 0
-
-    while (true) {
-        val open = html.indexOf("<script", position, ignoreCase = true)
-
-        if (open < 0) {
-            break
-        }
-
-        val tagEnd = html.indexOf('>', open)
-
-        if (tagEnd < 0) {
-            break
-        }
-
-        val attributes = html.substring(open + "<script".length, tagEnd)
-
-        if (attributes.isNotEmpty() && !attributes[0].isWhitespace()) {
-            position = open + 1
-            continue
-        }
-
-        val close = html.indexOf("</script", tagEnd + 1, ignoreCase = true)
-
-        if (close < 0) {
-            break
-        }
-
-        val type = SCRIPT_TYPE.find(attributes)?.groupValues?.get(1)?.lowercase()
-
-        if (!SCRIPT_SOURCE.containsMatchIn(attributes) && (type == null || type in RUNNABLE_TYPES)) {
-            scripts += html.substring(tagEnd + 1, close)
-        }
-
-        position = close + "</script".length
-    }
-
-    return scripts
-}
-
-private val SCRIPT_TYPE = Regex("""\btype\s*=\s*["']?([^"'\s>]*)""", RegexOption.IGNORE_CASE)
-private val SCRIPT_SOURCE = Regex("""(^|\s)src\s*=""", RegexOption.IGNORE_CASE)
-private val RUNNABLE_TYPES = setOf("", "module", "text/javascript", "application/javascript")
-
-/** A script's CSP hash, of its text as a browser reads it: HTML turns every line break into a line feed first. */
-internal fun scriptHash(script: String): String {
-    val text = script.replace("\r\n", "\n").replace('\r', '\n')
-    val digest = MessageDigest.getInstance("SHA-256").digest(text.toByteArray(StandardCharsets.UTF_8))
-    return "sha256-" + Base64.getEncoder().encodeToString(digest)
 }

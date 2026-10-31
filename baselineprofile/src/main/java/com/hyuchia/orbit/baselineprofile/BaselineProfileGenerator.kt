@@ -19,7 +19,7 @@ class BaselineProfileGenerator {
     @get:Rule
     val rule = BaselineProfileRule()
 
-    /** Each recording starts as a fresh install does, with the welcome map and the samples and nothing else. */
+    /** Each recording starts as a fresh install does, with the welcome map and nothing else. */
     @Before
     fun startFresh() {
         UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).executeShellCommand("pm clear $PACKAGE_NAME")
@@ -44,7 +44,7 @@ class BaselineProfileGenerator {
             pressHome()
             startOnYourMaps()
             scrollYourMaps()
-            openMap(SAMPLE_MAP)
+            openMap(WELCOME_MAP)
             openStyleAndLayout()
             backToYourMaps()
         }

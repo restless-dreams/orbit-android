@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -51,9 +50,6 @@ import com.hyuchia.orbit.R
 import com.hyuchia.orbit.data.MapTags
 import java.text.Collator
 
-/** A phone on its side: with the keyboard up, the sheet keeps only what it needs. */
-private val ShortScreen = 480.dp
-
 /**
  * A map's tags (`tags`), to pick from every tag the maps have (`known`) or
  * add new ones. Each change is kept as it's made, through `onChange`; the
@@ -71,7 +67,7 @@ fun TagsSheet(title: String, tags: List<String>, known: List<String>, onChange: 
 
     // Above a keyboard on a phone on its side there's room for a line of tags and the field, without the title.
     val windowHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
-    val typingOnShortScreen = windowHeight < ShortScreen && WindowInsets.isImeVisible
+    val typingOnShortScreen = isShort(windowHeight) && WindowInsets.isImeVisible
 
     fun change(next: List<String>) {
         chosen = MapTags.normalize(next)

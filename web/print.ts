@@ -4,7 +4,8 @@
  * mode the phone is in. The app prints it through Android's print framework
  * (MapPrinter.kt), and a shared web page prints it from the browser.
  */
-import type { OrbitDocument, OrbitNode, OrbitNodeType, OrbitPrintOptions } from '@restless-dreams/orbit';
+import { printTheme, themeTokens } from '@restless-dreams/orbit';
+import type { OrbitDocument, OrbitNode, OrbitNodeType, OrbitPrintOptions, OrbitRendererTheme } from '@restless-dreams/orbit';
 import { automaticRings, goalRing, nodeTypeFor, nodeTypes, progressRing, themeOption } from './look';
 import type { AppTheme, Ring } from './look';
 import { pageWords } from './words';
@@ -12,7 +13,7 @@ import { pageWords } from './words';
 /** What the app asks of a map it prints: what its picture shows. */
 export interface PrintRequest {
   /** `focus`, an idea with its orbit, or `all`, the whole map. */
-  viewMode: 'focus' | 'all';
+  view: 'focus' | 'all';
 
   /** The idea in the middle of a focused picture; the top idea without one. */
   focus?: string | null;
@@ -70,7 +71,7 @@ export const printNodeTypes = (language: string): Record<string, OrbitNodeType> 
 export const printOptions = (map: OrbitDocument, theme: AppTheme, style: string | null, request: PrintRequest | null | undefined, language: string): OrbitPrintOptions => {
   return {
     theme: themeOption(lightTheme(theme), style),
-    viewMode: request?.viewMode,
+    view: request?.view,
     focus: request?.focus ?? undefined,
     language,
     nodeTypes: printNodeTypes(language),
@@ -81,4 +82,19 @@ export const printOptions = (map: OrbitDocument, theme: AppTheme, style: string 
 /** Settles once every picture in `element` has loaded or failed to: a page prints only what it has drawn. */
 export const picturesLoaded = async (element: ParentNode): Promise<void> => {
   await Promise.all(Array.from(element.querySelectorAll('img'), (image) => image.decode().catch(() => undefined)));
+};
+
+/**
+ * The colors of the print layout's chips and links, as Orbit prints them in
+ * `theme` (the map's own style, when it has one), under Orbit's public names
+ * for them. Set on the layout's container, they're what its chips take, and
+ * what the rings the app writes beside them take too (web-page.html).
+ */
+export const printColors = (theme: string | OrbitRendererTheme | undefined): Record<string, string> => {
+  const printed = printTheme(theme);
+  const tokens: Record<string, string | undefined> = { ...themeTokens(printed.preset), ...printed.tokens };
+  return {
+    '--orbit-print-chip-background': tokens['chip-background'] ?? '',
+    '--orbit-print-link-text': tokens['link-text'] ?? tokens.text ?? '',
+  };
 };

@@ -36,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.onClick
@@ -44,7 +45,10 @@ import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.data.MapTags
 import com.hyuchia.orbit.ui.EscapeCloses
+import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.ListRow
+import com.hyuchia.orbit.ui.TitleDialog
+import com.hyuchia.orbit.ui.rememberDefaultButton
 
 /**
  * The tags on the maps, as chips: tapping one shows only its maps, and
@@ -107,9 +111,18 @@ fun ManageTagsSheet(tags: List<TagCount>, onRename: (String, String) -> Unit, on
                     headline = { Text(tag.name) },
                     supporting = { Text(pluralStringResource(R.plurals.home_map_count, tag.count, tag.count)) },
                     trailing = {
+                        // Each button names its tag: TalkBack hears "Rename “Work”", not the same words on every row.
+                        val rename = stringResource(R.string.home_rename_named_tag, tag.name)
+                        val remove = stringResource(R.string.home_remove_named_tag, tag.name)
+
                         Row {
-                            IconButton(onClick = { renaming = tag }) { Icon(Icons.Outlined.Edit, contentDescription = stringResource(R.string.home_rename_tag)) }
-                            IconButton(onClick = { removing = tag }) { Icon(Icons.Outlined.Delete, contentDescription = stringResource(R.string.home_remove_tag)) }
+                            Hint(rename) {
+                                IconButton(onClick = { renaming = tag }) { Icon(Icons.Outlined.Edit, contentDescription = rename) }
+                            }
+
+                            Hint(remove) {
+                                IconButton(onClick = { removing = tag }) { Icon(Icons.Outlined.Delete, contentDescription = remove) }
+                            }
                         }
                     },
                     modifier = Modifier.padding(horizontal = 8.dp),
@@ -151,7 +164,8 @@ fun ManageTagsSheet(tags: List<TagCount>, onRename: (String, String) -> Unit, on
                     },
                 ) { Text(stringResource(R.string.common_remove)) }
             },
-            dismissButton = { TextButton(onClick = { removing = null }) { Text(stringResource(R.string.common_cancel)) } },
+            // Enter keeps the tag on its maps.
+            dismissButton = { TextButton(onClick = { removing = null }, modifier = Modifier.focusRequester(rememberDefaultButton())) { Text(stringResource(R.string.common_cancel)) } },
         )
     }
 }

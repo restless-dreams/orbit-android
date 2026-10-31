@@ -31,15 +31,25 @@ import type {
   OrbitRendererTheme,
   OrbitSpinOptions,
   OrbitSVGRenderer,
-  ViewMode,
+  OrbitViewMode,
 } from '@restless-dreams/orbit';
+import { attempt, changeable, refused } from './changing';
+import type { Lock } from './changing';
 import { mergeAttributes, readGoal, stepGoal } from './goal';
 import { aboutAppSettings, automaticRings, knownStyle, nodeTypeFor, nodeTypes, refreshRings, tagsOf, themeOption, withAutomaticRings, withTags } from './look';
 import type { AppTheme } from './look';
+import { editedMap } from './map-edits';
+import { MEDIA_KEYS, mergedMedia } from './media';
 import { importFile } from './other-apps';
-import { pastedText } from './paste';
+import { reportErrors } from './page-errors';
+import { caughtIdea, mapFromText, pastedText } from './paste';
 import { readingOf } from './reading';
 import type { Reading } from './reading';
+import { renamings } from './renaming';
+import type { Renamed } from './renaming';
+import { study } from './study';
+import type { StudyCommand } from './study';
+import { wholeNumber } from './whole-numbers';
 import { pageWords, speak } from './words';
 import type { PageWords } from './words';
 
@@ -55,10 +65,10 @@ interface MapOptions {
   theme?: string | null;
   palette?: string[] | null;
   showRings?: boolean | null;
-  orbitAnimation?: boolean | null;
-  orbitSpeed?: number | null;
+  animation?: boolean | null;
+  speed?: number | null;
   maxDepth?: number | null;
-  viewMode?: ViewMode | null;
+  view?: OrbitViewMode | null;
 
   /** The app's own: `false` turns off the rings ideas with to-dos or goals show by themselves. Saved only while off. */
   progressRings?: boolean | null;
@@ -73,6 +83,9 @@ interface Media {
   caption: string | null;
   provider: string | null;
   thumbnail: string | null;
+
+  /** A picture's motion, when it's a live photo's: its video, and where in it the still was taken, in seconds. */
+  motion: { src: string; still: number | null } | null;
 }
 
 /** A node, as the app's outline, search and editor see it. */
@@ -96,6 +109,10 @@ interface NodeInfo {
   tags: string[];
   collapsed: boolean;
   type: string | null;
+
+  /** The version of its type's fields it was written for (`goal@2`), when it says. */
+  typeVersion: number | null;
+
   link: string | null;
   note: string | null;
   noteFormat: string | null;
@@ -105,6 +122,9 @@ interface NodeInfo {
 
   /** Attributes Orbit doesn't use itself, as they were read: a goal's numbers, or another app's. */
   attrs: Record<string, unknown> | null;
+
+  /** Its sound: a voice memo, music or a recording. */
+  audio: Media | null;
 }
 
 /** The whole map for the app: every node, its options and the reader's place. */
@@ -113,7 +133,7 @@ export interface MapState {
   nodes: NodeInfo[];
   options: MapOptions;
   path: string[];
-  mode: ViewMode;
+  mode: OrbitViewMode;
 
   /** The style the map picks, when Orbit knows it. */
   style: string | null;
@@ -126,19 +146,6 @@ export interface MapState {
 
   /** What Orbit couldn't read, in its words, when that's why. */
   problem: string | null;
-}
-
-/**
- * Why a map is only shown, never changed or saved: Orbit couldn't read all
- * of its text (`unreadable`), a newer Orbit wrote it (`newer`), or the app
- * says so: the map was deleted, or the app's files are a newer version's.
- */
-type Lock = 'unreadable' | 'newer' | 'deleted' | 'storage';
-
-/** A node that got a new id from new text, so the app can follow it. */
-interface Renamed {
-  from: string;
-  to: string;
 }
 
 interface Diagnostic {
@@ -169,15 +176,9 @@ interface SnapshotJob {
   /** Draw the map in this style instead of its own; an empty name draws it in the app's colors. */
   style?: string | null;
 
-  viewMode?: ViewMode | null;
+  view?: OrbitViewMode | null;
   focus?: string | null;
   baseUrl?: string | null;
-}
-
-/** An idea caught on the go: its text, and the whole of it as its note when the text is cut short. */
-interface CapturedIdea {
-  text: string;
-  note?: string | null;
 }
 
 /**
@@ -187,8 +188,8 @@ interface CapturedIdea {
  */
 export type Command =
   | { type: 'language'; words: Partial<PageWords> }
-  | { type: 'load'; markdown: string; theme: AppTheme; settings: MapSettings; insets?: OrbitInsets | null; baseUrl?: string | null; focus?: string | null; view?: ViewMode | null; mapId?: string | null }
-  | { type: 'insets'; insets: OrbitInsets }
+  | { type: 'load'; markdown: string; theme: AppTheme; settings: MapSettings; insets?: OrbitInsets | null; baseUrl?: string | null; focus?: string | null; view?: OrbitViewMode | null; mapId?: string | null; revision?: number }
+  | { type: 'insets'; insets: OrbitInsets; glide?: boolean }
   | { type: 'unload' }
   | { type: 'theme'; theme: AppTheme }
   | { type: 'settings'; settings: MapSettings }
@@ -202,10 +203,10 @@ export type Command =
   | { type: 'move'; id: string; parentId: string; index?: number | null }
   | { type: 'duplicate'; id: string }
   | { type: 'focus'; id: string }
-  | { type: 'view'; mode: ViewMode }
+  | { type: 'view'; mode: OrbitViewMode }
   | { type: 'zoom'; factor: number }
   | { type: 'fit' }
-  | { type: 'restore'; markdown: string }
+  | { type: 'restore'; markdown: string; revision?: number }
   | { type: 'preview'; markdown: string; editable: boolean }
   | { type: 'source'; text: string }
   | { type: 'options'; options: MapOptions }
@@ -215,9 +216,16 @@ export type Command =
   | { type: 'convert'; job: number; text: string; to: 'markdown' | 'yaml' | 'opml' }
   | { type: 'check'; job: number; text: string }
   | { type: 'importFile'; job: number; data: string; name: string | null }
-  | { type: 'addIdeas'; job: number; markdown: string; ideas: (string | CapturedIdea)[]; parentId: string | null }
+  | { type: 'addIdeas'; job: number; markdown: string; text: string; parentId: string | null }
+  | { type: 'editMap'; job: number; markdown: string; title: string | null; tags: string[] | null }
   | { type: 'copy'; job: number; id: string }
-  | { type: 'paste'; job: number; parentId: string; text: string };
+  | { type: 'paste'; job: number; parentId: string; text: string }
+  | { type: 'dropOver'; x: number; y: number }
+  | { type: 'dropLeave' }
+  | { type: 'dropAt'; job: number; x: number; y: number }
+  | { type: 'addNodes'; job: number; parentId: string; nodes: Record<string, unknown>[] }
+  | { type: 'mapFromText'; job: number; text: string; subject: string | null }
+  | StudyCommand;
 
 type Job = Extract<Command, { job: number }>;
 
@@ -225,9 +233,9 @@ type Job = Extract<Command, { job: number }>;
 export type Message =
   | { type: 'hello' }
   | { type: 'ready'; state: MapState }
-  | { type: 'saved'; kind: string; markdown: string; state: MapState; added: string | null; renamed: Renamed | null; removed: string | null }
+  | { type: 'saved'; kind: string; markdown: string; state: MapState; added: string | null; renamed: Renamed | null; removed: string | null; revision: number }
   | { type: 'state'; state: MapState }
-  | { type: 'focus'; path: string[]; mode: ViewMode }
+  | { type: 'focus'; path: string[]; mode: OrbitViewMode }
   | { type: 'context'; id: string; x: number; y: number }
   | { type: 'held' }
   | { type: 'drag'; phase: 'start' | 'over' | 'end'; id: string; parentId: string | null; index: number | null }
@@ -239,7 +247,10 @@ export type Message =
   | { type: 'haptic' }
   | { type: 'result'; job: number; value?: unknown; error?: string }
   | { type: 'clipboard'; action: ClipboardAction; id: string }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'declined'; change: 'add' | 'update' | 'options'; message: string }
+  | { type: 'dropTarget'; id: string | null }
+  | { type: 'dragOut'; id: string };
 
 /** What Ctrl+C, Ctrl+X and Ctrl+V ask the app for: it has the clipboard. */
 type ClipboardAction = 'copy' | 'cut' | 'paste';
@@ -263,6 +274,8 @@ let currentMap: string | null = null;
 let reading: Reading = { lock: null, problem: null };
 /** Why the app keeps the map from changes, if it does. */
 let appLock: Lock | null = null;
+/** An earlier version of the map, from its history, is on show: it's only looked at, never changed or saved. */
+let showingVersion = false;
 let appTheme: AppTheme = { dark: false, tokens: {} };
 let settings: MapSettings = { haptics: true, snap: true, longPressDelay: 400 };
 let baseUrl: string | undefined;
@@ -275,6 +288,8 @@ let insets: OrbitInsets = {};
 let batching = false;
 /** The node the app is changing, to tell it when the node's id changes with its text. */
 let updating: string | null = null;
+/** Which idea an edit gave a new id: the app's change, or text typed on the map. */
+const renames = renamings();
 /** The app is removing a node, and offers its own Undo for it; a node removed on the page, by its Delete key, the app hears of. */
 let removing = false;
 /** A finger, pen or mouse button is down on the page. */
@@ -286,6 +301,11 @@ let pressing = false;
  * without moving.
  */
 let heldMenu: { id: string; x: number; y: number } | null = null;
+/** The idea lit up for something dragged onto the map from another app, while there's one. */
+let dropTarget: string | null = null;
+/** The idea being dragged on the map, while one is, and whether it went out of the window to another app. */
+let draggedIdea: string | null = null;
+let draggedOut = false;
 
 const post = (message: Message): void => {
   window.orbitNative?.postMessage(JSON.stringify(currentMap === null ? message : { ...message, map: currentMap }));
@@ -305,30 +325,37 @@ const problemOf = (read: Reading): string | null => {
   return read.noIdeas ? pageWords().noIdeas : read.problem;
 };
 
-/** Why the map can't be changed now, if it can't. */
+/** Why the map can't be changed now, if it's locked: what the app is told. */
 const lock = (): Lock | null => {
   return appLock ?? reading.lock;
 };
 
+/** Whether the map on the page can be changed and saved now: not while it's locked, nor while an earlier version is on show. */
+const canChange = (): boolean => {
+  return changeable(lock(), showingVersion);
+};
+
 /** Whether ideas can be added, typed, moved and removed on the map now. */
 const editable = (): boolean => {
-  return !presenting && lock() === null;
+  return !presenting && canChange();
 };
 
 // The map as the app sees it
 
-const media = (value: OrbitNode['image'] | OrbitNode['video'] | OrbitNode['embed']): Media | null => {
+const media = (value: OrbitNode['image'] | OrbitNode['video'] | OrbitNode['embed'] | OrbitNode['audio']): Media | null => {
   if (!value?.src) {
     return null;
   }
 
-  const item = value as Partial<Media> & { src: string };
+  const item = value as Partial<Omit<Media, 'motion'>> & { src: string; motion?: { src?: unknown; still?: unknown } };
+  const motion = typeof item.motion?.src === 'string' && item.motion.src !== '' ? item.motion : null;
   return {
     src: item.src,
     alt: item.alt ?? null,
     caption: item.caption ?? null,
     provider: item.provider ?? null,
     thumbnail: item.thumbnail ?? null,
+    motion: motion ? { src: motion.src as string, still: typeof motion.still === 'number' && Number.isFinite(motion.still) ? motion.still : null } : null,
   };
 };
 
@@ -344,10 +371,13 @@ const nodeInfo = (renderer: OrbitSVGRenderer, node: OrbitNode, depth: number, in
     color: node.color ?? null,
     drawnColor: renderer.getNodeColor(node.id),
     status: node.status ?? null,
-    priority: typeof node.priority === 'number' && Number.isFinite(node.priority) ? Math.round(node.priority) : null,
+    // Rounded, as the app shows it; a number past what the app holds, such as 1e12, is the nearest it does (whole-numbers.ts).
+    priority: wholeNumber(node.priority, Math.round),
     tags: node.tags ?? [],
     collapsed: node.collapsed === true,
     type: node.type ?? null,
+    // A version past what the app holds (goal@99999999999) is still newer than any it knows.
+    typeVersion: wholeNumber(node.typeVersion, Math.ceil),
     link: node.link ?? null,
     note: node.note ?? null,
     noteFormat: node.noteFormat ?? null,
@@ -355,6 +385,7 @@ const nodeInfo = (renderer: OrbitSVGRenderer, node: OrbitNode, depth: number, in
     video: media(node.video),
     embed: media(node.embed),
     attrs: node.attrs && Object.keys(node.attrs).length > 0 ? node.attrs : null,
+    audio: media(node.audio),
   };
 };
 
@@ -383,10 +414,11 @@ const stateOf = (renderer: OrbitSVGRenderer): MapState | null => {
       theme: options.theme ?? null,
       palette: options.palette ?? null,
       showRings: options.showRings ?? null,
-      orbitAnimation: options.orbitAnimation ?? null,
-      orbitSpeed: options.orbitSpeed ?? null,
-      maxDepth: options.maxDepth ?? null,
-      viewMode: options.viewMode ?? null,
+      animation: options.animation ?? null,
+      speed: options.speed ?? null,
+      // Orbit shows the levels up to maxDepth, so 1.5 shows what 2 does.
+      maxDepth: wholeNumber(options.maxDepth, Math.ceil),
+      view: options.view ?? null,
       progressRings: automaticRings(current) ? null : false,
       tags: tagsOf(current),
     },
@@ -405,9 +437,19 @@ const postFocus = (): void => {
   }
 };
 
+/**
+ * The app's revision of the map's text the page last drew whole (`load`,
+ * `restore`): each save says it, so a save made before a change from
+ * elsewhere reached the page is never taken for one made after it.
+ */
+let revision = 0;
+
 const postSaved = (kind: string, node: OrbitNode | null = null): void => {
-  // A map that can't be changed is never saved: its file stays exactly as it is.
-  if (!map || batching || lock() !== null) {
+  // Told of every edit, saved or not, so only the one right after the field for typing on the map closed is taken for its.
+  const renamed = renames.edited(kind, node, updating);
+
+  // A map that can't be changed is never saved, nor an earlier version on show: the map's file stays exactly as it is.
+  if (!map || batching || !canChange()) {
     return;
   }
 
@@ -415,9 +457,8 @@ const postSaved = (kind: string, node: OrbitNode | null = null): void => {
 
   if (state) {
     const added = kind === 'add' ? node?.id ?? null : null;
-    const renamed = kind === 'update' && node && updating && node.id !== updating ? { from: updating, to: node.id } : null;
     const removed = kind === 'remove' && node && !removing ? node.text : null;
-    post({ type: 'saved', kind, markdown: map.toMarkdown(), state, added, renamed, removed });
+    post({ type: 'saved', kind, markdown: map.toMarkdown(), state, added, renamed, removed, revision });
   }
 };
 
@@ -467,12 +508,14 @@ const load = (command: Extract<Command, { type: 'load' }>): void => {
   }
 
   unload();
+  revision = command.revision ?? 0;
   appTheme = command.theme;
   settings = command.settings;
   insets = command.insets ?? {};
   baseUrl = command.baseUrl ?? undefined;
   currentMap = command.mapId ?? null;
   appLock = null;
+  showingVersion = false;
   const parsed = parse(command.markdown);
   reading = readingOf(parsed, command.markdown);
   ringsOn = automaticRings(parsed);
@@ -487,7 +530,7 @@ const load = (command: Extract<Command, { type: 'load' }>): void => {
     editingKeys: true,
     // Where the reader left the map: the app remembers it, the file doesn't.
     focus: command.focus ?? undefined,
-    viewMode: command.view ?? undefined,
+    view: command.view ?? undefined,
     baseUrl,
     theme: themeOption(appTheme, knownStyle(parsed.options.theme)),
     spin: spinOptions(),
@@ -510,6 +553,10 @@ const load = (command: Extract<Command, { type: 'load' }>): void => {
     onNodeDrag: ({ phase, node, parent, index }) => {
       if (phase === 'start') {
         heldMenu = null;
+        draggedIdea = node.id;
+        draggedOut = false;
+      } else if (phase === 'end') {
+        draggedIdea = null;
       }
 
       post({ type: 'drag', phase, id: node.id, parentId: parent?.id ?? null, index });
@@ -519,7 +566,11 @@ const load = (command: Extract<Command, { type: 'load' }>): void => {
       postSaved(kind, node);
     },
     onEditorOpen: ({ node, parent }) => post({ type: 'editorOpen', id: node?.id ?? null, parentId: parent?.id ?? null }),
-    onEditorClose: () => post({ type: 'editorClose' }),
+    onEditorClose: ({ node }) => {
+      // The idea as it was: what was typed is saved next, and may give it a new id.
+      renames.closed(node);
+      post({ type: 'editorClose' });
+    },
     onAction: ({ node, action }) => {
       if (action === 'link') {
         if (node.link && !node.link.startsWith('#')) {
@@ -550,6 +601,9 @@ const unload = (): void => {
   currentMap = null;
   reading = { lock: null, problem: null };
   appLock = null;
+  showingVersion = false;
+  dropTarget = null;
+  draggedIdea = null;
   document.getElementById('map')?.replaceChildren();
 };
 
@@ -587,8 +641,8 @@ const setOptions = (changes: MapOptions): void => {
   map.setOptions({ theme: themeOption(appTheme, knownStyle(next.options.theme)) });
   map.render(next);
 
-  if (changes.viewMode) {
-    map.setViewMode(changes.viewMode);
+  if (changes.view) {
+    map.setViewMode(changes.view);
   }
 
   // Planets of a new style take new colors: rings take the ink that reads on them.
@@ -600,12 +654,30 @@ const setOptions = (changes: MapOptions): void => {
  * `null` in a change from the app removes that attribute. Custom attributes
  * (`attrs`) are merged into the node's own, so the app changes a goal's
  * numbers without knowing every other attribute; `null` there removes one.
+ * A picture, video, sound or page for the same file is merged into the
+ * node's own the same way (see `mergedMedia`), so a new caption keeps every
+ * field the app doesn't know.
  */
 const nodeChanges = (changes: Record<string, unknown>, node: OrbitNode | null = null): OrbitNodeInput => {
   const input: Record<string, unknown> = Object.fromEntries(Object.entries(changes).map(([key, value]) => [key, value === null ? undefined : value]));
 
   if (changes.attrs && typeof changes.attrs === 'object' && !Array.isArray(changes.attrs)) {
     input.attrs = mergeAttributes(node?.attrs, changes.attrs as Record<string, unknown>);
+  }
+
+  for (const key of MEDIA_KEYS) {
+    const change = changes[key];
+
+    if (change && typeof change === 'object' && !Array.isArray(change)) {
+      const merged = mergedMedia(node?.[key as keyof OrbitNode], change as Record<string, unknown>);
+
+      if (merged === undefined) {
+        // A change to a file the node doesn't have changes nothing.
+        delete input[key];
+      } else {
+        input[key] = merged;
+      }
+    }
   }
 
   return input as OrbitNodeInput;
@@ -717,7 +789,75 @@ const paste = (renderer: OrbitSVGRenderer, parentId: string, text: string): { co
   return { count: ideas.reduce((total, idea) => total + countIdeas(idea), 0) };
 };
 
+/** Ideas the app made, such as pictures dropped from another app, under `parentId`, after its last, as one change: one save, and one step to undo. */
+const addNodes = (renderer: OrbitSVGRenderer, parentId: string, nodes: Record<string, unknown>[]): { count: number } => {
+  const current = renderer.getDocument();
+
+  if (!current || !findNode(current.root, parentId)) {
+    throw new Error(`No idea ${parentId} to add to`);
+  }
+
+  let count = 0;
+
+  batch('add', () => {
+    let first: OrbitNode | null = null;
+
+    for (const node of nodes) {
+      // One Orbit declines is left out, said back, and the others still come as one change.
+      const input = { text: '', ...nodeChanges(node) } as OrbitNewNode;
+      const added = changing('add', () => renderer.addNode(parentId, input));
+
+      if (added) {
+        count += 1;
+        first ??= added;
+      }
+    }
+
+    return first;
+  });
+
+  return { count };
+};
+
+// Drops from other apps
+
+/**
+ * Where something dragged onto the map from another app, at (`x`, `y`) on
+ * the page, would go: the idea under it, or the one in focus where there's
+ * none. Nowhere on a map that can't be changed now.
+ */
+const dropPlace = (x: number, y: number): OrbitNode | null => {
+  if (!map || !editable()) {
+    return null;
+  }
+
+  return map.getNodeAt(x, y) ?? map.getFocusedNode();
+};
+
+/** Lights up where a drag from another app would go, as the map's own drags light theirs, and tells the app when that changes. */
+const showDropTarget = (id: string | null): void => {
+  if (id === dropTarget) {
+    return;
+  }
+
+  dropTarget = id;
+  map?.setDropTarget(id);
+  post({ type: 'dropTarget', id });
+};
+
 /** Answers a job with what `work` gives, or what went wrong. */
+/** Makes a change the app asked for: one Orbit declines is said back, with why, and the map stays as it was. */
+const changing = <Value>(change: 'add' | 'update' | 'options', work: () => Value): Value | null => {
+  const tried = attempt(work);
+
+  if (!tried.made) {
+    post({ type: 'declined', change, message: tried.reason });
+    return null;
+  }
+
+  return tried.value;
+};
+
 const answer = (job: number, work: () => unknown): void => {
   try {
     post({ type: 'result', job, value: work() });
@@ -788,7 +928,7 @@ const language = (words: Partial<PageWords>): void => {
   map.setOptions({ nodeTypes: nodeTypes() });
   const current = map.getDocument();
 
-  if (current && lock() === null && current.root.id === UNTITLED_MAP && current.root.text === before.untitledMap && now.untitledMap !== before.untitledMap) {
+  if (current && canChange() && current.root.id === UNTITLED_MAP && current.root.text === before.untitledMap && now.untitledMap !== before.untitledMap) {
     // A map that's just a list, read again: its text is the same, only the made-up idea's name changes.
     map.render(parse(map.toMarkdown()));
   }
@@ -912,7 +1052,7 @@ const snapshot = async (job: SnapshotJob): Promise<string> => {
     svg = renderToSVGString(parsed, {
       width,
       height,
-      viewMode: job.viewMode ?? 'focus',
+      view: job.view ?? 'focus',
       focus: job.focus ?? undefined,
       theme: snapshotTheme(parsed, job),
       baseUrl: job.baseUrl ?? undefined,
@@ -965,11 +1105,12 @@ const convert = (text: string, to: 'markdown' | 'yaml' | 'opml'): string => {
 };
 
 /**
- * A map's text with `ideas` added under `parentId` (default: its top), for
- * ideas caught without the map open. Orbit adds them on a map no one sees,
+ * A map's text with the ideas in `text` added under `parentId` (default:
+ * its top), for ideas caught without the map open: a line each, nested as
+ * pasting nests them (see paste.ts). Orbit adds them on a map no one sees,
  * so the text comes back the way Orbit writes it, ids and all.
  */
-const addIdeas = (markdown: string, ideas: (string | CapturedIdea)[], parentId: string | null): string => {
+const addIdeas = (markdown: string, text: string, parentId: string | null): string => {
   const parsed = parse(markdown);
   // A map Orbit can't read all of, or one a newer Orbit wrote, isn't written over: it would lose what wasn't read.
   const { lock: unread } = readingOf(parsed, markdown);
@@ -994,10 +1135,11 @@ const addIdeas = (markdown: string, ideas: (string | CapturedIdea)[], parentId: 
       throw new Error('No map to add to');
     }
 
-    for (const idea of ideas) {
-      const input = typeof idea === 'string' ? { text: idea } : { text: idea.text, note: idea.note ?? undefined };
+    const { markdown: caught, whole } = pastedText(text);
+    const read = parse(caught);
 
-      if (!capture.addNode(parent, input)) {
+    for (const idea of (whole ? [read.root] : read.root.children).map(newNode).map(caughtIdea)) {
+      if (!capture.addNode(parent, idea)) {
         throw new Error(`No idea ${parent} to add to`);
       }
     }
@@ -1046,7 +1188,13 @@ const runJob = async (command: Job): Promise<void> => {
         value = importFile(command.data, command.name, pageWords().untitledMap);
         break;
       case 'addIdeas':
-        value = addIdeas(command.markdown, command.ideas, command.parentId);
+        value = addIdeas(command.markdown, command.text, command.parentId);
+        break;
+      case 'editMap':
+        value = editedMap(command.markdown, { title: command.title, tags: command.tags }, pageWords().untitledMap);
+        break;
+      case 'mapFromText':
+        value = mapFromText(command.text, command.subject);
         break;
     }
 
@@ -1057,9 +1205,6 @@ const runJob = async (command: Job): Promise<void> => {
 };
 
 // Commands from the app
-
-/** Commands that change the map: none run while it can't be saved. */
-const CHANGES = new Set<Command['type']>(['edit', 'editNew', 'add', 'update', 'addToGoal', 'remove', 'move', 'duplicate', 'options']);
 
 const handle = (command: Command): void => {
   switch (command.type) {
@@ -1077,6 +1222,8 @@ const handle = (command: Command): void => {
     case 'check':
     case 'importFile':
     case 'addIdeas':
+    case 'editMap':
+    case 'mapFromText':
       void runJob(command);
       return;
     case 'copy':
@@ -1092,13 +1239,38 @@ const handle = (command: Command): void => {
     case 'paste':
       answer(command.job, () => {
         // Nothing changes a map that can't be saved, as for the other changes.
-        if (!map || lock() !== null) {
+        if (!map || !canChange()) {
           throw new Error('This map can\'t be changed');
         }
 
         return paste(map, command.parentId, command.text);
       });
 
+      return;
+    case 'addNodes':
+      answer(command.job, () => {
+        if (!map || !canChange()) {
+          throw new Error('This map can\'t be changed');
+        }
+
+        return addNodes(map, command.parentId, command.nodes);
+      });
+
+      return;
+    case 'dropAt':
+      answer(command.job, () => {
+        // Let go: the light goes out, and the app adds what was dropped where it says.
+        const place = dropPlace(command.x, command.y);
+        showDropTarget(null);
+        return { id: place?.id ?? null };
+      });
+
+      return;
+    case 'dropOver':
+      showDropTarget(dropPlace(command.x, command.y)?.id ?? null);
+      return;
+    case 'dropLeave':
+      showDropTarget(null);
       return;
     case 'theme':
       appTheme = command.theme;
@@ -1112,7 +1284,8 @@ const handle = (command: Command): void => {
       return;
     case 'insets':
       insets = command.insets;
-      map?.setOptions({ insets });
+      // A change made once (the talk panel coming or going) glides; one each frame (the keyboard) can't.
+      map?.setOptions({ insets, insetsTransition: command.glide ? 'glide' : 'instant' });
       return;
   }
 
@@ -1122,8 +1295,8 @@ const handle = (command: Command): void => {
     return;
   }
 
-  if (lock() !== null && CHANGES.has(command.type)) {
-    // Nothing changes a map that can't be saved: what's on screen stays what's in its file.
+  if (refused(command.type, lock(), showingVersion)) {
+    // Nothing changes a map that can't be saved, nor an earlier version on show: the map's file stays as it is.
     return;
   }
 
@@ -1137,16 +1310,19 @@ const handle = (command: Command): void => {
     case 'stopEditing':
       renderer.stopEditing(command.save);
       break;
-    case 'add':
-      renderer.addNode(command.parentId, { text: '', ...nodeChanges(command.node) } as OrbitNodeInput & { text: string }, command.index ?? undefined);
+    case 'add': {
+      const input = { text: '', ...nodeChanges(command.node) } as OrbitNodeInput & { text: string };
+      changing('add', () => renderer.addNode(command.parentId, input, command.index ?? undefined));
       break;
+    }
     case 'update': {
       const tree = renderer.getDocument()?.root;
       const node = tree ? findNode(tree, command.id) : null;
       updating = command.id;
 
       try {
-        renderer.updateNode(command.id, nodeChanges(command.changes, node));
+        const changes = nodeChanges(command.changes, node);
+        changing('update', () => renderer.updateNode(command.id, changes));
       } finally {
         updating = null;
       }
@@ -1196,7 +1372,10 @@ const handle = (command: Command): void => {
       break;
     case 'restore': {
       // The map's text as the app has it now (an undo, a version brought back, a change from elsewhere): drawn, never
-      // saved, since the app saves that very text itself, and Orbit writing it its own way could change it.
+      // saved, since the app saves that very text itself, and Orbit writing it its own way could change it. A version
+      // on show goes: what's drawn is the map as it is now, which takes changes again.
+      showingVersion = false;
+      revision = command.revision ?? revision;
       const parsed = parse(command.markdown);
       reading = readingOf(parsed, command.markdown);
       ringsOn = automaticRings(parsed);
@@ -1207,17 +1386,25 @@ const handle = (command: Command): void => {
       break;
     }
     case 'preview': {
-      // A version to look at, not saved: one from the history, read-only, or the map as it is now again.
+      // A version to look at, not saved: one from the history, which nothing changes until the map as it is now
+      // comes back, or the map as it is now again. What was being typed is kept first, in the map as it is now.
       const parsed = parse(command.markdown);
       renderer.stopEditing(true);
+      showingVersion = !command.editable;
 
       if (command.editable) {
         reading = readingOf(parsed, command.markdown);
       }
 
       ringsOn = automaticRings(parsed);
-      renderer.setOptions({ theme: themeOption(appTheme, knownStyle(parsed.options.theme)), editable: command.editable && editable() });
+      renderer.setOptions({ theme: themeOption(appTheme, knownStyle(parsed.options.theme)), editable: editable() });
       renderer.render(parsed);
+
+      if (command.editable) {
+        // The map as it is now is back: the app hears of it as it is, whatever it heard while a version was on show.
+        postState();
+      }
+
       postFocus();
       break;
     }
@@ -1231,10 +1418,14 @@ const handle = (command: Command): void => {
       showSource(command.text);
       break;
     case 'options':
-      setOptions(command.options);
+      changing('options', () => setOptions(command.options));
       break;
     case 'present':
       present(command.on);
+      break;
+    case 'hideChildren':
+    case 'revealChildren':
+      study(renderer, command);
       break;
   }
 };
@@ -1247,7 +1438,7 @@ window.orbitNative?.addEventListener('message', (event) => {
   }
 });
 
-window.addEventListener('error', (event) => post({ type: 'error', message: event.message }));
+reportErrors(window, post);
 
 window.addEventListener('pointerdown', () => {
   pressing = true;
@@ -1266,6 +1457,25 @@ window.addEventListener('pointerup', () => {
 window.addEventListener('pointercancel', () => {
   pressing = false;
   heldMenu = null;
+}, true);
+
+/** How far past the window's edge (px) an idea dragged on the map goes before it leaves for another app: a drag along the edge stays on the map. */
+const PAST_THE_EDGE = 24;
+
+// An idea dragged out of the window, into another app beside Orbit, goes on as a drag that app can take: the app starts it.
+window.addEventListener('pointermove', (event) => {
+  if (draggedIdea === null || draggedOut) {
+    return;
+  }
+
+  const { clientX: x, clientY: y } = event;
+
+  if (x < -PAST_THE_EDGE || y < -PAST_THE_EDGE || x > innerWidth + PAST_THE_EDGE || y > innerHeight + PAST_THE_EDGE) {
+    draggedOut = true;
+    post({ type: 'dragOut', id: draggedIdea });
+    // The press is the outside drag's now: the idea goes back to its place on the map, as when a press is taken away.
+    event.target?.dispatchEvent(new PointerEvent('pointercancel', { pointerId: event.pointerId, pointerType: event.pointerType, isPrimary: event.isPrimary, clientX: x, clientY: y, bubbles: true }));
+  }
 }, true);
 
 /** Keys the map answers to. */

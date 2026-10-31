@@ -9,18 +9,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,18 +29,31 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.ui.unit.dp
+import com.hyuchia.orbit.R
+import com.hyuchia.orbit.page.OrbitBuild
+import com.hyuchia.orbit.ui.EscapeCloses
+import com.hyuchia.orbit.ui.openLink
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.entity.Library
-import com.hyuchia.orbit.R
-import com.hyuchia.orbit.ui.openLink
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+/** Orbit's own entry in the list (`app/config/libraries/orbit.json`), which has no version of its own. */
+internal const val ORBIT_LIBRARY = "@restless-dreams/orbit"
+
+/**
+ * A library's version as the list shows it. Orbit's is the one the map's
+ * pages are built with (`assets/map/orbit.json`, which `web/build.ts` writes
+ * from Orbit's package.json), so it's never a number kept by hand.
+ */
+internal fun shownVersion(uniqueId: String, artifactVersion: String?, orbit: OrbitBuild?): String? = if (uniqueId == ORBIT_LIBRARY) orbit?.version else artifactVersion
 
 /** Every library and font the app ships, with its license, as the build listed them. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LicensesScreen(onBack: () -> Unit) {
     val resources = LocalResources.current
+    val context = LocalContext.current
 
     val libraries by produceState<List<Library>?>(null) {
         value = withContext(Dispatchers.IO) {
@@ -54,21 +62,16 @@ fun LicensesScreen(onBack: () -> Unit) {
         }
     }
 
+    val orbit by produceState<OrbitBuild?>(null) {
+        value = withContext(Dispatchers.IO) { OrbitBuild.bundled(context) }
+    }
+
     var shown by remember { mutableStateOf<Library?>(null) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.settings_open_source_licenses)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back)) }
-                },
-            )
-        },
-    ) { padding ->
+    SettingsScaffold(stringResource(R.string.settings_open_source_licenses), onBack) { padding ->
         // On a tablet, the list keeps to a column of reading width, and still scrolls from anywhere.
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
-            val side = ((maxWidth - 720.dp) / 2).coerceAtLeast(0.dp)
+            val side = ((maxWidth - ReadingWidth) / 2).coerceAtLeast(0.dp)
 
             LazyColumn(contentPadding = PaddingValues(start = side, end = side, bottom = 24.dp), modifier = Modifier.fillMaxSize()) {
                 item {
@@ -83,8 +86,9 @@ fun LicensesScreen(onBack: () -> Unit) {
                     ListItem(
                         onClick = { shown = library },
                         supportingContent = {
-                            Text(listOfNotNull(library.artifactVersion, library.licenses.joinToString { it.name }.ifEmpty { null }).joinToString(" · "))
+                            Text(listOfNotNull(shownVersion(library.uniqueId, library.artifactVersion, orbit), library.licenses.joinToString { it.name }.ifEmpty { null }).joinToString(" · "))
                         },
+                        modifier = Modifier.padding(horizontal = 8.dp),
                     ) {
                         Text(library.name)
                     }
@@ -94,7 +98,9 @@ fun LicensesScreen(onBack: () -> Unit) {
     }
 
     shown?.let { library ->
-        ModalBottomSheet(onDismissRequest = { shown = null }) {
+        // Whole at once, as a license is read from the top; Escape closes it, as Back does.
+        ModalBottomSheet(onDismissRequest = { shown = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+            EscapeCloses { shown = null }
             LicenseText(library)
         }
     }

@@ -64,6 +64,11 @@ let captionsOn = true;
 let current: string | null = null;
 /** Under the map, the captions' room only grows during a presentation, so the map doesn't move with every step. */
 let tallestCaption = 0;
+/**
+ * Whether a caption has shown yet. Until one does, the map sits in the middle of the whole screen; then it glides
+ * aside for the captions, and keeps to the rest from there on, so it doesn't move with every step.
+ */
+let captionsBegun = false;
 let swap = 0;
 let shown: Shown | null = null;
 /** Where the presenter's video is, as this page reckons it from the commands: `at` seconds in at `since` (ms). */
@@ -187,6 +192,7 @@ const show = (command: Extract<AudienceCommand, { type: 'show' }>): void => {
   baseUrl = command.baseUrl ?? undefined;
   captionsOn = command.captions ?? true;
   tallestCaption = 0;
+  captionsBegun = false;
   const parsed = parseOrbit(command.markdown, { untitled: pageWords().untitledMap });
   const style = knownStyle(parsed.options.theme);
   page.classList.toggle('audience--dark', style ? isDark(themeTokens(style).surface) : command.theme.dark);
@@ -196,7 +202,7 @@ const show = (command: Extract<AudienceCommand, { type: 'show' }>): void => {
     showActionButtons: false,
     showDetailSheet: false,
     focus: command.focus ?? undefined,
-    viewMode: 'focus',
+    view: 'focus',
     baseUrl,
     theme: themeOption(command.theme, style),
     nodeTypes: nodeTypes(),
@@ -271,7 +277,9 @@ const showMedia = (command: Extract<AudienceCommand, { type: 'media' }>): void =
     showStill(node);
   } else {
     hideStill();
-    const opened = map.openMedia(command.id, { kind: command.kind, autoplay: command.playing, startAt: command.at > 0 ? command.at : undefined });
+    // A live photo plays its motion once as it shows, muted, as Orbit's viewer does for the person holding the phone.
+    const autoplay = command.playing || command.kind === 'image';
+    const opened = map.openMedia(command.id, { kind: command.kind, autoplay, startAt: command.at > 0 ? command.at : undefined });
 
     if (!opened) {
       shown = null;
@@ -282,7 +290,18 @@ const showMedia = (command: Extract<AudienceCommand, { type: 'media' }>): void =
 };
 
 const playback = (playing: boolean): void => {
-  if (!map || !shown || shown.kind !== 'video') {
+  if (!map || !shown) {
+    return;
+  }
+
+  if (shown.kind === 'image') {
+    // A live photo's motion, through once from its start, or back to its picture: a plain picture has none to play.
+    if (playing) {
+      map.playMedia();
+    } else {
+      map.pauseMedia();
+    }
+
     return;
   }
 
@@ -377,9 +396,30 @@ const reachable = (node: OrbitNode): boolean => {
   return baseUrl !== undefined || source.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(source);
 };
 
+/**
+ * A still picture's address as the page loads it: a web one, one inside the
+ * map (`data:image/…`, but not SVG, which can carry a script), or one the
+ * page's own address completes. Any other kind is no picture.
+ */
+const pictureAddress = (address: string | undefined): string | undefined => {
+  const trimmed = address?.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(trimmed.replace(/[\t\n\r]/g, ''))?.[1]?.toLowerCase();
+
+  if (scheme === undefined || scheme === 'http' || scheme === 'https' || scheme === 'blob') {
+    return trimmed;
+  }
+
+  return scheme === 'data' && /^data:image\/(?!svg)/i.test(trimmed) ? trimmed : undefined;
+};
+
 const showStill = (node: OrbitNode): void => {
   const video = node.video;
-  const poster = video?.thumbnail?.trim();
+  const poster = pictureAddress(video?.thumbnail);
   stillPicture.hidden = !poster;
 
   if (poster) {
@@ -402,19 +442,24 @@ const hideStill = (): void => {
   page.classList.remove('audience--still');
 };
 
-/** The idea's name, and its note when it has one. The top of the map without a note needs no caption. */
+/**
+ * The idea's name, and its note when it has one. The top of the map without a
+ * note needs no caption, but its name is still the title's: a web page keeps
+ * focus on the title, and says what that focus is on.
+ */
 const fillCaption = (id: string): void => {
   current = id;
   const tree = map?.getDocument()?.root;
   const node = tree ? findNodeById(tree, id) : null;
+  title.textContent = node ? [node.icon, node.text].filter(Boolean).join(' ') : '';
 
   if (!node || (!node.note?.trim() && node.id === tree?.id)) {
     caption.classList.add('audience__caption--empty');
+    note.replaceChildren();
     return;
   }
 
   caption.classList.remove('audience__caption--empty');
-  title.textContent = [node.icon, node.text].filter(Boolean).join(' ');
   const text = node.note?.trim() ?? '';
   note.replaceChildren(text && node.noteFormat !== 'plain' ? renderNoteMarkdown(text, { baseUrl, resolveLink: (href) => linksTo(tree, href) }) : document.createTextNode(text));
 };
@@ -434,8 +479,9 @@ const layout = (): void => {
   }
 
   let insets: OrbitInsets = {};
+  captionsBegun ||= !caption.classList.contains('audience__caption--empty');
 
-  if (captionsOn) {
+  if (captionsOn && captionsBegun) {
     const box = caption.getBoundingClientRect();
 
     if (beside) {

@@ -17,15 +17,17 @@
         <item quantity="many">Agregar %d ideas</item>
         <item quantity="other">Agregar %d ideas</item>
     </plurals>
-    <string name="capture_added_idea">Se agregó a %1$s</string>
+    <string name="capture_added_idea">Se agregó la idea a %1$s</string>
     <plurals name="capture_added_ideas">
         <item quantity="one">Se agregó %1$d idea a %2$s</item>
         <item quantity="many">Se agregaron %1$d ideas a %2$s</item>
         <item quantity="other">Se agregaron %1$d ideas a %2$s</item>
     </plurals>
-    <string name="capture_problem">Orbit no pudo agregar a %1$s. Tus ideas siguen aquí.</string>
-    <string name="capture_problem_with_reason">Orbit no pudo agregar a %1$s. %2$s. Tus ideas siguen aquí.</string>
-    <string name="capture_problem_refused">Orbit no pudo agregar a %1$s porque el mapa no se puede cambiar en este dispositivo. Tus ideas siguen aquí.</string>
-    <string name="capture_problem_missing">Orbit no pudo agregar a %1$s. El mapa ya no está aquí. Tus ideas siguen aquí.</string>
-    <string name="capture_problem_kept_changing">Orbit no pudo agregar a %1$s. El mapa no dejaba de cambiar. Tus ideas siguen aquí.</string>
+    <string name="capture_problem">Orbit no pudo agregar nada a %1$s. Tus ideas siguen aquí.</string>
+    <string name="capture_problem_with_reason">Orbit no pudo agregar nada a %1$s. %2$s. Tus ideas siguen aquí.</string>
+    <string name="capture_problem_refused">Orbit no pudo agregar nada a %1$s porque el mapa no se puede cambiar en este dispositivo. Tus ideas siguen aquí.</string>
+    <string name="capture_problem_missing">Orbit no pudo agregar nada a %1$s. El mapa ya no está aquí. Tus ideas siguen aquí.</string>
+    <string name="capture_problem_kept_changing">Orbit no pudo agregar nada a %1$s. El mapa no dejaba de cambiar. Tus ideas siguen aquí.</string>
+    <string name="capture_adding">Agregando…</string>
+    <string name="capture_problem_not_written">Orbit no pudo agregar nada a %1$s. ¿Está lleno el almacenamiento de este dispositivo? Tus ideas siguen aquí.</string>
 </resources>

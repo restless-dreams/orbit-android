@@ -1,7 +1,9 @@
 package com.hyuchia.orbit.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LinksTest {
@@ -28,6 +30,18 @@ class LinksTest {
         assertEquals("https://example.com/tokyo.jpg", pictureAddress("https://example.com/tokyo.jpg"))
         assertEquals("data:image/png;base64,iVBORw0KGgo=", pictureAddress("data:image/png;base64,iVBORw0KGgo="))
         assertEquals("javascript:alert(1)", pictureAddress("javascript:alert(1)"))
+    }
+
+    @Test
+    fun picturesLoadFromTheWebOrInsideTheMapAndNothingElse() {
+        for (address in listOf("https://example.com/tokyo.jpg", "HTTP://EXAMPLE.COM/tokyo.jpg", " https://example.com/a.png\n", "data:image/png;base64,iVBORw0KGgo=")) {
+            assertTrue(address, isWebPicture(address))
+        }
+
+        // Orbit's own files, other apps', and anything that isn't a picture.
+        for (address in listOf("file:///data/user/0/com.hyuchia.orbit/files/maps/diary/media/photo.jpg", "content://com.hyuchia.orbit.files/maps/diary/map.md", "content://media/external/images/1", "file:///android_asset/map/index.html", "javascript:alert(1)", "data:text/html,x", "ftp://example.com/a.jpg", "android.resource://com.hyuchia.orbit/raw/x")) {
+            assertFalse(address, isWebPicture(address))
+        }
     }
 
     @Test

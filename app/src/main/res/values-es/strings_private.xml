@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mapas privados: bloqueados con el propio bloqueo de pantalla del teléfono, y fuera de los widgets, los accesos directos y Recientes. Ver TRANSLATING.md. -->
+<resources>
+    <string name="private_map">Mapa privado</string>
+    <string name="private_badge">Privado</string>
+    <string name="private_make_private">Hacer privado</string>
+    <string name="private_make_not_private">Desactivar Privado</string>
+    <string name="private_made_private">“%1$s” ahora es privado: se abre con tu bloqueo de pantalla</string>
+    <string name="private_made_not_private">“%1$s” ya no es privado</string>
+    <string name="private_unlock">Desbloquear</string>
+    <string name="private_unlock_private_maps">Desbloquear mapas privados</string>
+    <string name="private_lock_private_maps">Bloquear mapas privados</string>
+    <string name="private_lock_now">Bloquearlos ahora</string>
+    <string name="private_menu_lock_now">Bloquear ahora</string>
+    <string name="private_lock_private_maps_now">Bloquear mapas privados ahora</string>
+    <string name="private_locked_card_hint">Bloqueado · Toca para desbloquear</string>
+    <string name="private_locked_card_description">Mapa privado, bloqueado</string>
+    <string name="private_more_options">Más opciones de este mapa privado</string>
+
+    <string name="private_cover_title">Este mapa es privado</string>
+    <string name="private_cover_body">Desbloquéalo con tu huella, tu rostro o tu bloqueo de pantalla para verlo.</string>
+    <string name="private_back_to_your_maps">Volver a tus mapas</string>
+
+    <string name="private_needs_screen_lock_title">Primero configura un bloqueo de pantalla</string>
+    <string name="private_needs_screen_lock_body">Los mapas privados se abren con tu huella, tu rostro o tu bloqueo de pantalla, y este dispositivo todavía no tiene bloqueo de pantalla. Cuando configures uno, este mapa se volverá privado.</string>
+    <string name="private_set_screen_lock">Configurar bloqueo</string>
+    <string name="private_not_now">Ahora no</string>
+
+    <string name="private_settings_heading">Mapas privados</string>
+    <string name="private_settings_description">Haz privado un mapa desde su menú: aparece bloqueado entre tus mapas, queda fuera de los widgets, los accesos directos y Recientes, y se abre con tu huella, tu rostro o tu bloqueo de pantalla.</string>
+    <plurals name="private_settings_count">
+        <item quantity="one">%1$d mapa privado: aparece bloqueado entre tus mapas, queda fuera de los widgets, los accesos directos y Recientes, y se abre con tu huella, tu rostro o tu bloqueo de pantalla.</item>
+        <item quantity="many">%1$d mapas privados: aparecen bloqueados entre tus mapas, quedan fuera de los widgets, los accesos directos y Recientes, y se abren con tu huella, tu rostro o tu bloqueo de pantalla.</item>
+        <item quantity="other">%1$d mapas privados: aparecen bloqueados entre tus mapas, quedan fuera de los widgets, los accesos directos y Recientes, y se abren con tu huella, tu rostro o tu bloqueo de pantalla.</item>
+    </plurals>
+    <string name="private_settings_lock_again">Volver a bloquearlos al salir de Orbit</string>
+    <string name="private_lock_right_away">De inmediato</string>
+    <plurals name="private_lock_minutes">
+        <item quantity="one">%1$d minuto</item>
+        <item quantity="many">%1$d minutos</item>
+        <item quantity="other">%1$d minutos</item>
+    </plurals>
+    <string name="private_settings_screen_off">Apagar la pantalla los bloquea de inmediato.</string>
+    <string name="private_settings_not_encrypted">Los mapas privados se bloquean en Orbit, pero no se cifran: sus archivos siguen siendo markdown, así que una app de sincronización, la carpeta donde guardas mapas o una copia de seguridad pueden leerlos como cualquier otro mapa.</string>
+    <string name="private_settings_no_screen_lock">Este dispositivo no tiene bloqueo de pantalla, así que todavía no se pueden hacer privados los mapas. Configura un PIN, un patrón o una contraseña para bloquearlos.</string>
+    <string name="private_settings_no_screen_lock_with_maps">Este dispositivo ya no tiene bloqueo de pantalla, así que tus mapas privados no están bloqueados. Configura un PIN, un patrón o una contraseña para volver a bloquearlos. Hasta entonces, la copia de seguridad de Android los deja fuera.</string>
+
+    <string name="private_widget_hint">Toca para abrir</string>
+
+    <string name="private_deleted_map">Se eliminó un mapa privado</string>
+    <string name="private_arrival_newer_version_from">%1$s te envió una versión más reciente de un mapa privado</string>
+    <string name="private_arrival_another_version">Otra versión de un mapa privado</string>
+    <plurals name="private_maps_in_a_note">
+        <item quantity="one">un mapa privado</item>
+        <item quantity="many">%1$d mapas privados</item>
+        <item quantity="other">%1$d mapas privados</item>
+    </plurals>
+    <plurals name="private_files_in_a_note">
+        <item quantity="one">una imagen o un video de un mapa privado</item>
+        <item quantity="many">%1$d imágenes y videos de mapas privados</item>
+        <item quantity="other">%1$d imágenes y videos de mapas privados</item>
+    </plurals>
+
+    <string name="private_switch">Privado</string>
+    <string name="private_show_private_maps">Mostrar mapas privados</string>
+    <string name="private_settings_hide">Ocultarlos mientras estén bloqueados</string>
+    <string name="private_settings_hide_description">Bloqueados, quedan fuera de tus mapas, las búsquedas y las etiquetas, en vez de conservar su lugar. El candado de arriba los muestra.</string>
+    <string name="private_settings_description_hidden">Haz privado un mapa desde su menú: se oculta de tus mapas mientras está bloqueado, queda fuera de los widgets, los accesos directos y Recientes, y se abre con tu huella, tu rostro o tu bloqueo de pantalla.</string>
+    <plurals name="private_settings_count_hidden">
+        <item quantity="one">%1$d mapa privado: se oculta de tus mapas mientras está bloqueado, queda fuera de los widgets, los accesos directos y Recientes, y se abre con tu huella, tu rostro o tu bloqueo de pantalla.</item>
+        <item quantity="many">%1$d mapas privados: se ocultan de tus mapas mientras están bloqueados, quedan fuera de los widgets, los accesos directos y Recientes, y se abren con tu huella, tu rostro o tu bloqueo de pantalla.</item>
+        <item quantity="other">%1$d mapas privados: se ocultan de tus mapas mientras están bloqueados, quedan fuera de los widgets, los accesos directos y Recientes, y se abren con tu huella, tu rostro o tu bloqueo de pantalla.</item>
+    </plurals>
+    <string name="private_exported_every_map">Se exportaron todos los mapas.</string>
+    <string name="private_presentation_stopped">La presentación se detuvo al bloquearse los mapas privados</string>
+    <string name="private_present_again">Presentar de nuevo</string>
+
+    <string name="private_cover_while_locked">Portada al estar bloqueado</string>
+    <string name="private_cover_explanation">Se muestra en lugar de su nombre mientras está bloqueado.</string>
+    <string name="private_cover_name">Nombre</string>
+    <string name="private_cover_name_example">Diario</string>
+    <string name="private_cover_emoji">Emoji</string>
+    <string name="private_cover_choose_emoji">Elegir un emoji</string>
+    <string name="private_cover_change_emoji">Emoji %1$s. Cambiarlo</string>
+    <string name="private_cover_emoji_title">Un emoji para su portada</string>
+    <string name="private_cover_save">Guardar</string>
+    <string name="private_cover_remove">Quitar portada</string>
+    <string name="private_locked_card_description_named">Mapa privado, %1$s, bloqueado</string>
+    <string name="private_cover_named_body">Un mapa privado. Desbloquéalo con tu huella, tu rostro o tu bloqueo de pantalla para verlo.</string>
+    <string name="private_arrival_newer_version_of_from">%2$s te envió una versión más reciente de tu mapa privado “%1$s”</string>
+    <string name="private_arrival_another_version_of">Otra versión de tu mapa privado “%1$s”</string>
+</resources>

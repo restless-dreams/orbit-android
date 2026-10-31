@@ -13,13 +13,13 @@ import androidx.test.uiautomator.textAsString
 /** Orbit's application id, the same in both builds. */
 const val PACKAGE_NAME = "com.hyuchia.orbit"
 
-/** One of the samples a fresh install has: small, so it draws quickly on any device. */
-const val SAMPLE_MAP = "Weekend in Lisbon"
+/** The map a fresh install has, in English: small, so it draws quickly on any device. */
+const val WELCOME_MAP = "Welcome to Orbit"
 
 /** Starting the map's WebView and drawing a map takes a while on an emulator without a GPU. */
 private const val PAGE_TIMEOUT = 30_000L
 
-/** Enough flings to reach either end of the maps a fresh install has, and then some. */
+/** Enough flings to reach either end of the maps, and then some. */
 private const val FLING_LIMIT = 8
 
 /** Starts Orbit with its launcher intent and waits for the maps' cards, which show once the maps are read. */

@@ -135,17 +135,60 @@ class FolderSyncTest {
     }
 
     @Test
-    fun `an emptied folder gets the maps written again instead of deleting them`() {
+    fun `an emptied folder gets the maps written again, once a later sync agrees, instead of deleting them`() {
         val maps = listOf(map("plan", "# Plan", file = "Plan.md"), map("trip", "# Trip", file = "Trip.md"))
-        assertEquals(listOf(SyncStep.Write("plan", null), SyncStep.Write("trip", null)), planSync(folder, maps, emptyList(), emptyList()))
+        val records = maps.map { it.record!! }
+        assertEquals(listOf(SyncStep.Missing("plan", records[0]), SyncStep.Missing("trip", records[1])), planSync(folder, maps, emptyList(), emptyList(), now = now))
+
+        // Still empty moments later, as a restored phone's folder still filling: nothing is written over it yet.
+        val missed = listOf(map("plan", "# Plan", file = "Plan.md", missingSince = now - 4_000), map("trip", "# Trip", file = "Trip.md", missingSince = now - 4_000))
+        assertEquals(emptyList<SyncStep>(), planSync(folder, missed, emptyList(), emptyList(), now = now))
+
+        val agreed = listOf(map("plan", "# Plan", file = "Plan.md", missingSince = now - MISSING_CONFIRMATION), map("trip", "# Trip", file = "Trip.md", missingSince = now - MISSING_CONFIRMATION))
+        assertEquals(listOf(SyncStep.Write("plan", null), SyncStep.Write("trip", null)), planSync(folder, agreed, emptyList(), emptyList(), now = now))
     }
 
     @Test
     fun `a folder with none of the maps' files is taken as another folder, not as deletions`() {
-        val maps = listOf(map("plan", "# Plan", file = "Plan.md"), map("trip", "# Trip", file = "Trip.md"))
+        val maps = listOf(map("plan", "# Plan", file = "Plan.md", missingSince = now - MISSING_CONFIRMATION), map("trip", "# Trip", file = "Trip.md", missingSince = now - MISSING_CONFIRMATION))
         val other = file("Notes.md", "# Notes")
-        val steps = planSync(folder, maps, listOf(other), emptyList())
+        val steps = planSync(folder, maps, listOf(other), emptyList(), now = now)
         assertEquals(listOf(SyncStep.Write("plan", null), SyncStep.Write("trip", null), SyncStep.Add(other)), steps)
+    }
+
+    @Test
+    fun `a map changed here is written to an emptied folder at once`() {
+        val maps = listOf(map("plan", "# Plan\n- New", file = "Plan.md", matched = "# Plan"), map("trip", "# Trip", file = "Trip.md"))
+        val steps = planSync(folder, maps, emptyList(), emptyList(), now = now)
+        assertEquals(listOf(SyncStep.Write("plan", null), SyncStep.Missing("trip", maps[1].record!!)), steps)
+    }
+
+    @Test
+    fun `a map whose record another install left waits a day for its file, as a restored phone's folder fills`() {
+        val restored = { missed: Long -> LocalMap("plan", digest("# Plan"), SyncRecord(folder, "Plan.md", digest("# Plan"), 1, 1, missingSince = missed, install = "old-phone")) }
+        val trip = LocalMap("trip", digest("# Trip"), SyncRecord(folder, "Trip.md", digest("# Trip"), 1, 1, install = "new-phone"))
+        val maps = { missed: Long -> listOf(restored(missed), trip) }
+        val files = listOf(file("Trip.md", null))
+        assertEquals(emptyList<SyncStep>(), planSync(folder, maps(now - MISSING_CONFIRMATION), files, emptyList(), now = now, install = "new-phone"))
+        assertEquals(listOf(SyncStep.Remove("plan")), planSync(folder, maps(now - FOREIGN_CONFIRMATION), files, emptyList(), now = now, install = "new-phone"))
+    }
+
+    @Test
+    fun `a record another install left is taken over once its file matches here`() {
+        val record = SyncRecord(folder, "Plan.md", digest("# Plan"), 1, 1, install = "old-phone")
+        val plan = file("Plan.md", null)
+        val steps = planSync(folder, listOf(LocalMap("plan", digest("# Plan"), record)), listOf(plan), emptyList(), install = "new-phone")
+        assertEquals(listOf(SyncStep.Link("plan", plan)), steps)
+    }
+
+    @Test
+    fun `a record from before records said whose they were becomes this install's, and one already is stays as it is`() {
+        val plan = file("Plan.md", null)
+        val before = SyncRecord(folder, "Plan.md", digest("# Plan"), 1, 1)
+        assertEquals(listOf(SyncStep.Link("plan", plan)), planSync(folder, listOf(LocalMap("plan", digest("# Plan"), before)), listOf(plan), emptyList(), install = "phone"))
+
+        val mine = before.copy(install = "phone")
+        assertEquals(emptyList<SyncStep>(), planSync(folder, listOf(LocalMap("plan", digest("# Plan"), mine)), listOf(plan), emptyList(), install = "phone"))
     }
 
     @Test
@@ -192,11 +235,5 @@ class FolderSyncTest {
         assertEquals("Q3 plan v2.md", MapText.fileName("Q3: plan/v2", emptyList(), words))
         assertEquals("Untitled map.md", MapText.fileName("  ...  ", emptyList(), words))
         assertEquals("Plan (3).md", MapText.fileName("Plan", listOf("plan.md", "Plan (2).md"), words))
-    }
-
-    @Test
-    fun `pictures are found by their place in the media folder`() {
-        val markdown = "# Trip\n- Beach ![](media/picture-abc.jpg)\n- <!-- orbit image: media/map_2.png -->\n- media/../secret"
-        assertEquals(setOf("picture-abc.jpg", "map_2.png"), picturesIn(markdown))
     }
 }

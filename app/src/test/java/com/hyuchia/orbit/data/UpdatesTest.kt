@@ -4,8 +4,9 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -46,7 +47,8 @@ class UpdatesTest {
 
     @After
     fun cleanUp() {
-        scope.cancel()
+        // The store's work ends before its folder goes, rather than finding it gone on a thread of its own.
+        runBlocking { scope.coroutineContext.job.cancelAndJoin() }
         folder.deleteRecursively()
     }
 
@@ -118,6 +120,10 @@ class UpdatesTest {
         assertNull(parseRelease(release("v0.2.0", prerelease = true)))
         assertNull(parseRelease(release("nightly")))
         assertNull(parseRelease(release("v0.1.2", page = "http://example.com/orbit.apk")))
+        // Only GitHub's page of Orbit's releases, whatever else the answer points to.
+        assertNull(parseRelease(release("v0.1.2", page = "https://example.com/orbit.apk")))
+        assertNull(parseRelease(release("v0.1.2", page = "https://github.com.example.com/restless-dreams/orbit-android/releases/tag/v0.1.2")))
+        assertNull(parseRelease(release("v0.1.2", page = "https://github.com/someone-else/orbit-android/releases/tag/v0.1.2")))
         assertNull(parseRelease("""{"message": "Not Found"}"""))
         assertNull(parseRelease("<html>Unicorn!</html>"))
     }

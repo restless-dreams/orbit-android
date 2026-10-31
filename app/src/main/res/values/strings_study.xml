@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Study mode: the ideas under each idea of a branch become cards to recall. See TRANSLATING.md. -->
+<resources>
+    <!-- Starting a session, in a map's menu, on its card on Home, and in the keyboard shortcuts. -->
+    <string name="study_study">Study</string>
+
+    <!-- The bar at the top: where the session is (%1$d of %2$d cards), and what TalkBack says of it. -->
+    <string name="study_position">%1$d of %2$d</string>
+    <string name="study_position_description">Card %1$d of %2$d</string>
+    <!-- Shown while studying every card, due or not. -->
+    <string name="study_studying_anyway">Studying anyway</string>
+    <string name="study_undo_answer">Undo the last answer</string>
+    <string name="study_stop">Stop studying</string>
+
+    <!-- A card before it's revealed: what to recall before showing it. -->
+    <plurals name="study_recall_ideas">
+        <item quantity="one">Recall the idea under it</item>
+        <item quantity="other">Recall the %1$d ideas under it</item>
+    </plurals>
+    <plurals name="study_recall_ideas_and_note">
+        <item quantity="one">Recall the idea under it, and its note</item>
+        <item quantity="other">Recall the %1$d ideas under it, and its note</item>
+    </plurals>
+    <string name="study_recall_note">Recall its note</string>
+    <string name="study_show">Show</string>
+    <!-- The Show button, for TalkBack: %1$s is the card's idea. -->
+    <string name="study_show_description">Show what’s under %1$s</string>
+
+    <!-- The answers once a card is revealed, each with when the card comes back after it. -->
+    <string name="study_again">Again</string>
+    <string name="study_knew_it">Knew it</string>
+    <!-- When a card comes back, in the middle of a sentence (“comes back tomorrow”), and under the buttons, where it starts with a capital. -->
+    <string name="study_in_a_moment">in a moment</string>
+    <string name="study_tomorrow">tomorrow</string>
+    <plurals name="study_in_days">
+        <item quantity="one">in %1$d day</item>
+        <item quantity="other">in %1$d days</item>
+    </plurals>
+    <plurals name="study_in_weeks">
+        <item quantity="one">in %1$d week</item>
+        <item quantity="other">in %1$d weeks</item>
+    </plurals>
+    <plurals name="study_in_months">
+        <item quantity="one">in %1$d month</item>
+        <item quantity="other">in %1$d months</item>
+    </plurals>
+    <!-- The answer buttons, for TalkBack: %1$s is when the card comes back, from the words above. -->
+    <string name="study_again_description">Again, comes back %1$s</string>
+    <string name="study_knew_it_description">Knew it, comes back %1$s</string>
+
+    <!-- The summary at the end of a session. -->
+    <string name="study_finished_title">Done for now</string>
+    <plurals name="study_finished">
+        <item quantity="one">You studied %1$d card</item>
+        <item quantity="other">You studied %1$d cards</item>
+    </plurals>
+    <plurals name="study_first_try">
+        <item quantity="one">%1$d on the first try</item>
+        <item quantity="other">%1$d on the first try</item>
+    </plurals>
+    <plurals name="study_another_look">
+        <item quantity="one">%1$d needed another look</item>
+        <item quantity="other">%1$d needed another look</item>
+    </plurals>
+    <!-- %1$s is when, from the words above: “tomorrow”, “in 3 days”. -->
+    <string name="study_next">The next cards come back %1$s.</string>
+    <plurals name="study_new_left">
+        <item quantity="one">%1$d new card waits for another day.</item>
+        <item quantity="other">%1$d new cards wait for another day.</item>
+    </plurals>
+    <string name="study_keep_going">Keep going</string>
+    <!-- Above the choice of how many new cards a map brings each day, where a session runs out of them. -->
+    <string name="study_new_cards_a_day">New cards a day</string>
+    <!-- Each choice said in full, for TalkBack: "20 new cards a day". -->
+    <plurals name="study_new_cards_a_day_choice">
+        <item quantity="one">%1$d new card a day</item>
+        <item quantity="other">%1$d new cards a day</item>
+    </plurals>
+    <!-- The choice, short, on a button that opens the others, where there's little room: "20 a day". -->
+    <plurals name="study_new_cards_a_day_short">
+        <item quantity="one">%1$d a day</item>
+        <item quantity="other">%1$d a day</item>
+    </plurals>
+
+    <!-- Nothing is due. %1$s is the idea studying began at, %2$s when the next cards come back. -->
+    <string name="study_caught_up_title">All caught up</string>
+    <string name="study_caught_up">Nothing under %1$s is due. The next cards come back %2$s.</string>
+    <string name="study_anyway">Study anyway</string>
+    <string name="study_anyway_explained">Cards you know stay on schedule, and the ones you miss come back sooner.</string>
+
+    <!-- The idea has no cards under it. %1$s is that idea. -->
+    <string name="study_no_cards_title">Nothing to study here yet</string>
+    <string name="study_no_cards">Ideas with ideas or a note under them become cards. Add some under %1$s, then study again.</string>
+
+    <!-- A map’s card on Home: how many of its cards are due. -->
+    <plurals name="study_due">
+        <item quantity="one">%1$d to study</item>
+        <item quantity="other">%1$d to study</item>
+    </plurals>
+
+    <!-- The keyboard shortcuts while studying. -->
+    <string name="study_shortcuts">Studying</string>
+    <string name="study_shortcut_show">Show what’s under the card</string>
+</resources>

@@ -61,4 +61,20 @@ class GalleryTest {
         // A video's description isn't shown, so only its caption describes it.
         assertNull(described.copy(kind = MediaKind.Video, media = Media("media/belem.mp4", alt = "The tower at sunset")).givenDescription())
     }
+
+    @Test
+    fun `a sound comes after its idea's picture and video, with how its idea looks for its art`() {
+        val withSounds = listOf(
+            node("trip", image = "media/cover.jpg").copy(audio = Media("media/memo-intro.mp4")),
+            node("alfama", "trip", image = "media/alfama.jpg", video = "media/video-alfama.mp4").copy(audio = Media("media/sound-fado.mp3", caption = "Fado at night"), drawnColor = "#F5A3A8"),
+            node("belem", "trip").copy(audio = Media(" ")),
+        )
+        val gallery = galleryOf(withSounds, "Untitled")
+        assertEquals(listOf("trip/Picture", "trip/Sound", "alfama/Picture", "alfama/Video", "alfama/Sound"), gallery.map { it.key })
+        assertEquals(IdeaLook("#F5A3A8", null, "media/alfama.jpg"), gallery.last().look)
+        assertEquals("Fado at night", gallery.last().givenDescription())
+        assertEquals(4, gallery.indexOf("alfama", MediaKind.Sound))
+        assertEquals("trip/Sound", soundOf(withSounds.first(), "Untitled")?.key)
+        assertNull(soundOf(withSounds.last(), "Untitled"))
+    }
 }

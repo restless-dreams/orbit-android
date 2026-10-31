@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -40,11 +39,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ClosedCaption
 import androidx.compose.material.icons.outlined.ClosedCaptionDisabled
-import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
@@ -89,6 +90,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
@@ -96,14 +99,18 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
+import com.hyuchia.orbit.data.MediaSummary
+import com.hyuchia.orbit.data.Uncleaned
 import com.hyuchia.orbit.media.MediaKind
 import com.hyuchia.orbit.media.MediaViewer
 import com.hyuchia.orbit.media.VideoScreen
 import com.hyuchia.orbit.page.MapInsets
 import com.hyuchia.orbit.page.MapNode
-import com.hyuchia.orbit.present.BrowserAddressDialog
+import com.hyuchia.orbit.present.Audience
+import com.hyuchia.orbit.present.BrowserAddressSheet
 import com.hyuchia.orbit.present.CastButton
 import com.hyuchia.orbit.present.rememberAudience
 import com.hyuchia.orbit.present.rememberBrowserPresenting
@@ -111,6 +118,8 @@ import com.hyuchia.orbit.rememberWords
 import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.MarkdownNote
+import com.hyuchia.orbit.ui.controlsLinger
+import com.hyuchia.orbit.ui.rememberAsTheyAre
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -119,7 +128,7 @@ import kotlin.math.abs
 private val CaptionsBesideWidth = 640.dp
 private val CaptionsBeside = 360.dp
 private val CaptionMargin = 16.dp
-/** The controls' row, which keeps its room while they're hidden, so the caption above stays put. */
+/** The controls' row, at the least: it keeps its room while they're hidden, so the caption above stays put. */
 private val ControlsHeight = 56.dp
 /** The controls step aside after this long without a touch, leaving the map and its caption. */
 private const val CONTROLS_LINGER_MILLISECONDS = 3_500L
@@ -165,12 +174,31 @@ fun PresentationMode(model: MapViewModel, ui: MapUi, background: Color, map: @Co
         }
     }
 
-    val audience = rememberAudience(model.folder(), model::setAudience)
+    // Files that can't go clean stay on this phone unless the presenter chooses, as browsers or a TV join, to show them as they are.
+    val asTheyAre = rememberAsTheyAre()
+    val uncleaned by produceState(Uncleaned(), ui.revision) { value = model.uncleaned() }
+    // The TV that last joined: it gets the map once the presenter has answered for its pictures, if it's still there.
+    val joiningTv = remember { mutableStateOf<Audience?>(null) }
+
+    val audience = rememberAudience(model.folder(), asTheyAre = { asTheyAre.chosen }) { made ->
+        joiningTv.value = made
+
+        if (made != null && made.carriesPictures) {
+            asTheyAre.then(uncleaned.inPictures) {
+                if (joiningTv.value === made) {
+                    model.setAudience(made)
+                }
+            }
+        } else {
+            model.setAudience(made)
+        }
+    }
+
     var inBrowsers by remember { mutableStateOf(false) }
     var showAddress by remember { mutableStateOf(false) }
-    val browsers = rememberBrowserPresenting(inBrowsers, model.folder(), model::setBrowserAudience)
+    val browsers = rememberBrowserPresenting(inBrowsers, model.folder(), asTheyAre = { asTheyAre.chosen }, model::setBrowserAudience)
 
-    fun showInBrowsers() {
+    fun showInBrowsers() = asTheyAre.then(uncleaned.inRoom) {
         inBrowsers = true
         showAddress = true
     }
@@ -217,13 +245,19 @@ fun PresentationMode(model: MapViewModel, ui: MapUi, background: Color, map: @Co
     // The idea's picture or video, full screen over the presentation on this screen alone.
     if (audience == null && browsers == null) {
         ui.viewing?.let { viewing ->
+            val sound by model.sound.collectAsStateWithLifecycle()
+
             MediaViewer(
+                mapId = model.id,
                 items = viewing.items,
                 start = viewing.start,
                 source = model::mediaModel,
                 onPlay = model::play,
                 onClosed = model::closeViewer,
+                sound = sound,
+                sounds = model.sounds,
                 onKey = { event -> fullScreenStepKeys(event, model, seconds, volume = true) },
+                soundLength = model::soundLength,
             )
         }
 
@@ -234,8 +268,14 @@ fun PresentationMode(model: MapViewModel, ui: MapUi, background: Color, map: @Co
     }
 
     if (showAddress && browsers != null) {
-        BrowserAddressDialog(
+        // The room gets the map's pictures and videos: its sounds play from this phone. Those that can't go clean are named.
+        val chosen = asTheyAre.chosen
+        val media by produceState(MediaSummary(), ui.revision, uncleaned, chosen) { value = model.mediaSummary(leavingOut = uncleaned.names - chosen).copy(audio = 0) }
+        BrowserAddressSheet(
             browsers,
+            media,
+            uncleaned.inRoom,
+            chosen,
             onStop = {
                 inBrowsers = false
                 showAddress = false
@@ -358,10 +398,16 @@ private fun OnThisScreen(
     var touches by remember { mutableIntStateOf(0) }
     // The swipes outlive this composition: they step at the pace set now, not the one when they began.
     val pace by rememberUpdatedState(seconds)
+    // A screen reader can't tap hidden controls back: while one explores the screen, they stay.
+    val linger = controlsLinger(CONTROLS_LINGER_MILLISECONDS)
+    // The tap outlives this composition too.
+    val lingering by rememberUpdatedState(linger)
 
-    LaunchedEffect(controls, touches, presentation.playing) {
-        if (controls) {
-            delay(CONTROLS_LINGER_MILLISECONDS)
+    LaunchedEffect(controls, touches, presentation.playing, linger) {
+        if (linger == null) {
+            controls = true
+        } else if (controls) {
+            delay(linger)
             controls = false
         }
     }
@@ -379,6 +425,7 @@ private fun OnThisScreen(
         val besideAtLeft = LocalLayoutDirection.current == LayoutDirection.Rtl
         var captions by remember { mutableStateOf(IntSize.Zero) }
         var tallest by remember(beside, captioned) { mutableIntStateOf(0) }
+        var controlsHeight by remember { mutableStateOf(ControlsHeight) }
 
         LaunchedEffect(beside, besideAtLeft, captioned, captions) {
             if (!captioned) {
@@ -410,7 +457,7 @@ private fun OnThisScreen(
                 .presentationGestures(
                     rightToLeft = besideAtLeft,
                     onTap = {
-                        if (controls) {
+                        if (controls && lingering != null) {
                             controls = false
                         } else {
                             touch()
@@ -419,11 +466,13 @@ private fun OnThisScreen(
                     onStep = { by -> model.step(by, pace) },
                 ),
         )
+        val progress = stringResource(R.string.present_progress, presentation.index + 1, presentation.order.size)
         LinearProgressIndicator(
             progress = { (presentation.index + 1f) / presentation.order.size },
             modifier = Modifier
                 .fillMaxWidth()
-                .align(Alignment.TopCenter),
+                .align(Alignment.TopCenter)
+                .semantics { contentDescription = progress },
         )
 
         if (presentation.rehearsing) {
@@ -467,6 +516,22 @@ private fun OnThisScreen(
                     }
                 }
 
+                // The idea's sound plays from the phone, over the presentation, which goes on.
+                if (node?.audio != null) {
+                    val sound by model.sound.collectAsStateWithLifecycle()
+                    val playing = sound?.playing == true && sound?.item?.nodeId == node.id
+                    val playTheSound = stringResource(if (playing) R.string.audio_pause_the_sound else R.string.audio_play_the_sound)
+
+                    Hint(playTheSound) {
+                        IconButton(onClick = {
+                            model.toggleSound(node.id)
+                            touch()
+                        }) {
+                            Icon(if (playing) Icons.Outlined.PauseCircle else Icons.Outlined.GraphicEq, contentDescription = playTheSound)
+                        }
+                    }
+                }
+
                 CaptionsButton(captioned) {
                     model.setCaptions(!captioned)
                     touch()
@@ -474,13 +539,7 @@ private fun OnThisScreen(
 
                 CastButton(dark = background.luminance() < 0.5f, screenCast = true)
 
-                IconButton(onClick = onBrowsers) {
-                    Icon(Icons.Outlined.Language, contentDescription = stringResource(R.string.present_show_in_a_browser))
-                }
-
-                IconButton(onClick = model::stopPresentation) {
-                    Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.common_stop_presenting))
-                }
+                BrowsersAndStopButtons(model, onBrowsers)
             }
         }
 
@@ -498,9 +557,16 @@ private fun OnThisScreen(
                 Caption(model, node)
             }
 
-            Box(Modifier.height(ControlsHeight), contentAlignment = Alignment.Center) {
+            // As tall as the controls have been, larger type and the pace under the count included.
+            Box(Modifier.heightIn(min = controlsHeight), contentAlignment = Alignment.Center) {
                 androidx.compose.animation.AnimatedVisibility(visible = controls, enter = fadeIn(tween(160)), exit = fadeOut(tween(420))) {
-                    StepButtons(model, presentation, seconds, onTouch = ::touch)
+                    StepButtons(
+                        model,
+                        presentation,
+                        seconds,
+                        onTouch = ::touch,
+                        modifier = Modifier.onSizeChanged { size -> controlsHeight = maxOf(controlsHeight, with(density) { size.height.toDp() }) },
+                    )
                 }
             }
         }
@@ -611,32 +677,37 @@ fun Presentation.stepTime(now: Long, words: Words): String {
 
 /** Back, play or pause, where the presentation is with its pace, and forward. */
 @Composable
-fun StepButtons(model: MapViewModel, presentation: Presentation, seconds: Int, onTouch: () -> Unit = {}) {
+fun StepButtons(model: MapViewModel, presentation: Presentation, seconds: Int, modifier: Modifier = Modifier, onTouch: () -> Unit = {}) {
     val now = rememberNow(presentation.stepStartedAt)
     val words = rememberWords()
     val pace = presentation.takeIf { !it.rehearsing }?.pace(now, words)
 
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        FilledTonalIconButton(
-            onClick = {
-                model.step(-1, seconds)
-                onTouch()
-            },
-            enabled = presentation.index > 0,
-        ) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.present_previous_idea))
+    val previous = stringResource(R.string.present_previous_idea)
+    val playOrPause = stringResource(if (presentation.playing) R.string.present_pause else R.string.present_play_on_its_own)
+    val next = stringResource(R.string.present_next_idea)
+
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = modifier) {
+        Hint(previous, MapKeys.PreviousIdea) {
+            FilledTonalIconButton(
+                onClick = {
+                    model.step(-1, seconds)
+                    onTouch()
+                },
+                enabled = presentation.index > 0,
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = previous)
+            }
         }
 
-        FilledTonalIconButton(
-            onClick = {
-                model.setPlaying(!presentation.playing, seconds.coerceAtLeast(8))
-                onTouch()
-            },
-        ) {
-            Icon(
-                if (presentation.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                contentDescription = stringResource(if (presentation.playing) R.string.present_pause else R.string.present_play_on_its_own),
-            )
+        Hint(playOrPause) {
+            FilledTonalIconButton(
+                onClick = {
+                    model.setPlaying(!presentation.playing, seconds.coerceAtLeast(8))
+                    onTouch()
+                },
+            ) {
+                Icon(if (presentation.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = playOrPause)
+            }
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -651,14 +722,16 @@ fun StepButtons(model: MapViewModel, presentation: Presentation, seconds: Int, o
             }
         }
 
-        FilledIconButton(
-            onClick = {
-                model.step(1, seconds)
-                onTouch()
-            },
-            enabled = presentation.index < presentation.order.lastIndex,
-        ) {
-            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = stringResource(R.string.present_next_idea))
+        Hint(next, MapKeys.NextIdea) {
+            FilledIconButton(
+                onClick = {
+                    model.step(1, seconds)
+                    onTouch()
+                },
+                enabled = presentation.index < presentation.order.lastIndex,
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = next)
+            }
         }
     }
 }
@@ -666,10 +739,26 @@ fun StepButtons(model: MapViewModel, presentation: Presentation, seconds: Int, o
 /** Shows the captions, or hides them for the map alone. */
 @Composable
 fun CaptionsButton(captioned: Boolean, onClick: () -> Unit) {
-    IconButton(onClick = onClick) {
-        Icon(
-            if (captioned) Icons.Outlined.ClosedCaption else Icons.Outlined.ClosedCaptionDisabled,
-            contentDescription = stringResource(if (captioned) R.string.present_hide_the_captions else R.string.present_show_the_captions),
-        )
+    val captions = stringResource(if (captioned) R.string.present_hide_the_captions else R.string.present_show_the_captions)
+
+    Hint(captions) {
+        IconButton(onClick = onClick) {
+            Icon(if (captioned) Icons.Outlined.ClosedCaption else Icons.Outlined.ClosedCaptionDisabled, contentDescription = captions)
+        }
+    }
+}
+
+/** Shows the presentation in browsers too, and stops presenting: the last of the presentation's buttons, wherever it shows them. */
+@Composable
+fun BrowsersAndStopButtons(model: MapViewModel, onBrowsers: () -> Unit) {
+    val browsers = stringResource(R.string.present_show_in_a_browser)
+    val stop = stringResource(R.string.common_stop_presenting)
+
+    Hint(browsers) {
+        IconButton(onClick = onBrowsers) { Icon(Icons.Outlined.Language, contentDescription = browsers) }
+    }
+
+    Hint(stop, MapKeys.StopPresenting) {
+        IconButton(onClick = model::stopPresentation) { Icon(Icons.Outlined.Close, contentDescription = stop) }
     }
 }

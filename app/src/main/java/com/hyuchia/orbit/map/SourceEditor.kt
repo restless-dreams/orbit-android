@@ -5,9 +5,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material.icons.outlined.WarningAmber
@@ -61,34 +62,65 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.page.Diagnostic
+import com.hyuchia.orbit.ui.Hint
 
-/** The top bar while the map is edited as text: markdown or YAML, and done. */
+/**
+ * The top bar while the map is edited as text: markdown or YAML, and done.
+ * Narrower than [SourceFormatsInBarWidth] (a phone held upright), the
+ * choice of markdown or YAML takes a row of its own under the title, which
+ * keeps to one line.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SourceTopBar(model: MapViewModel, source: SourceState, background: Color) {
-    TopAppBar(
-        title = { Text(stringResource(R.string.map_edit_as_text)) },
-        navigationIcon = {
-            IconButton(onClick = model::closeSource) { Icon(Icons.Outlined.Check, contentDescription = stringResource(R.string.common_done)) }
-        },
-        actions = {
-            SingleChoiceSegmentedButtonRow(Modifier.padding(end = 8.dp)) {
-                SegmentedButton(
-                    selected = !source.yaml,
-                    onClick = { model.setSourceYaml(false) },
-                    shape = SegmentedButtonDefaults.itemShape(0, 2),
-                    enabled = !source.converting,
-                ) { Text("Markdown") }
-                SegmentedButton(
-                    selected = source.yaml,
-                    onClick = { model.setSourceYaml(true) },
-                    shape = SegmentedButtonDefaults.itemShape(1, 2),
-                    enabled = !source.converting,
-                ) { Text("YAML") }
+    BoxWithConstraints {
+        val inBar = maxWidth >= SourceFormatsInBarWidth
+
+        Column(Modifier.background(background)) {
+            TopAppBar(
+                title = { Text(stringResource(R.string.map_edit_as_text), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                navigationIcon = {
+                    val done = stringResource(R.string.common_done)
+
+                    Hint(done) {
+                        IconButton(onClick = model::closeSource) { Icon(Icons.Outlined.Check, contentDescription = done) }
+                    }
+                },
+                actions = {
+                    if (inBar) {
+                        SourceFormats(model, source, Modifier.padding(end = 8.dp))
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = background),
+            )
+
+            if (!inBar) {
+                SourceFormats(model, source, Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp))
             }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = background),
-    )
+        }
+    }
+}
+
+/** From this width the choice of markdown or YAML fits in the top bar beside its title. */
+private val SourceFormatsInBarWidth = 600.dp
+
+/** Markdown or YAML, the two ways the map's text can be written. */
+@Composable
+private fun SourceFormats(model: MapViewModel, source: SourceState, modifier: Modifier = Modifier) {
+    SingleChoiceSegmentedButtonRow(modifier) {
+        SegmentedButton(
+            selected = !source.yaml,
+            onClick = { model.setSourceYaml(false) },
+            shape = SegmentedButtonDefaults.itemShape(0, 2),
+            enabled = !source.converting,
+        ) { Text("Markdown") }
+        SegmentedButton(
+            selected = source.yaml,
+            onClick = { model.setSourceYaml(true) },
+            shape = SegmentedButtonDefaults.itemShape(1, 2),
+            enabled = !source.converting,
+        ) { Text("YAML") }
+    }
 }
 
 /**
@@ -115,6 +147,8 @@ fun SourceEditor(model: MapViewModel, source: SourceState, readOnly: ReadOnly?, 
     Column(modifier.background(colors.surfaceContainerLow)) {
         if (!editable && readOnly != null) {
             ReadOnlyLine(readOnly)
+        } else if (source.yaml && editable) {
+            YamlLine()
         }
 
         Box(
@@ -172,6 +206,21 @@ private fun ReadOnlyLine(readOnly: ReadOnly) {
                 Text(stringResource(title), style = MaterialTheme.typography.labelLarge)
                 Text(stringResource(body), style = MaterialTheme.typography.bodySmall)
             }
+        }
+    }
+}
+
+/**
+ * Above the text while it's YAML, Orbit's own form of the map: an edit there
+ * writes the map's markdown anew, without the shapes it was written in.
+ * Switching back without one gives the markdown back as it was.
+ */
+@Composable
+private fun YamlLine() {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, contentColor = MaterialTheme.colorScheme.onSurfaceVariant) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+            Icon(Icons.Outlined.Info, contentDescription = null, modifier = Modifier.padding(top = 1.dp).size(18.dp))
+            Text(stringResource(R.string.map_source_yaml_rewrites), style = MaterialTheme.typography.bodySmall)
         }
     }
 }

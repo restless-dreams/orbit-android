@@ -23,8 +23,11 @@ import androidx.compose.material.icons.outlined.ControlPointDuplicate
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.EmojiEmotions
+import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.OpenWith
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Timelapse
 import androidx.compose.material.icons.outlined.Tune
@@ -49,6 +52,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.data.isVoiceMemo
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.theme.parseCssColor
 import com.hyuchia.orbit.ui.ColorChoices
@@ -86,6 +90,12 @@ sealed interface NodeAction {
 
     /** Adds an amount to a goal, takes one off, or pays one, in a small dialog. */
     data class ChangeGoal(val change: GoalChange) : NodeAction
+
+    /** Opens the recorder for a voice memo on it. */
+    data object RecordMemo : NodeAction
+
+    /** Plays its sound in the small player over the map, or pauses it. */
+    data object PlaySound : NodeAction
 }
 
 private enum class MenuPage { Main, Status, Color, Move }
@@ -119,7 +129,8 @@ val Statuses = listOf(
  * `ideasUnder` how many ideas are under it all the way down, which Delete
  * deletes with it. `mapColors` are the map's own colors, to give it again,
  * and `pasteable` is what the clipboard holds that the idea can take, if
- * anything.
+ * anything. `soundPlaying` says its sound is playing, for the item that
+ * pauses it.
  */
 @Composable
 fun NodeMenu(
@@ -131,6 +142,7 @@ fun NodeMenu(
     ideasUnder: Int = node.childCount,
     mapColors: List<String> = emptyList(),
     pasteable: Pasteable? = null,
+    soundPlaying: Boolean = false,
     onDismiss: () -> Unit,
     onAction: (NodeAction) -> Unit,
 ) {
@@ -172,6 +184,15 @@ fun NodeMenu(
                     Item(stringResource(R.string.common_status), Icons.Outlined.CheckCircle, more = true) { page = MenuPage.Status }
                     Item(stringResource(R.string.common_color), Icons.Outlined.Palette, more = true) { page = MenuPage.Color }
                     Item(stringResource(if (node.icon == null) R.string.map_add_an_icon else R.string.map_change_the_icon), Icons.Outlined.EmojiEmotions) { onAction(NodeAction.PickIcon) }
+
+                    // Its sound, and a voice memo, said into it.
+                    if (node.audio != null) {
+                        Item(stringResource(if (soundPlaying) R.string.audio_pause_the_sound else R.string.audio_play_the_sound), if (soundPlaying) Icons.Outlined.PauseCircle else Icons.Outlined.GraphicEq) {
+                            onAction(NodeAction.PlaySound)
+                        }
+                    }
+
+                    Item(stringResource(if (node.audio?.src?.let(::isVoiceMemo) == true) R.string.audio_record_again else R.string.audio_record_a_voice_memo), Icons.Outlined.Mic) { onAction(NodeAction.RecordMemo) }
 
                     if (node.childCount > 0 && !node.isRoot) {
                         if (node.collapsed) {
@@ -258,7 +279,8 @@ fun NodeMenu(
 @Composable
 private fun Item(label: String, icon: ImageVector, more: Boolean = false, checked: Boolean = false, onClick: () -> Unit) {
     DropdownMenuItem(
-        text = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        // Two lines where a language's words need them ("Grabar una nota de voz" at a large font), as the delete item has.
+        text = { Text(label, maxLines = 2, overflow = TextOverflow.Ellipsis) },
         leadingIcon = { Icon(icon, contentDescription = null) },
         trailingIcon = when {
             more -> ({ Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null) })

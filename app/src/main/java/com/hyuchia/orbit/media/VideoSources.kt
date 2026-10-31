@@ -1,14 +1,21 @@
 package com.hyuchia.orbit.media
 
 import com.hyuchia.orbit.page.Media
+import com.hyuchia.orbit.page.escapeHtml
+import java.io.File
 import java.net.URI
 import java.net.URISyntaxException
+import java.net.URLDecoder
+import java.net.URLEncoder
 
 /** YouTube's hosts, as Orbit reads video links. */
 private val YOUTUBE_HOSTS = setOf("youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com", "www.youtube-nocookie.com", "youtu.be")
 
 /** A YouTube video's id, as Orbit takes them. */
 private val YOUTUBE_ID = Regex("[A-Za-z0-9_-]{6,}")
+
+/** The provider of a video file kept with the map, which plays on the device rather than on a site. */
+const val NATIVE_PROVIDER = "native"
 
 /** A YouTube or Vimeo address written without its scheme, such as `youtu.be/…`. */
 private val BARE_HOST = Regex("^(?:(?:www|m|music|player)\\.)?(?:youtube\\.com|youtube-nocookie\\.com|youtu\\.be|vimeo\\.com)/", RegexOption.IGNORE_CASE)
@@ -32,7 +39,7 @@ internal fun webAddress(url: String): URI? {
 
 /** A query parameter of a web address, decoded. */
 internal fun URI.parameter(name: String): String? =
-    rawQuery?.split('&')?.firstOrNull { it.substringBefore('=') == name }?.substringAfter('=', "")?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+    rawQuery?.split('&')?.firstOrNull { it.substringBefore('=') == name }?.substringAfter('=', "")?.let { URLDecoder.decode(it, "UTF-8") }
 
 /** A YouTube video's id, from any of its links: watch pages, youtu.be, embeds, Shorts and lives. */
 fun youtubeId(url: String): String? {
@@ -58,7 +65,7 @@ fun youtubeId(url: String): String? {
 /** The picture a video shows before it plays: its own poster, or for a YouTube video, YouTube's. */
 fun posterOf(video: Media): String? =
     video.thumbnail?.takeIf { it.isNotBlank() }
-        ?: youtubeId(video.src)?.takeIf { video.provider != "vimeo" && video.provider != "native" }?.let { "https://img.youtube.com/vi/$it/hqdefault.jpg" }
+        ?: youtubeId(video.src)?.takeIf { video.provider != "vimeo" && video.provider != NATIVE_PROVIDER }?.let { "https://img.youtube.com/vi/$it/hqdefault.jpg" }
 
 /** Video files Orbit plays itself from the web, by the end of their address. */
 private val VIDEO_FILE = Regex("\\.(mp4|m4v|webm|mov)$", RegexOption.IGNORE_CASE)
@@ -69,7 +76,7 @@ private val VIMEO_HOSTS = setOf("vimeo.com", "www.vimeo.com", "player.vimeo.com"
 /** Where a video plays from, and so which player plays it. */
 sealed interface VideoSource {
     /** A video file in the map's folder. */
-    data class InMap(val file: java.io.File) : VideoSource
+    data class InMap(val file: File) : VideoSource
 
     /** A video file on the web, at a secure address. */
     data class OnTheWeb(val url: String) : VideoSource
@@ -92,23 +99,23 @@ sealed interface VideoSource {
 fun videoSource(video: Media, resolve: (String) -> Any?): VideoSource? {
     val resolved = resolve(video.src)
 
-    if (resolved is java.io.File) {
+    if (resolved is File) {
         return VideoSource.InMap(resolved)
     }
 
     val address = webAddress(video.src) ?: return null
     val host = address.host.lowercase()
 
-    if (video.provider != "vimeo" && video.provider != "native") {
+    if (video.provider != "vimeo" && video.provider != NATIVE_PROVIDER) {
         youtubeId(video.src)?.let { return VideoSource.YouTube(it, startSeconds(address)) }
     }
 
-    if (video.provider != "youtube" && video.provider != "native" && host in VIMEO_HOSTS) {
+    if (video.provider != "youtube" && video.provider != NATIVE_PROVIDER && host in VIMEO_HOSTS) {
         vimeoVideo(address)?.let { (id, hash) -> return VideoSource.Vimeo(id, hash) }
     }
 
     val secure = address.scheme.equals("https", ignoreCase = true)
-    val file = video.provider == "native" || VIDEO_FILE.containsMatchIn(address.path.orEmpty())
+    val file = video.provider == NATIVE_PROVIDER || VIDEO_FILE.containsMatchIn(address.path.orEmpty())
     return if (secure && file) VideoSource.OnTheWeb(address.toString()) else VideoSource.Elsewhere(address.toString())
 }
 
@@ -175,7 +182,7 @@ fun isPlayerHost(host: String?): Boolean = host?.lowercase() in PLAYER_HOSTS
  */
 fun embedUrl(source: VideoSource, origin: String): String? = when (source) {
     is VideoSource.YouTube -> "https://www.youtube-nocookie.com/embed/${source.id}?autoplay=1&playsinline=1&rel=0&enablejsapi=1" +
-        "&origin=${java.net.URLEncoder.encode(origin, "UTF-8")}" + source.start?.let { "&start=$it" }.orEmpty()
+        "&origin=${URLEncoder.encode(origin, "UTF-8")}" + source.start?.let { "&start=$it" }.orEmpty()
     is VideoSource.Vimeo -> "https://player.vimeo.com/video/${source.id}?autoplay=1&dnt=1" + source.hash?.let { "&h=$it" }.orEmpty()
     else -> null
 }
@@ -287,10 +294,12 @@ window.orbitPlayer = {
 
 /**
  * The page the provider's player plays in: the player filling it, on black,
- * and nothing else it can load. Its script gives the player the keyboard as
- * it loads, and takes the app's keys and pauses (`window.orbitPlayer`).
+ * and nothing else it can load, in the app's `language`, which screen
+ * readers read its title, the idea's text, in. Its script gives the player
+ * the keyboard as it loads, and takes the app's keys and pauses
+ * (`window.orbitPlayer`).
  */
-fun playerPage(source: VideoSource, title: String, origin: String): String? {
+fun playerPage(source: VideoSource, title: String, origin: String, language: String): String? {
     val embed = embedUrl(source, origin) ?: return null
 
     val (frameOrigin, script) = when (source) {
@@ -298,9 +307,9 @@ fun playerPage(source: VideoSource, title: String, origin: String): String? {
         else -> "https://www.youtube-nocookie.com" to YOUTUBE_SCRIPT
     }
 
-    val escapedTitle = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+    val escapedTitle = escapeHtml(title)
     return """<!doctype html>
-<html lang="en">
+<html lang="${escapeHtml(language)}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

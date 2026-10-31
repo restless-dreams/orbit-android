@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
     Maps are the user's own files: back them up and move them to new phones. Cloud backups stop
-    altogether past 25 MB, so they leave the maps' history out (it can be large); moving to a new
-    phone takes it along. OrbitBackupAgent picks the files these rules allow, and keeps a backup
-    within its quota: the maps' text first, then as many of their pictures and videos as fit.
-    Settings, Export all maps keeps everything, history, pictures and videos included.
+    altogether past 25 MB, so they leave the maps' history and the trash out (they can be large);
+    moving to a new phone takes them along, and the deletions the folder maps are kept in still has
+    to make. OrbitBackupAgent picks the files these rules allow, and keeps a backup within its
+    quota: the maps' text first, the most recently changed first, then as many of their pictures
+    and videos as fit. Settings, Export all maps keeps everything, history, pictures and videos
+    included.
 -->
 <data-extraction-rules>
     <cloud-backup>
@@ -14,6 +16,8 @@
     <device-transfer>
         <include domain="file" path="maps/" />
         <include domain="file" path="history/" />
+        <include domain="file" path="trash/" />
+        <include domain="file" path="folder-deletions.json" />
         <include domain="file" path="datastore/" />
     </device-transfer>
 </data-extraction-rules>

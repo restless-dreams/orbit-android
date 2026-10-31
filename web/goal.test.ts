@@ -9,6 +9,7 @@ import {
   formatAmount,
   goalReached,
   goalShare,
+  isGoal,
   layoutRing,
   mergeAttributes,
   readGoal,
@@ -53,6 +54,16 @@ const goalNode = (attrs: Record<string, unknown>): OrbitNode => {
 
 /** Every character half an em wide: enough to see lines shrink as they grow. */
 const halfEms: Measure = (text) => text.length * 0.5;
+
+describe('goals and Progress for a newer version', () => {
+  test('are ideas like any other: not counted, and not drawn as goals', () => {
+    const root = parseOrbit('# Shopping\n- Apples <!-- orbit type: goal@2, target: 5, current: 5 -->\n- Eggs <!-- orbit type: goal, target: 12, current: 6 -->\n- Week <!-- orbit type: progress@2 -->\n  - [x] Bread\n').root;
+    expect(isGoal(find(root, 'Apples'))).toBe(false);
+    expect(isGoal(find(root, 'Eggs'))).toBe(true);
+    // Eggs halfway and Bread done; Apples isn't a goal here, and the newer Progress counts through nothing of its own.
+    expect(progressOf(root)).toEqual({ done: 1.5, total: 2 });
+  });
+});
 
 describe('reading goals', () => {
   test('numbers are plain numbers, or text that is one', () => {

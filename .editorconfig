@@ -1,5 +1,16 @@
 root = true
 
 [*.{kt,kts}]
-# ktlint runs only the app's own style rules (code-style/), not its standard ones.
+# ktlint runs the app's own style rules (code-style/), and of its standard ones only these three: the others would
+# rewrite much more than the style asks.
 ktlint_standard = disabled
+ktlint_standard_no-unused-imports = enabled
+ktlint_standard_no-consecutive-blank-lines = enabled
+ktlint_standard_import-ordering = enabled
+# Imports in lexicographic order, with java, javax and kotlin last, and an alias where its name sorts, as the code has them.
+ij_kotlin_imports_layout = *,java.**,javax.**,kotlin.**
+
+[fdroid/*.yml]
+# F-Droid's rewritemeta writes a space after "Binaries:" before the address it folds onto the next line, and its
+# CI job fails if the space is gone.
+trim_trailing_whitespace = false

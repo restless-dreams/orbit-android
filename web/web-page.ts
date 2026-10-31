@@ -18,7 +18,7 @@ import type { OrbitNode } from '@restless-dreams/orbit';
 import { receive } from './audience';
 import { automaticRings, knownStyle, nodeTypeFor, nodeTypes, themeOption } from './look';
 import type { AppTheme } from './look';
-import { picturesLoaded, printOptions } from './print';
+import { picturesLoaded, printColors, printOptions } from './print';
 import type { PrintRequest } from './print';
 import { pageWords, speak } from './words';
 import type { PageWords } from './words';
@@ -38,6 +38,12 @@ interface PageData {
 
   /** Set when the app prints the map: what its picture shows. */
   print?: PrintRequest | null;
+
+  /** The map's sounds inside the page, as data: URLs by the address the map gives them, to play away from the phone. */
+  sounds?: Record<string, string> | null;
+
+  /** The live photos' motions inside the page, as data: URLs by the address the map gives them. */
+  motions?: Record<string, string> | null;
 }
 
 declare global {
@@ -70,6 +76,33 @@ const data = JSON.parse(document.getElementById('orbit-map')?.textContent ?? '{}
 speak(data.words);
 const page = document.body;
 const parsed = parseOrbit(data.markdown, { untitled: pageWords().untitledMap });
+
+/** Each sound plays from inside the page: its address swapped for the one the app put in, by its place in the map's folder. */
+const withSounds = (node: OrbitNode, sounds: Record<string, string>): void => {
+  const inside = node.audio ? sounds[node.audio.src.replace(/^\.\//, '')] : undefined;
+
+  if (node.audio && inside) {
+    node.audio = { ...node.audio, src: inside };
+  }
+
+  node.children.forEach((child) => withSounds(child, sounds));
+};
+
+withSounds(parsed.root, data.sounds ?? {});
+
+/** Each live photo plays its motion from inside the page, where the app put it in; one left out shows still. */
+const withMotions = (node: OrbitNode, motions: Record<string, string>): void => {
+  const motion = node.image?.motion;
+  const inside = motion ? motions[motion.src.replace(/^\.\//, '')] : undefined;
+
+  if (node.image && motion && inside) {
+    node.image = { ...node.image, motion: { ...motion, src: inside } };
+  }
+
+  node.children.forEach((child) => withMotions(child, motions));
+};
+
+withMotions(parsed.root, data.motions ?? {});
 const style = knownStyle(parsed.options.theme);
 const printed = document.getElementById('print') as HTMLElement;
 let laidOut = false;
@@ -81,7 +114,13 @@ const layOutForPrint = (): void => {
   }
 
   laidOut = true;
-  renderPrintLayout(printed, parsed, printOptions(parsed, data.theme, style, data.print, document.documentElement.lang));
+  const options = printOptions(parsed, data.theme, style, data.print, document.documentElement.lang);
+
+  for (const [name, value] of Object.entries(printColors(options.theme ?? parsed.options.theme))) {
+    printed.style.setProperty(name, value);
+  }
+
+  renderPrintLayout(printed, parsed, options);
 };
 
 /** The page as people explore and present it. */
@@ -93,6 +132,8 @@ const startExploring = (): void => {
   });
   const order = data.path?.length ? data.path : readingOrder(parsed.root);
   const count = document.querySelector<HTMLElement>('.page__count')!;
+  const title = document.querySelector<HTMLElement>('.audience__title')!;
+  const presentButton = document.querySelector<HTMLButtonElement>('button.page__present')!;
   const download = document.querySelector<HTMLAnchorElement>('.page__download');
 
   if (data.download && download) {
@@ -113,6 +154,9 @@ const startExploring = (): void => {
     receive({ type: 'show', markdown: data.markdown, theme: data.theme, focus: order[index], captions: true });
     step(0);
     showControls();
+    // Present hides: the title of the idea shown takes the focus, and the keys with it. Left to the browser, focus
+    // drops onto the page, or in Safari, gone full screen, can stay with the hidden button.
+    title.focus({ preventScroll: true });
     document.documentElement.requestFullscreen?.().catch(() => undefined);
   };
 
@@ -120,6 +164,8 @@ const startExploring = (): void => {
     presenting = false;
     receive({ type: 'end' });
     page.classList.remove('page--presenting', 'page--controls');
+    // Focus goes back to Present, where it was, rather than onto the page with the title it was on.
+    presentButton.focus({ preventScroll: true });
 
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => undefined);
@@ -141,7 +187,7 @@ const startExploring = (): void => {
     linger = window.setTimeout(() => page.classList.remove('page--controls'), CONTROLS_LINGER);
   };
 
-  document.querySelector('.page__present')?.addEventListener('click', present);
+  presentButton.addEventListener('click', present);
   document.querySelector('[data-close]')?.addEventListener('click', stop);
 
   document.querySelectorAll<HTMLElement>('[data-step]').forEach((button) => {

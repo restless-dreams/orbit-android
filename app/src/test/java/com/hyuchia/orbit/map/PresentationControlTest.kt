@@ -8,6 +8,7 @@ import com.hyuchia.orbit.page.MapMessage
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.MapState
 import com.hyuchia.orbit.page.Media
+import com.hyuchia.orbit.page.MediaMotion
 import com.hyuchia.orbit.present.Audience
 import com.hyuchia.orbit.present.ShownMedia
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -85,6 +86,38 @@ class PresentationControlTest {
         // The screens close it as they step: no other word needed.
         assertEquals(AudienceCommand.Step("end", 2, 3), screen.heard.last())
         assertTrue(AudienceCommand.CloseMedia !in screen.heard)
+    }
+
+    @Test
+    fun aLivePhotosMotionPlaysAgainOnEveryScreenAndOnlyALivePhotos() = runTest {
+        val control = control
+        val screen = Screen()
+        val browsers = Screen()
+        control.setScreen(screen)
+        control.setBrowsers(browsers)
+
+        // A plain picture has no motion: nothing goes out.
+        control.showMedia(MediaKind.Picture)
+        val heard = screen.heard.size
+        control.replayMotion()
+        assertEquals(heard, screen.heard.size)
+
+        // The same idea's picture as a live photo plays its motion again on every screen, and stays shown here.
+        val live = Media("media/tram.jpg", motion = MediaMotion("media/tram.motion.mp4", still = 1.2))
+        ui.update { state -> state.copy(map = state.map!!.copy(nodes = state.map!!.nodes.map { if (it.id == "tram") it.copy(image = live) else it })) }
+        val shown = presentation.media
+        control.replayMotion()
+        assertEquals(AudienceCommand.Playback(true), screen.heard.last())
+        assertEquals(AudienceCommand.Playback(true), browsers.heard.last())
+        assertEquals(shown, presentation.media)
+
+        // Back on the map, or with the video shown, there's no picture to play.
+        control.closeMedia()
+        control.replayMotion()
+        assertEquals(AudienceCommand.CloseMedia, screen.heard.last())
+        control.showMedia(MediaKind.Video)
+        control.replayMotion()
+        assertTrue(screen.heard.last() is AudienceCommand.Media)
     }
 
     @Test

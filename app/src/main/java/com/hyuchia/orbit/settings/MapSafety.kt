@@ -1,8 +1,10 @@
 package com.hyuchia.orbit.settings
 
+import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Archive
@@ -10,58 +12,112 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Unarchive
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
+import com.hyuchia.orbit.data.Importer
+import com.hyuchia.orbit.data.MapFileTypes
 import com.hyuchia.orbit.data.RefusedZipException
 import com.hyuchia.orbit.data.TRASH_DAYS
+import com.hyuchia.orbit.privacy.conceals
+import com.hyuchia.orbit.privacy.mentionedAlreadyHere
+import com.hyuchia.orbit.privacy.mentionedFilledIn
+import com.hyuchia.orbit.privacy.rememberUnlockedForEveryMap
+import com.hyuchia.orbit.theme.LocalAppSettings
+import com.hyuchia.orbit.ui.systemReason
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.time.LocalDate
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Keeping maps safe: the trash, and every map in one zip to keep anywhere
  * and bring back on any device (Android's own backup needs Google's, and
- * stops at 25 MB).
+ * stops at 25 MB). A backup shows as under way on its row and goes on if
+ * Settings closes; what it came to is said in `snackbars`.
  */
 @Composable
-internal fun MapSafety(onTrash: () -> Unit) {
+internal fun MapSafety(onTrash: () -> Unit, snackbars: SnackbarHostState) {
     val context = LocalContext.current
+    // A backup outlives the screen, so it reads and writes through the app's resolver rather than the screen's.
+    val application = context.applicationContext
     val resources = LocalResources.current
     val maps = context.container.maps
-    val trash by maps.trash.collectAsStateWithLifecycle()
+    val backups = context.container.backups
+    val words = context.container.words
+    // While private maps hide, nothing here counts them: not the trash, nor what's exported or already here.
+    val privacy by context.container.privateMaps.view.collectAsStateWithLifecycle()
+    val concealing = privacy.conceals(LocalAppSettings.current.hideLockedPrivateMaps)
+    val allTrash by maps.trash.collectAsStateWithLifecycle()
+    val trash = shownTrash(allTrash, privacy, LocalAppSettings.current.hideLockedPrivateMaps)
     val writable by maps.writable.collectAsStateWithLifecycle()
+    val working by backups.work.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    var note by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+
+    fun say(text: String, problem: Boolean) {
+        scope.launch {
+            snackbars.currentSnackbarData?.dismiss()
+            snackbars.showSnackbar(text, withDismissAction = problem, duration = if (problem) SnackbarDuration.Long else SnackbarDuration.Short)
+        }
+    }
+
+    // What a backup came to, said once: as it ends, or as Settings opens again after it.
+    LaunchedEffect(backups) {
+        backups.outcome.filterNotNull().collect { outcome ->
+            backups.said(outcome)
+            say(outcome.said, outcome.problem)
+        }
+    }
+
+    val unlockedForEveryMap = rememberUnlockedForEveryMap { reason -> say(reason, problem = true) }
 
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         if (uri == null) {
             return@rememberLauncherForActivityResult
         }
 
-        scope.launch {
-            note = try {
-                val count = context.contentResolver.openOutputStream(uri, "wt")?.use { maps.exportAll(it) } ?: throw IOException()
-                resources.getQuantityString(R.plurals.settings_exported_maps, count, count) to false
+        backups.start(MapBackups.Work.Exporting) {
+            try {
+                val count = application.contentResolver.openOutputStream(uri, "wt")?.use { maps.exportAll(it) } ?: throw IOException()
+                MapBackups.Outcome(
+                    if (concealing) resources.getString(R.string.private_exported_every_map) else resources.getQuantityString(R.plurals.settings_exported_maps, count, count),
+                    problem = false,
+                )
             } catch (failed: IOException) {
-                resources.getString(R.string.settings_could_not_write_file) to true
+                // Half a backup isn't one: the file goes, and what's said is that it couldn't be written.
+                runCatching { DocumentsContract.deleteDocument(application.contentResolver, uri) }
+                MapBackups.Outcome(resources.getString(R.string.settings_could_not_write_file), problem = true)
             } catch (failed: SecurityException) {
-                resources.getString(R.string.settings_not_allowed_to_write) to true
+                MapBackups.Outcome(resources.getString(R.string.settings_not_allowed_to_write), problem = true)
+            } catch (stopped: CancellationException) {
+                throw stopped
+            } catch (failed: RuntimeException) {
+                // Whatever else the app that keeps the file throws back: that file goes too.
+                runCatching { DocumentsContract.deleteDocument(application.contentResolver, uri) }
+                MapBackups.Outcome(resources.getString(R.string.settings_could_not_write_file), problem = true)
             }
         }
     }
@@ -71,43 +127,58 @@ internal fun MapSafety(onTrash: () -> Unit) {
             return@rememberLauncherForActivityResult
         }
 
-        scope.launch {
-            note = try {
-                val imported = context.contentResolver.openInputStream(uri)?.use { maps.importAll(it) } ?: throw IOException()
+        backups.start(MapBackups.Work.Importing) {
+            try {
+                val imported = withContext(Dispatchers.IO) { application.contentResolver.openInputStream(uri)?.use { maps.importAll(it) } } ?: throw IOException()
+                val alreadyHere = mentionedAlreadyHere(imported.alreadyHere, imported.privateAlreadyHere, concealing)
 
-                when {
+                val (said, problem) = when {
                     imported.added == 0 && imported.alreadyHere == 0 -> resources.getString(R.string.settings_no_maps_in_file) to true
                     imported.added == 0 -> resources.getString(R.string.settings_every_map_in_file_already_here) to false
-                    imported.alreadyHere == 0 -> resources.getQuantityString(R.plurals.common_added_maps, imported.added, imported.added) to false
-                    imported.alreadyHere == 1 ->
+                    alreadyHere == 0 -> resources.getQuantityString(R.plurals.common_added_maps, imported.added, imported.added) to false
+                    alreadyHere == 1 ->
                         resources.getQuantityString(R.plurals.common_added_maps_with_one_already_here, imported.added, imported.added) to false
                     else ->
-                        resources.getQuantityString(R.plurals.common_added_maps_with_several_already_here, imported.added, imported.added, imported.alreadyHere) to false
+                        resources.getQuantityString(R.plurals.common_added_maps_with_several_already_here, imported.added, imported.added, alreadyHere) to false
                 }
+
+                // Files the maps here were missing, the zip's folders without a map and files of kinds Orbit doesn't know are said after what came in.
+                val filledIn = mentionedFilledIn(imported.filledIn, imported.privateFilledIn, concealing)
+                MapBackups.Outcome((listOf(said) + Importer.zipNotes(filledIn, imported.skipped, imported.leftOut, words)).joinToString(" "), problem)
             } catch (refused: RefusedZipException) {
-                refused.message.orEmpty() to true
+                MapBackups.Outcome(refused.message.orEmpty(), problem = true)
             } catch (failed: IOException) {
-                val reason = failed.message
+                // What Android or the zip says went wrong is in English: another language's sentence goes without it.
+                val reason = resources.systemReason(failed)
 
-                val problem = if (reason != null) {
-                    resources.getString(R.string.settings_could_not_read_file, reason)
-                } else {
-                    resources.getString(R.string.settings_could_not_read_file_not_zip)
+                val problem = when {
+                    failed.message == null -> resources.getString(R.string.settings_could_not_read_file_not_zip)
+                    reason != null -> resources.getString(R.string.settings_could_not_read_file, reason)
+                    else -> resources.getString(R.string.data_file_unreadable)
                 }
 
-                problem to true
+                MapBackups.Outcome(problem, problem = true)
             } catch (failed: SecurityException) {
-                resources.getString(R.string.common_not_allowed_to_read_that_file) to true
+                MapBackups.Outcome(resources.getString(R.string.common_not_allowed_to_read_that_file), problem = true)
+            } catch (stopped: CancellationException) {
+                throw stopped
+            } catch (failed: RuntimeException) {
+                // Whatever else the app that gave it throws back, or a zip whose names aren't text.
+                MapBackups.Outcome(resources.getString(R.string.data_file_unreadable), problem = true)
             }
         }
     }
 
     if (!writable) {
-        Note(
+        Text(
             stringResource(R.string.settings_newer_version_keeps_maps),
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
         )
     }
+
+    WhereMapsAre()
 
     ListItem(
         onClick = onTrash,
@@ -132,34 +203,63 @@ internal fun MapSafety(onTrash: () -> Unit) {
         Text(stringResource(R.string.settings_trash))
     }
 
-    ListItem(
-        // The name the file picker offers, in the app's language; the extension isn't translated.
-        onClick = { exporter.launch("${resources.getString(R.string.settings_all_maps_file_name, LocalDate.now().toString())}.zip") },
-        supportingContent = { Text(stringResource(R.string.settings_export_all_maps_description)) },
-        leadingContent = { Icon(Icons.Outlined.Archive, contentDescription = null) },
-        modifier = Modifier.padding(horizontal = 8.dp),
-    ) {
-        Text(stringResource(R.string.settings_export_all_maps))
-    }
+    BackupRow(
+        title = stringResource(R.string.settings_export_all_maps),
+        description = stringResource(R.string.settings_export_all_maps_description),
+        busy = stringResource(R.string.settings_exporting),
+        icon = Icons.Outlined.Archive,
+        work = MapBackups.Work.Exporting,
+        working = working,
+        // Private maps go in too, as they are: while one is locked, the phone's owner says so first. The name the file
+        // picker offers is in the app's language; the extension isn't translated.
+        onClick = { unlockedForEveryMap { exporter.launch("${resources.getString(R.string.settings_all_maps_file_name, LocalDate.now().toString())}.zip") } },
+    )
 
-    ListItem(
-        onClick = { importer.launch(arrayOf("application/zip", "application/octet-stream")) },
-        supportingContent = { Text(stringResource(R.string.settings_import_maps_description)) },
-        leadingContent = { Icon(Icons.Outlined.Unarchive, contentDescription = null) },
-        modifier = Modifier.padding(horizontal = 8.dp),
-    ) {
-        Text(stringResource(R.string.settings_import_maps))
-    }
-
-    note?.let { (text, problem) -> Note(text, color = if (problem) MaterialTheme.colorScheme.error else Color.Unspecified) }
+    BackupRow(
+        title = stringResource(R.string.settings_import_maps),
+        description = stringResource(R.string.settings_import_maps_description),
+        busy = stringResource(R.string.settings_importing),
+        icon = Icons.Outlined.Unarchive,
+        work = MapBackups.Work.Importing,
+        working = working,
+        onClick = { importer.launch(MapFileTypes.ZIPS_PICKER.toTypedArray()) },
+    )
 }
 
+/**
+ * Export all or Import maps. While either runs, neither can start again:
+ * the one running says so beside an indicator, still easy to read, and
+ * TalkBack hears it as it starts; the other dims.
+ */
 @Composable
-private fun Note(text: String, color: Color) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodyMedium,
-        color = if (color == Color.Unspecified) MaterialTheme.colorScheme.onSurfaceVariant else color,
-        modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
-    )
+private fun BackupRow(title: String, description: String, busy: String, icon: ImageVector, work: MapBackups.Work, working: MapBackups.Work?, onClick: () -> Unit) {
+    val running = working == work
+    val colors = ListItemDefaults.colors()
+
+    ListItem(
+        onClick = onClick,
+        enabled = working == null,
+        supportingContent = {
+            Text(if (running) busy else description, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+        },
+        leadingContent = { Icon(icon, contentDescription = null) },
+        trailingContent = if (running) {
+            { LoadingIndicator(Modifier.size(40.dp)) }
+        } else {
+            null
+        },
+        // The one running isn't dimmed: it isn't unavailable, it's busy.
+        colors = if (running) {
+            ListItemDefaults.colors(
+                disabledContentColor = colors.contentColor,
+                disabledLeadingContentColor = colors.leadingContentColor,
+                disabledSupportingContentColor = colors.supportingContentColor,
+            )
+        } else {
+            colors
+        },
+        modifier = Modifier.padding(horizontal = 8.dp),
+    ) {
+        Text(title)
+    }
 }

@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { materialTheme, parseOrbit } from '@restless-dreams/orbit';
+import { materialTheme, parseOrbit, PRINT_THEMES, themeTokens } from '@restless-dreams/orbit';
 import type { OrbitRendererTheme } from '@restless-dreams/orbit';
 import type { AppTheme } from './look';
 import { goalRing, knownStyle, progressRing } from './look';
-import { lightTheme, printNodeTypes, printOptions, ringLine } from './print';
+import { lightTheme, printColors, printNodeTypes, printOptions, ringLine } from './print';
 
 const SEED = '#4F5B92';
 const LIGHT: AppTheme = { dark: false, seed: SEED, tokens: { surface: '#FBF8FF', text: '#1B1B21', 'chip-background': '#DEE1F9' } };
@@ -34,11 +34,11 @@ describe('printOptions', () => {
 
   test('draws the picture the app asks for, in the page’s language, with the app’s kinds of ideas', () => {
     const map = parseOrbit('# Trip\n## Savings <!-- orbit type: goal, target: 300, current: 120 -->\n- [ ] Pack');
-    const options = printOptions(map, LIGHT, null, { viewMode: 'all', focus: 'savings' }, 'es');
-    expect([options.viewMode, options.focus, options.language]).toEqual(['all', 'savings', 'es']);
+    const options = printOptions(map, LIGHT, null, { view: 'all', focus: 'savings' }, 'es');
+    expect([options.view, options.focus, options.language]).toEqual(['all', 'savings', 'es']);
     expect(options.nodeTypes?.goal).toBeDefined();
-    expect(printOptions(map, LIGHT, null, { viewMode: 'focus', focus: null }, 'en').focus).toBeUndefined();
-    expect(printOptions(map, LIGHT, null, null, 'en').viewMode).toBeUndefined();
+    expect(printOptions(map, LIGHT, null, { view: 'focus', focus: null }, 'en').focus).toBeUndefined();
+    expect(printOptions(map, LIGHT, null, null, 'en').view).toBeUndefined();
   });
 });
 
@@ -66,5 +66,17 @@ describe('rings on paper', () => {
     expect(typeof types.progress.details).toBe('function');
     expect(types.goal.icon).toBe('🎯');
     expect(types.milestone.details).toBeUndefined();
+  });
+});
+
+describe('printColors', () => {
+  test('gives rings on paper the colors of the layout\'s chips and links, under Orbit\'s public names', () => {
+    const map = parseOrbit('# Trip');
+    const inAppColors = printColors(printOptions(map, LIGHT, null, null, 'en').theme);
+    expect(inAppColors['--orbit-print-chip-background']).toBe('#DEE1F9');
+    expect(inAppColors['--orbit-print-link-text']).toMatch(/^#|^rgb/);
+    // A map in its own dark style prints in its light counterpart, chips and links included.
+    const counterpart = themeTokens(PRINT_THEMES.night);
+    expect(printColors('night')).toEqual({ '--orbit-print-chip-background': counterpart['chip-background'], '--orbit-print-link-text': counterpart['link-text'] });
   });
 });

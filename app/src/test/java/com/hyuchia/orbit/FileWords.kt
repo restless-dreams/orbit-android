@@ -1,5 +1,6 @@
 package com.hyuchia.orbit
 
+import com.ibm.icu.text.PluralRules
 import org.w3c.dom.Element
 import java.io.File
 import java.util.Locale
@@ -10,7 +11,7 @@ import javax.xml.parsers.DocumentBuilderFactory
  * The app's strings as a phone in `locale`'s language shows them, read from
  * the resource files, for tests, which have no resources: the language's
  * own over the English ones, as Android falls back. Plurals are picked by
- * English's and Spanish's rules.
+ * the language's rules from Unicode's CLDR, as Android picks them.
  */
 class FileWords(private val locale: Locale) : Words {
     private val strings = mutableMapOf<String, String>()
@@ -41,12 +42,8 @@ class FileWords(private val locale: Locale) : Words {
         return String.format(locale, forms[quantity(count)] ?: forms.getValue("other"), *arguments)
     }
 
-    /** The plural a count takes: `one` for 1, `many` for whole millions in Spanish, `other` for the rest. */
-    private fun quantity(count: Int): String = when {
-        count == 1 -> "one"
-        locale.language == "es" && count != 0 && count % 1_000_000 == 0 -> "many"
-        else -> "other"
-    }
+    /** The plural a count takes in the language: in English `one` for 1; in Spanish `many` for whole millions too. */
+    private fun quantity(count: Int): String = PluralRules.forLocale(locale).select(count.toDouble())
 
     /** A folder's strings and plurals, by name. */
     private class Folder(val strings: Map<String, String>, val plurals: Map<String, Map<String, String>>)

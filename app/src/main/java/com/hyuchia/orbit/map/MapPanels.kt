@@ -15,8 +15,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Text
 import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Text
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -39,6 +39,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.ui.EscapeCloses
+import com.hyuchia.orbit.ui.Hint
 import kotlinx.coroutines.launch
 
 /**
@@ -182,7 +183,11 @@ private fun PanelHeader(title: String, onClose: (() -> Unit)?, actions: @Composa
         actions()
 
         if (onClose != null) {
-            IconButton(onClick = onClose) { Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.common_close)) }
+            val close = stringResource(R.string.common_close)
+
+            Hint(close) {
+                IconButton(onClick = onClose) { Icon(Icons.Outlined.Close, contentDescription = close) }
+            }
         }
     }
 }

@@ -34,10 +34,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay
-import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.PlayCircle
@@ -47,7 +46,6 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -63,20 +61,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.media.MediaKind
 import com.hyuchia.orbit.media.VideoSource
 import com.hyuchia.orbit.media.posterOf
+import com.hyuchia.orbit.media.soundTime
 import com.hyuchia.orbit.media.videoSource
 import com.hyuchia.orbit.nearby.BrowserPresenting
 import com.hyuchia.orbit.page.MapInsets
@@ -100,6 +102,8 @@ private val StageProgressWidth = 132.dp
 private val StageDark = Color(0xFF0B0C0F)
 /** How often a playing video's time on the stage moves on. */
 private const val MEDIA_TICK_MILLISECONDS = 250L
+/** Narrower than this, as on a phone, the presenter's bar takes two lines: where the audience watches has one of its own. */
+private val PresenterBarOneLine = 600.dp
 
 /**
  * The presenter's screen while the audience watches others: a second
@@ -170,44 +174,48 @@ private fun PresenterBar(model: MapViewModel, presentation: Presentation, screen
     ).joinToString(" · ")
 
     Column {
+        val progress = stringResource(R.string.present_progress, presentation.index + 1, presentation.order.size)
         LinearProgressIndicator(
             progress = { (presentation.index + 1f) / presentation.order.size },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().semantics { contentDescription = progress },
         )
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp),
-        ) {
-            Icon(Icons.Outlined.Tv, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Text(
-                where,
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+        BoxWithConstraints {
             val now = rememberNow(presentation.stepStartedAt)
+            val pace = presentation.takeIf { !it.rehearsing }?.pace(now, words)
+            val behind = presentation.isBehind(now)
 
-            presentation.takeIf { !it.rehearsing }?.pace(now, words)?.let { pace ->
-                Text(
-                    pace,
-                    style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
-                    color = if (presentation.isBehind(now)) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary,
-                )
-            }
+            // On a phone, where the audience watches has a line of its own, under the clock and the buttons; wider, it's all one line.
+            if (maxWidth < PresenterBarOneLine) {
+                Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        Clock(presentation.startedAt)
 
-            Clock(presentation.startedAt)
-            CaptionsButton(presentation.captions) { model.setCaptions(!presentation.captions) }
-            CastButton(dark)
+                        if (pace != null) {
+                            Pace(pace, behind)
+                        }
 
-            IconButton(onClick = onBrowsers) {
-                Icon(Icons.Outlined.Language, contentDescription = stringResource(R.string.present_show_in_a_browser))
-            }
+                        Spacer(Modifier.weight(1f))
+                        PresenterButtons(model, presentation, dark, onBrowsers)
+                    }
 
-            IconButton(onClick = model::stopPresentation) {
-                Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.common_stop_presenting))
+                    Watching(where, maxLines = 2, modifier = Modifier.padding(start = 4.dp, end = 12.dp, bottom = 4.dp))
+                }
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp),
+                ) {
+                    Watching(where, maxLines = 1, modifier = Modifier.weight(1f))
+
+                    if (pace != null) {
+                        Pace(pace, behind)
+                    }
+
+                    Clock(presentation.startedAt)
+                    PresenterButtons(model, presentation, dark, onBrowsers)
+                }
             }
         }
 
@@ -220,6 +228,34 @@ private fun PresenterBar(model: MapViewModel, presentation: Presentation, screen
             )
         }
     }
+}
+
+/** Where the audience watches: on a second screen or a TV, in browsers, and whether it's a rehearsal. */
+@Composable
+private fun Watching(where: String, maxLines: Int, modifier: Modifier = Modifier) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = modifier) {
+        Icon(Icons.Outlined.Tv, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Text(where, style = MaterialTheme.typography.titleSmall, maxLines = maxLines, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** How the presentation keeps to the last rehearsal's pace, in red when it's behind. */
+@Composable
+private fun Pace(pace: String, behind: Boolean) {
+    Text(
+        pace,
+        style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+        color = if (behind) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary,
+        maxLines = 1,
+    )
+}
+
+/** The buttons for the whole presentation: the captions, a TV, browsers, and stopping. */
+@Composable
+private fun PresenterButtons(model: MapViewModel, presentation: Presentation, dark: Boolean, onBrowsers: () -> Unit) {
+    CaptionsButton(presentation.captions) { model.setCaptions(!presentation.captions) }
+    CastButton(dark)
+    BrowsersAndStopButtons(model, onBrowsers)
 }
 
 /** How long the presentation has been going: minutes and seconds, or hours past the first. */
@@ -413,8 +449,9 @@ private fun rememberMediaNow(media: ShownMedia): Long {
 
 /**
  * The idea's picture and video to show the audience, or, while one shows,
- * the way back to the map: with a video, it starts over, plays and pauses.
- * With big text the buttons take two rows rather than lose their words.
+ * the way back to the map: with a video, it starts over, plays and pauses,
+ * and with a live photo's picture, it plays its motion again. With big text
+ * the buttons take two rows rather than lose their words.
  */
 @Composable
 private fun StageButtons(model: MapViewModel, node: MapNode, media: ShownMedia?, modifier: Modifier = Modifier) {
@@ -434,6 +471,10 @@ private fun StageButtons(model: MapViewModel, node: MapNode, media: ShownMedia?,
 
             if (node.video != null) {
                 StageButton(Icons.Outlined.PlayCircle, stringResource(R.string.common_play_the_video)) { model.showMedia(MediaKind.Video) }
+            }
+
+            if (node.audio != null) {
+                SoundStage(model, node)
             }
 
             return@FlowRow
@@ -462,10 +503,55 @@ private fun StageButtons(model: MapViewModel, node: MapNode, media: ShownMedia?,
                     )
                 }
             }
-        } else if (node.video != null) {
-            StageButton(Icons.Outlined.PlayCircle, stringResource(R.string.common_play_the_video)) { model.showMedia(MediaKind.Video) }
+        } else {
+            // A live photo played its motion once as it showed, on every screen: this plays it again there.
+            if (node.image?.motion != null) {
+                val again = stringResource(R.string.present_play_live_photo_again)
+
+                Hint(again) {
+                    FilledTonalIconButton(onClick = model::replayMotion) {
+                        Icon(Icons.Filled.Replay, contentDescription = again)
+                    }
+                }
+            }
+
+            if (node.video != null) {
+                StageButton(Icons.Outlined.PlayCircle, stringResource(R.string.common_play_the_video)) { model.showMedia(MediaKind.Video) }
+            }
         }
     }
+}
+
+/**
+ * The idea's sound, for the presenter: it plays from this phone, where its
+ * sound goes (its speaker, headphones, or a screen on its cable), while the
+ * audience's screens keep the map. Its time shows as it plays.
+ */
+@Composable
+private fun SoundStage(model: MapViewModel, node: MapNode) {
+    val sound by model.sound.collectAsStateWithLifecycle()
+    val current = sound?.takeIf { it.item.nodeId == node.id }
+
+    if (current == null) {
+        StageButton(Icons.Outlined.GraphicEq, stringResource(R.string.audio_play_the_sound)) { model.toggleSound(node.id) }
+        return
+    }
+
+    FilledTonalButton(
+        onClick = { model.toggleSound(node.id) },
+        elevation = ButtonDefaults.filledTonalButtonElevation(defaultElevation = 3.dp),
+        contentPadding = ButtonDefaults.contentPaddingFor(ButtonDefaults.MinHeight, hasStartIcon = true),
+    ) {
+        Icon(if (current.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+        Text(
+            "${stringResource(if (current.playing) R.string.audio_pause_the_sound else R.string.audio_play_the_sound)} · ${soundTime(current.position)} / ${soundTime(current.duration)}",
+            maxLines = 1,
+            style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+        )
+    }
+
+    Text(stringResource(R.string.audio_plays_from_this_phone), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 /** A button on the stage, raised a little off the map or picture under it. */
@@ -551,37 +637,44 @@ private fun ColumnScope.Notes(model: MapViewModel, node: MapNode?, next: MapNode
         }
     }
 
+    val previous = stringResource(R.string.present_previous_idea)
+    val playOrPause = stringResource(if (presentation.playing) R.string.present_pause else R.string.present_play_on_its_own)
+    val next = stringResource(R.string.present_next_idea)
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
     ) {
-        FilledTonalIconButton(
-            onClick = { model.step(-1, seconds) },
-            enabled = presentation.index > 0,
-            modifier = Modifier.size(IconButtonDefaults.mediumContainerSize()),
-        ) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.present_previous_idea))
+        Hint(previous, MapKeys.PreviousIdea) {
+            FilledTonalIconButton(
+                onClick = { model.step(-1, seconds) },
+                enabled = presentation.index > 0,
+                modifier = Modifier.size(IconButtonDefaults.mediumContainerSize()),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = previous)
+            }
         }
 
-        FilledTonalIconButton(
-            onClick = { model.setPlaying(!presentation.playing, seconds.coerceAtLeast(8)) },
-            modifier = Modifier.size(IconButtonDefaults.mediumContainerSize()),
-        ) {
-            Icon(
-                if (presentation.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                contentDescription = stringResource(if (presentation.playing) R.string.present_pause else R.string.present_play_on_its_own),
-            )
+        Hint(playOrPause) {
+            FilledTonalIconButton(
+                onClick = { model.setPlaying(!presentation.playing, seconds.coerceAtLeast(8)) },
+                modifier = Modifier.size(IconButtonDefaults.mediumContainerSize()),
+            ) {
+                Icon(if (presentation.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = playOrPause)
+            }
         }
 
         Text(stringResource(R.string.present_position, presentation.index + 1, presentation.order.size), style = MaterialTheme.typography.titleMedium)
 
-        FilledIconButton(
-            onClick = { model.step(1, seconds) },
-            enabled = presentation.index < presentation.order.lastIndex,
-            modifier = Modifier.size(IconButtonDefaults.largeContainerSize()),
-        ) {
-            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = stringResource(R.string.present_next_idea))
+        Hint(next, MapKeys.NextIdea) {
+            FilledIconButton(
+                onClick = { model.step(1, seconds) },
+                enabled = presentation.index < presentation.order.lastIndex,
+                modifier = Modifier.size(IconButtonDefaults.largeContainerSize()),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = next)
+            }
         }
     }
 }

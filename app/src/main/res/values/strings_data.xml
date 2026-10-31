@@ -45,6 +45,10 @@
     <string name="data_newer_version_keeps_maps">A newer version of Orbit keeps these maps: update Orbit to change them.</string>
     <!-- A new map, a template's, a copy or the welcome map couldn't be added: its files couldn't be written. -->
     <string name="data_could_not_add_map">Orbit couldn’t add the map. Is this device’s storage full?</string>
+    <!-- A map renamed, tagged or copied from the list of maps couldn't be changed: its file couldn't be read, most likely. -->
+    <string name="data_could_not_change_map">Orbit couldn’t change the map.</string>
+    <!-- A change to a map (its name, its tags, being pinned) couldn't be written. -->
+    <string name="data_could_not_save_change">Orbit couldn’t save that change. Is this device’s storage full?</string>
 
     <!-- Zips Orbit won't take in -->
     <string name="data_zip_too_many_files">That zip holds too many files to be maps.</string>
@@ -52,20 +56,30 @@
     <string name="data_zip_points_outside">That zip has a file that points outside it.</string>
     <string name="data_zip_file_too_big">A file in that zip is too big to be part of a map.</string>
     <string name="data_no_room_for_zip_maps">There isn\'t room on this device for the maps in that zip.</string>
+    <!-- Said after a zip of maps came in, when some of its folders had no map in them: pictures or versions without the map's text. -->
+    <!-- Said after a zip of every map came in, when maps already here were missing some of its files: pictures, videos, sounds or versions, as after a cloud backup that left them out. -->
+    <plurals name="data_zip_files_filled_in">
+        <item quantity="one">One file a map here was missing came in: a picture, video, sound or version.</item>
+        <item quantity="other">%1$d files that maps here were missing came in: pictures, videos, sounds or versions.</item>
+    </plurals>
+    <plurals name="data_zip_folders_without_maps">
+        <item quantity="one">One folder in that zip had no map in it, so it was left out.</item>
+        <item quantity="other">%1$d folders in that zip had no map in them, so they were left out.</item>
+    </plurals>
 
     <!-- Pictures and videos a map can't take. Sizes read as data_megabytes does: 50 MB. -->
     <!-- %1$s is the video's size, %2$s the most a video can be. -->
     <string name="data_video_too_big">That video is %1$s, and a map keeps videos of up to %2$s, so it can still go to your other devices. Trim it in your gallery, or add it as a YouTube or Vimeo link.</string>
     <!-- %1$s is the most a video can be. -->
     <string name="data_video_past_limit">That video is more than %1$s, and a map keeps videos of up to that, so it can still go to your other devices. Trim it in your gallery, or add it as a YouTube or Vimeo link.</string>
-    <!-- %1$s is what the map's pictures and videos come to, %2$s the most they can. -->
-    <string name="data_video_past_map_room">This map\'s pictures and videos come to %1$s already. With this video they\'d be more than the %2$s a map can carry when it\'s shared or backed up. Choose a shorter one, or add it as a YouTube or Vimeo link.</string>
-    <!-- %1$s is what the map's pictures and videos come to. -->
-    <string name="data_picture_past_map_room">This map\'s pictures and videos come to %1$s, all a map can carry when it\'s shared or backed up. Take one off to make room, or add this one as a web address.</string>
+    <!-- %1$s is what the map's pictures, videos and sounds come to, %2$s the most they can. -->
+    <string name="data_video_past_map_room">This map\'s pictures, videos and sounds come to %1$s already. With this video they\'d be more than the %2$s a map can carry when it\'s shared or backed up. Choose a shorter one, or add it as a YouTube or Vimeo link.</string>
+    <!-- %1$s is what the map's pictures, videos and sounds come to. -->
+    <string name="data_picture_past_map_room">This map\'s pictures, videos and sounds come to %1$s, all a map can carry when it\'s shared or backed up. Take one off to make room, or add this one as a web address.</string>
     <!-- %1$s is the video's type as computers name it, such as video/x-matroska. -->
     <string name="data_video_kind_refused">Orbit keeps videos as MP4, WebM or QuickTime files, and this one is %1$s.</string>
     <string name="data_video_kind_unknown">Orbit keeps videos as MP4, WebM or QuickTime files, and this one is of a kind it doesn\'t know.</string>
-    <string name="data_no_room_for_video">There isn\'t room on this phone for that video.</string>
+    <string name="data_no_room_for_video">There isn\'t room on this device for that video.</string>
     <string name="data_more_than_a_map_keeps">That\'s more than a map keeps.</string>
     <!-- A size: %1$s is a number of megabytes, such as 64.5. -->
     <string name="data_megabytes">%1$s MB</string>
@@ -141,5 +155,12 @@
     <plurals name="data_import_formatting_not_kept">
         <item quantity="one">%1$d note is plain text now, without its bold, italics or lists.</item>
         <item quantity="other">%1$d notes are plain text now, without their bold, italics or lists.</item>
+    </plurals>
+    <!-- A zip a newer version of Orbit made in a way this one would misread: nothing in it comes in. -->
+    <string name="data_zip_from_newer_orbit">That zip comes from a newer version of Orbit. Update Orbit to open it.</string>
+    <!-- Files in a zip of kinds this version doesn't know, a newer Orbit's say, which didn't come in with their maps. -->
+    <plurals name="data_zip_files_left_out">
+        <item quantity="one">One file in that zip is of a kind this version of Orbit doesn\'t know, so it was left out. Update Orbit to bring it in.</item>
+        <item quantity="other">%1$d files in that zip are of kinds this version of Orbit doesn\'t know, so they were left out. Update Orbit to bring them in.</item>
     </plurals>
 </resources>

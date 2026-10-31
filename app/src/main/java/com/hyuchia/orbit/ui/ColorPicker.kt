@@ -24,15 +24,11 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,7 +39,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -310,44 +305,19 @@ private fun SaturationAndBrightness(color: HsvColor, onChange: (HsvColor) -> Uni
     }
 }
 
-/** The hue, around the color wheel from red to red. Screen readers say the color it is. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** The hue, around the color wheel from red to red, a tick each twelfth. Screen readers say the color it is. */
 @Composable
 private fun HueSlider(color: HsvColor, onChange: (HsvColor) -> Unit) {
-    val pure = HsvColor(color.hue, 1f, 1f)
-    val description = stringResource(R.string.ui_color_hue)
-    val state = colorNameText(colorName(pure.toArgb()))
-    val slider = remember { SliderState(color.hue, 0, 0f..360f) }
+    val pure = Color(HsvColor(color.hue, 1f, 1f).toArgb())
 
-    // The hue also changes as a hex code is typed: the slider follows it.
-    SideEffect { slider.value = color.hue }
-
-    Slider(
-        state = slider,
+    OrbitSlider(
+        value = color.hue,
         onValueChange = { onChange(color.copy(hue = it)) },
-        thumb = {
-            Box(
-                Modifier
-                    .size(28.dp)
-                    .shadow(2.dp, CircleShape)
-                    .background(Color.White, CircleShape)
-                    .padding(4.dp)
-                    .background(Color(pure.toArgb()), CircleShape),
-            )
-        },
-        track = {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(14.dp)
-                    .clip(CircleShape)
-                    .background(Brush.horizontalGradient(HueColors)),
-            )
-        },
-        modifier = Modifier.semantics {
-            contentDescription = description
-            stateDescription = state
-        },
+        valueRange = 0f..360f,
+        label = stringResource(R.string.ui_color_hue),
+        valueDescription = colorNameText(colorName(pure.toArgb())),
+        ticks = 12,
+        look = SliderLook.Gradient(HueColors, pure),
     )
 }
 

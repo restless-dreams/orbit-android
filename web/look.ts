@@ -69,6 +69,24 @@ const isToDo = (node: OrbitNode): boolean => {
   return TO_DO_STATUS.test(statusWord(node));
 };
 
+/** The version of what a Progress idea counts that this app reads: as `GOAL_VERSION` is a goal's. */
+const PROGRESS_VERSION = 1;
+
+/** A Progress idea this app reads: one written for this version of Progress, or an older one. */
+const isProgress = (node: OrbitNode): boolean => {
+  return node.type?.trim().toLowerCase() === 'progress' && (node.typeVersion ?? 1) <= PROGRESS_VERSION;
+};
+
+/**
+ * Whether an idea drawn as Progress gets its ring here: one drawn so by
+ * itself (`automaticType`), which has no kind of its own, or one written as
+ * a Progress this app reads. One written for a newer Progress may count
+ * another way: it's an idea like any other here.
+ */
+export const drawsProgress = (node: OrbitNode): boolean => {
+  return !node.type?.trim() || isProgress(node);
+};
+
 /** A goal with a target of its own, which shows its own numbers. */
 const hasOwnTarget = (node: OrbitNode): boolean => {
   return isGoal(node) && readGoal(node).target !== null;
@@ -90,7 +108,7 @@ const countsThrough = (node: OrbitNode): boolean => {
     return readGoal(node).target === null;
   }
 
-  return node.type?.trim().toLowerCase() === 'progress' || hasItemsUnder(node);
+  return isProgress(node) || hasItemsUnder(node);
 };
 
 /**
@@ -299,15 +317,29 @@ const luminance = ([red, green, blue]: [number, number, number]): number => {
   return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue);
 };
 
+/** Node `id`'s element in the map that `element` is drawn in: the nearest map around it with that node. */
+const nodeElement = (element: HTMLElement, id: string): Element | null => {
+  const selector = `.orbit-node[data-orbit-node-id="${CSS.escape(id)}"]`;
+
+  for (let around = element.parentElement; around; around = around.parentElement) {
+    const found = around.querySelector(selector);
+
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+};
+
 /**
- * The ink that reads best on the node's planet, as Orbit picks its labels'
- * text: whichever of dark and light has more contrast on the planet's color.
+ * The ink that reads best on node `id`'s planet, as Orbit picks its labels'
+ * text: whichever of dark and light has more contrast on the planet's color,
+ * which Orbit puts on the node's element as `--orbit-node-color`.
  */
-const inkOn = (element: HTMLElement): Ink => {
-  const id = element.dataset.orbitFor;
-  const root = element.closest('.orbit__contents')?.parentElement;
-  const disc = id && root ? root.querySelector<SVGElement>(`.orbit-node[data-orbit-node-id="${CSS.escape(id)}"] .orbit-node__disc`) : null;
-  const fill = disc ? getComputedStyle(disc).fill : '';
+const inkOn = (element: HTMLElement, id: string): Ink => {
+  const node = nodeElement(element, id);
+  const fill = node ? getComputedStyle(node).getPropertyValue('--orbit-node-color').trim() : '';
 
   if (!fill || !fill.trim() || fill === 'none') {
     return INKS.dark;
@@ -431,6 +463,8 @@ const paintRing = (element: HTMLElement, look: RingLook, from: number | null): v
 /** A line of the ring's text, its digits centered on `y`. */
 const ringLine = (text: string, size: number, y: number, weight: number, fill: string): SVGElement => {
   const line = svgElement('text', {
+    // Left out where the idea is drawn too small to read them (see the pages' `.ring__words`).
+    class: 'ring__words',
     x: 50,
     y: Math.round((y + (CAP_HEIGHT * size) / 2) * 100) / 100,
     'text-anchor': 'middle',
@@ -537,17 +571,26 @@ export const goalRing = (node: OrbitNode, locale?: string, words: RingWords = EN
 
 /** A ring that fills as the node's goals and to-dos get done, with the share in the middle. */
 const drawProgress = (node: OrbitNode, element: HTMLElement): () => void => {
+  if (!drawsProgress(node)) {
+    return () => undefined;
+  }
+
   return liveRing(node, element, () => {
     const { share, text } = progressRing(node);
-    return { share, layout: layoutRing(text, measure), ink: inkOn(element) };
+    return { share, layout: layoutRing(text, measure), ink: inkOn(element, node.id) };
   });
 };
 
 /** A goal's ring, as `goalRing` says, in the page's words. */
 const drawGoal = (node: OrbitNode, element: HTMLElement): () => void => {
+  // Written for a newer goal (`goal@2`), its numbers may mean something else: it's an idea like any other here.
+  if (!isGoal(node)) {
+    return () => undefined;
+  }
+
   return liveRing(node, element, () => {
     const { share, text } = goalRing(node, undefined, pageWords());
-    return { share, layout: layoutRing(text, measure), ink: inkOn(element) };
+    return { share, layout: layoutRing(text, measure), ink: inkOn(element, node.id) };
   });
 };
 

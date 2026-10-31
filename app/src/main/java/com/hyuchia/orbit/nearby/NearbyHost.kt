@@ -10,8 +10,13 @@ import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.ResourceWords
 import com.hyuchia.orbit.Words
+import com.hyuchia.orbit.data.MAP_FORMAT
+import com.hyuchia.orbit.data.MEDIA_DIRECTORY
 import com.hyuchia.orbit.data.MapBundle
 import com.hyuchia.orbit.data.MapRepository
+import com.hyuchia.orbit.data.MapSummary
+import com.hyuchia.orbit.data.VersionReason
+import com.hyuchia.orbit.data.carriedMediaTypes
 import com.hyuchia.orbit.page.AppTheme
 import com.hyuchia.orbit.page.WebPage
 import kotlinx.coroutines.CoroutineScope
@@ -22,6 +27,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -97,7 +104,41 @@ class Incoming internal constructor(val id: String, val from: String, val addres
 enum class OfferState { Confirming, Waiting, Opened, Declined }
 
 /** A map shown to computers' browsers at a code, and who may open it. */
-class SharedMap internal constructor(val code: String, internal val mapId: String, internal val theme: AppTheme, val joining: Joining)
+class SharedMap internal constructor(
+    val code: String,
+    internal val mapId: String,
+    internal val theme: AppTheme,
+    val joining: Joining,
+
+    /** The map's files that can't go clean which the person sharing chose to share as they are: its page and zip carry them. */
+    internal val asTheyAre: Set<String> = emptySet(),
+) {
+    private val building = Mutex()
+
+    /** The page last built, with the version of the map it was built from. */
+    private var built: Pair<String, String>? = null
+
+    /**
+     * The map's page for its version `version`, its text and files as they
+     * are: built once for each version, one build at a time, so browsers
+     * reloading it, or many opening it at once, don't each make one, every
+     * picture inside. What else goes into it, the files shared as they are
+     * and the theme, is this share's own.
+     */
+    internal suspend fun page(version: String, build: suspend () -> String): String = building.withLock {
+        built?.takeIf { it.first == version }?.second ?: build().also { built = version to it }
+    }
+}
+
+/**
+ * Which version of a map a computer's page is made from: its text, and its
+ * files as they are now, so a picture that reaches the folder late, from a
+ * sync app, makes a new page too.
+ */
+internal fun pageVersion(summary: MapSummary?, folder: File): String {
+    val files = File(folder, MEDIA_DIRECTORY).listFiles().orEmpty().sortedBy { it.name }.joinToString("|") { "${it.name}:${it.length()}:${it.lastModified()}" }
+    return "${summary?.contentKey}:${summary?.modified}:$files"
+}
 
 /**
  * What a sender calls itself, made safe to show: no control characters, no
@@ -170,6 +211,9 @@ private fun isHidden(codePoint: Int): Boolean = when (Character.getType(codePoin
     else -> false
 }
 
+/** How long the phone keeps quiet after saying a device's Orbit is too old to send it maps. */
+private const val OLDER_SENDER_QUIET_MILLISECONDS = 10 * 60 * 1000L
+
 /**
  * This device on the local network, while Orbit is on screen and only when
  * there's a reason to be: it tells nearby devices it's here and takes the
@@ -205,6 +249,13 @@ class NearbyHost internal constructor(
     /** What other devices see this one called when the person chose `chosen`, or nothing. */
     fun nameFor(chosen: String?): String = senderName(chosen) ?: senderName(deviceName) ?: "Orbit"
 
+    /**
+     * Whether a map is private and locked now. A map shown to computers stops being served as it locks, as a
+     * presentation stops: browsers reach this server, whatever the phone's screen shows. The app sets it.
+     */
+    @Volatile
+    var hidden: (mapId: String) -> Boolean = { false }
+
     /** This launch's key pair for offers: maps sent here are sealed to its public half, so only this launch can open them. */
     private val keys: KeyPair by lazy { newKeyPair() }
 
@@ -221,6 +272,7 @@ class NearbyHost internal constructor(
         bodyLimit = { method, path -> if (method == "POST" && isMapUpload(path)) OFFER_LIMIT else FORM_LIMIT },
         spool = offersFolder,
         policy = policy,
+        words = words,
         admit = ::admit,
     ) { answer(it) }
     private val guard = CodeGuard()
@@ -291,6 +343,8 @@ class NearbyHost internal constructor(
     fun start(accepting: Boolean) {
         onScreen = true
         this.accepting = accepting
+        // Private maps shown to computers that locked while Orbit was away aren't served again as it comes back.
+        shares.values.filter { hidden(it.mapId) }.forEach { end(it.code) }
         refresh()
     }
 
@@ -347,7 +401,7 @@ class NearbyHost internal constructor(
     suspend fun accept(offer: Offer, keepBoth: Boolean): String? {
         val id = try {
             val bundle = withContext(Dispatchers.IO) { offer.file.inputStream().use { maps.readBundle(it) } } ?: throw IOException("No map in the offer")
-            maps.receive(bundle, replacing = if (keepBoth) null else offer.existing)
+            maps.receive(bundle, replacing = if (keepBoth) null else offer.existing, reason = VersionReason.FromDevice(offer.from))
         } catch (failed: IOException) {
             Logs.warn(TAG, "Couldn't take in an offered map", failed)
             null
@@ -379,9 +433,11 @@ class NearbyHost internal constructor(
 
     /**
      * Shows a map to computers' browsers at a code, until [unshare]: to
-     * explore, present or download it, for whoever `options` lets in.
+     * explore, present or download it, for whoever `options` lets in. Its
+     * files that can't go clean stay out of its page and zip, but those of
+     * `asTheyAre`, which the person sharing chose to share as they are.
      */
-    fun share(mapId: String, theme: AppTheme, options: JoiningOptions = JoiningOptions(askNames = false)): SharedMap {
+    fun share(mapId: String, theme: AppTheme, options: JoiningOptions = JoiningOptions(askNames = false), asTheyAre: Set<String> = emptySet()): SharedMap {
         if (shares.isEmpty()) {
             // A new code: wrong guesses at old ones no longer keep anyone waiting.
             guard.reset()
@@ -393,7 +449,7 @@ class NearbyHost internal constructor(
             code = newCode()
         }
 
-        val shared = SharedMap(code, mapId, theme, Joining(code, RoomKind.Share, options, template = { asset("join.html") }, words = words))
+        val shared = SharedMap(code, mapId, theme, Joining(code, RoomKind.Share, options, template = { asset("join.html") }, words = words), asTheyAre)
         synchronized(endedShares) { endedShares.remove(code) }
         shares[code] = shared
         refresh()
@@ -401,12 +457,16 @@ class NearbyHost internal constructor(
     }
 
     fun unshare(code: String) {
+        end(code)
+        refresh()
+    }
+
+    /** Ends the share at `code`: the browsers in it hear it ended, and its code says so from then on. */
+    private fun end(code: String) {
         shares.remove(code)?.let { shared ->
             shared.joining.end()
             synchronized(endedShares) { endedShares[code] = shared.joining }
         }
-
-        refresh()
     }
 
     private fun settle(offer: Offer, state: OfferState) {
@@ -446,8 +506,12 @@ class NearbyHost internal constructor(
 
             if (version != OFFER_VERSION && accepting) {
                 // Orbit 0.2.0 and earlier send the map before the codes are checked: never read, and the phone says why.
-                if (version == null || version < OFFER_VERSION) {
-                    olderSenders.value = System.currentTimeMillis()
+                val now = System.currentTimeMillis()
+
+                // Said at most once every ten minutes: a device on the Wi-Fi offering again and again can't keep the
+                // phone's dialog up.
+                if ((version == null || version < OFFER_VERSION) && now - olderSenders.value >= OLDER_SENDER_QUIET_MILLISECONDS) {
+                    olderSenders.value = now
                 }
 
                 return Admission.Refuse(Response.text(400, "Update Orbit on the other device: maps sent here are checked first."))
@@ -487,7 +551,7 @@ class NearbyHost internal constructor(
             return Response.text(403, "This device isn't taking maps")
         }
 
-        return json(offerJson.encodeToString(KeyAnswer.serializer(), KeyAnswer(OFFER_VERSION, key.text)))
+        return json(offerJson.encodeToString(KeyAnswer.serializer(), KeyAnswer(OFFER_VERSION, key.text, MAP_FORMAT, carriedMediaTypes().sorted())))
     }
 
     /**
@@ -522,7 +586,7 @@ class NearbyHost internal constructor(
             synchronized(opening) { arriving.remove(id) }
         }
 
-        return json(offerJson.encodeToString(OfferAnswer.serializer(), OfferAnswer(id, base64Url(opened.receiverNonce))))
+        return json(offerJson.encodeToString(OfferAnswer.serializer(), OfferAnswer(id, base64Url(opened.receiverNonce), MAP_FORMAT, carriedMediaTypes().sorted())))
     }
 
     /** Opens an offer's hello. Throws [UnreadableOfferException] when it doesn't open whole, or has anything after the commitment. */
@@ -572,6 +636,9 @@ class NearbyHost internal constructor(
             null
         }
 
+        // The map here it would update, found before the lock: finding it may read the maps' details on disk.
+        val here = bundle?.uuid?.let { uuid -> withContext(Dispatchers.IO) { maps.findByIdentity(uuid) } }
+
         val offer = synchronized(opening) {
             val still = announced.value.any { it.id == id }
             announced.update { list -> list.filterNot { it.id == id } }
@@ -582,7 +649,7 @@ class NearbyHost internal constructor(
                 return if (still) Response.text(400, "The map didn't arrive intact. Send it again.") else Response.notFound()
             }
 
-            Offer(id, incoming.from, incoming.address, bundle, bundle.uuid?.let(maps::findByIdentity), file, incoming.check).also { offer ->
+            Offer(id, incoming.from, incoming.address, bundle, here, file, incoming.check).also { offer ->
                 states[id] = OfferState.Waiting
                 waiting.update { it + offer }
             }
@@ -721,7 +788,11 @@ class NearbyHost internal constructor(
 
         val parts = request.path.trim('/').split('/').filter { it.isNotEmpty() }
         val first = parts.firstOrNull()
-        val share = first?.let(shares::get)
+        var share = first?.let(shares::get)
+
+        if (share != null && endedAsHidden(share)) {
+            share = null
+        }
 
         if (share == null) {
             if (looksLikeCode(first) && guard.waitFor(request.from) > 0) {
@@ -754,7 +825,31 @@ class NearbyHost internal constructor(
         }
 
         folderRedirect(request.path)?.let { return Response.redirect(it) }
-        return share.joining.serve(request, parts.drop(1)) { _, rest -> content(share, rest) }
+        val answer = share.joining.serve(request, parts.drop(1)) { _, rest -> content(share, rest) }
+
+        // A big map's page or zip takes a while to make: a private map that locked meanwhile gives out none of it, and
+        // the browser hears the share ended, as one asking after does.
+        if (endedAsHidden(share)) {
+            (answer as? Response.FromFile)?.takeIf { it.temporary }?.file?.delete()
+            return share.joining.serve(request, parts.drop(1)) { _, _ -> Response.notFound() }
+        }
+
+        return answer
+    }
+
+    /**
+     * Ends the share when its map is private and locked now, as a map that
+     * locked while it was shown is: the server then stops if nothing else
+     * needs it. Says whether it ended.
+     */
+    private fun endedAsHidden(share: SharedMap): Boolean {
+        if (!hidden(share.mapId)) {
+            return false
+        }
+
+        end(share.code)
+        scope.launch { refresh() }
+        return true
     }
 
     private suspend fun content(share: SharedMap, rest: List<String>): Response {
@@ -762,7 +857,12 @@ class NearbyHost internal constructor(
 
         return when (rest.firstOrNull()) {
             null -> {
-                val page = WebPage.build(context, title, maps.read(share.mapId), share.theme, maps.folder(share.mapId), download = "map.zip")
+                val folder = maps.folder(share.mapId)
+
+                val page = share.page(pageVersion(maps.summary(share.mapId), folder)) {
+                    WebPage.build(context, title, maps.read(share.mapId), share.theme, folder, download = "map.zip", asTheyAre = share.asTheyAre)
+                }
+
                 // YouTube's player plays only for a page it can name, so this page tells where it is, though never its code.
                 Response.page(200, page, mapOf("Referrer-Policy" to "strict-origin"))
             }
@@ -772,7 +872,7 @@ class NearbyHost internal constructor(
                 val bundle = File.createTempFile("map", ".zip", sharedFolder)
 
                 try {
-                    bundle.outputStream().use { maps.writeZip(share.mapId, it) }
+                    bundle.outputStream().use { maps.writeZip(share.mapId, it, share.asTheyAre) }
                 } catch (failure: IOException) {
                     bundle.delete()
                     throw failure

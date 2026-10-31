@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.PersistableBundle
 import android.text.Html
 import com.hyuchia.orbit.Logs
 
@@ -94,20 +95,33 @@ class MapClipboard(context: Context) {
 
     /**
      * Copies an idea: `text`, an outline other apps paste, and `markdown`,
-     * the idea as Orbit pastes it, from map `mapId`. False when it's too much
-     * for the clipboard to hold.
+     * the idea as Orbit pastes it, from map `mapId`. A `sensitive` one, from
+     * a private map, is marked so: Android doesn't show it as it's copied,
+     * and keyboards keep it out of their clipboard history. False when it's
+     * too much for the clipboard to hold.
      */
-    fun copy(label: String, text: String, markdown: String, mapId: String): Boolean {
-        val manager = manager ?: return false
+    fun copy(label: String, text: String, markdown: String, mapId: String, sensitive: Boolean): Boolean {
         val orbit = Intent().putExtra(EXTRA_MARKDOWN, markdown).putExtra(EXTRA_MAP, mapId)
         val clip = ClipData(label, arrayOf(ClipDescription.MIMETYPE_TEXT_PLAIN), ClipData.Item(text, orbit, null))
+        return put(clip, sensitive, markdown.length + text.length)
+    }
+
+    /** Copies `text` as it is, such as a whole map in a format, marked `sensitive` as [copy] marks it. False when it's too much. */
+    fun copyText(label: String, text: String, sensitive: Boolean): Boolean = put(ClipData.newPlainText(label, text), sensitive, text.length)
+
+    private fun put(clip: ClipData, sensitive: Boolean, characters: Int): Boolean {
+        val manager = manager ?: return false
+
+        if (sensitive) {
+            clip.description.extras = PersistableBundle().apply { putBoolean(EXTRA_IS_SENSITIVE, true) }
+        }
 
         return try {
             manager.setPrimaryClip(clip)
             true
         } catch (tooBig: RuntimeException) {
             // The clipboard crosses processes: a clip past its transaction's size doesn't get there.
-            Logs.warn("MapClipboard", "Couldn't copy an idea of ${markdown.length + text.length} characters", tooBig)
+            Logs.warn("MapClipboard", "Couldn't copy $characters characters", tooBig)
             false
         }
     }
@@ -115,5 +129,8 @@ class MapClipboard(context: Context) {
     private companion object {
         const val EXTRA_MARKDOWN = "com.hyuchia.orbit.markdown"
         const val EXTRA_MAP = "com.hyuchia.orbit.map"
+
+        /** `ClipDescription.EXTRA_IS_SENSITIVE`, which Android 13 and later read; earlier ones leave it. */
+        const val EXTRA_IS_SENSITIVE = "android.content.extra.IS_SENSITIVE"
     }
 }

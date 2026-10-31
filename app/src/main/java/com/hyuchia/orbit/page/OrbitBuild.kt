@@ -4,9 +4,13 @@ import android.content.Context
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/** The build of Orbit the map's pages carry, as `web/build.ts` writes it into `assets/map/orbit.json`. */
+/**
+ * The build of Orbit the map's pages carry, as `web/build.ts` writes it into
+ * `assets/map/orbit.json`: its version, its commit, and the newest map format
+ * it reads (its `SUPPORTED_SCHEMA_VERSION`, which [com.hyuchia.orbit.data.MAP_FORMAT] matches).
+ */
 @Serializable
-data class OrbitBuild(val version: String, val commit: String = "") {
+data class OrbitBuild(val version: String, val commit: String = "", val format: Int? = null) {
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
 

@@ -1,0 +1,18 @@
+{
+  "uniqueId": "hyph-utf8:hyph-es",
+  "artifactVersion": "5.0",
+  "name": "Hyphenation patterns for Spanish",
+  "description": "Where long Spanish words break across lines in the map's names: the hyph-utf8 package's patterns, which Orbit includes.",
+  "website": "https://www.hyphenation.org/tex",
+  "developers": [
+    {
+      "name": "Javier Bezos"
+    },
+    {
+      "name": "CervanTeX"
+    }
+  ],
+  "licenses": [
+    "MIT-hyph-es"
+  ]
+}

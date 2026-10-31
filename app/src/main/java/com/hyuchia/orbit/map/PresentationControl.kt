@@ -181,6 +181,20 @@ class PresentationControl(
         }
     }
 
+    /**
+     * Plays the live photo shown over the map through once more, on every
+     * screen, from its start and muted, as it played when it showed. The
+     * phone doesn't reckon with it: the picture stays shown, and each screen
+     * settles back on it once the motion ends. A plain picture has none.
+     */
+    fun replayMotion() {
+        val shown = presentation?.media?.takeIf { !it.isVideo } ?: return
+
+        if (ui.value.nodes[shown.id]?.image?.motion != null) {
+            tell(AudienceCommand.Playback(true))
+        }
+    }
+
     /** Back to the map: the audience sees it again, and a presentation that plays goes on by itself, the idea's time from the start. */
     fun closeMedia() {
         if (presentation?.media == null) {

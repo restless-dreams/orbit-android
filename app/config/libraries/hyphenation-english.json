@@ -1,0 +1,14 @@
+{
+  "uniqueId": "hyph-utf8:hyph-en-us",
+  "name": "Hyphenation patterns for American English",
+  "description": "Where long English words break across lines in the map's names: the hyph-utf8 package's patterns, which Orbit includes.",
+  "website": "https://www.hyphenation.org/tex",
+  "developers": [
+    {
+      "name": "Gerard D.C. Kuiken"
+    }
+  ],
+  "licenses": [
+    "hyph-en-us"
+  ]
+}

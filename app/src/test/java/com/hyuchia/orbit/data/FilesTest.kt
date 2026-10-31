@@ -41,7 +41,23 @@ class FilesTest {
         }
 
         assertEquals("kept", File(file, "inside").readText())
-        assertFalse(File(folder, ".map.md.partial").exists())
+        assertEquals(listOf("map.md"), folder.list()!!.toList())
+    }
+
+    @Test
+    fun `two writes of one file at once each fill a partial file of their own`() {
+        val file = File(folder, "photo.jpg")
+        var inner: String? = null
+
+        writeAtomically(file) { outer ->
+            outer.write("first".toByteArray())
+            writeAtomically(file) { it.write("second".toByteArray()) }
+            inner = file.readText()
+        }
+
+        assertEquals("second", inner)
+        assertEquals("first", file.readText())
+        assertEquals(listOf("photo.jpg"), folder.list()!!.toList())
     }
 
     @Test
@@ -58,5 +74,27 @@ class FilesTest {
         val text = decodeText(bytes)
         assertEquals("Café – résumé\u0081", text)
         assertTrue('�' !in text)
+    }
+
+    @Test
+    fun `a UTF-8 file with a stray byte keeps its characters, and only that byte reads as Windows-1252`() {
+        val bytes = "Canción, corazón, ñandú".toByteArray() + byteArrayOf(0xE9.toByte()) + " 🧳".toByteArray()
+        assertEquals("Canción, corazón, ñandúé 🧳", decodeText(bytes))
+        assertEquals("Canción é", decodeText("Canción ".toByteArray() + byteArrayOf(0xE9.toByte())))
+    }
+
+    @Test
+    fun `a file that stops partway through a character is still arriving`() {
+        val whole = "## 🧳 To pack\n".toByteArray()
+        val cut = "## 🧳".toByteArray()
+
+        for (end in 1..3) {
+            assertTrue(endsMidCharacter(cut.copyOf(cut.size - end)))
+        }
+
+        assertFalse(endsMidCharacter(whole))
+        assertFalse(endsMidCharacter("Plain".toByteArray()))
+        // Windows-1252 with a stray byte before the end isn't UTF-8 cut short.
+        assertFalse(endsMidCharacter(byteArrayOf(0x43, 0xE9.toByte(), 0x20, 0xE9.toByte())))
     }
 }

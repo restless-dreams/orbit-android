@@ -92,6 +92,17 @@ class PresentationTest {
     }
 
     @Test
+    fun aRehearsalLeavesBehindTheTimesOfIdeasTheMapNoLongerHasOnlyOnceTheMapWasReadWhole() {
+        val rehearsal = Rehearsal.of(listOf("intro", "plan"), mapOf(0 to 30_400L, 1 to 59_600L))
+        val earlier = mapOf("intro" to 20, "gone" to 15, "unread" to 40)
+
+        // Read whole, the map shows every idea it has: one it doesn't show is gone.
+        assertEquals(mapOf("intro" to 30, "plan" to 60), rehearsal.keptOver(earlier, ideas = setOf("intro", "plan"), readWhole = true))
+        // Orbit couldn't read all of it: the ideas it doesn't show may be there still, and keep their times.
+        assertEquals(mapOf("intro" to 30, "gone" to 15, "unread" to 40, "plan" to 60), rehearsal.keptOver(earlier, ideas = setOf("intro", "plan"), readWhole = false))
+    }
+
+    @Test
     fun timesReadLikeAClock() {
         assertEquals("0:42", clock(42))
         assertEquals("12:05", clock(725))

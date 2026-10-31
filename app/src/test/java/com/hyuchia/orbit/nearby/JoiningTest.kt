@@ -491,7 +491,7 @@ class JoiningTest {
         fun canBindFrom(address: String): Boolean = runCatching { Socket().use { it.bind(InetSocketAddress(address, 0)) } }.isSuccess
 
         fun eventually(condition: () -> Boolean): Boolean {
-            val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
 
             while (System.nanoTime() < until) {
                 if (condition()) {

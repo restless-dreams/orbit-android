@@ -2,4 +2,6 @@
 <resources>
     <color name="window_background">#FCF8FF</color>
     <color name="splash_background">#FCF8FF</color>
+    <color name="splash_background_light">#FCF8FF</color>
+    <color name="splash_background_dark">#12131A</color>
 </resources>

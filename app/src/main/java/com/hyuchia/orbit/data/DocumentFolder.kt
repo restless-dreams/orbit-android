@@ -6,6 +6,7 @@ import android.database.Cursor
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
+import android.system.Os
 import androidx.core.net.toUri
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
@@ -25,8 +26,27 @@ import java.io.OutputStream
 class DocumentFolder(private val resolver: ContentResolver, private val tree: Uri, private val words: Words) : SyncFolder {
     private val root = DocumentsContract.getTreeDocumentId(tree)
     private val documents = mutableMapOf<String, String>()
+
+    /** The markdown files as last listed, or as this folder last wrote them, by name. */
+    private val listed = mutableMapOf<String, FolderFile>()
+
     private var media: String? = null
     private var mediaDocuments: MutableMap<String, Child>? = null
+
+    /** `.orbit/`, where devices keep their records, as last listed; null when it isn't there. */
+    private var orbit: String? = null
+
+    /** The records in `.orbit/devices/`, by name, as last listed. */
+    private val records = mutableMapOf<String, String>()
+
+    /** `.orbit/study/`, as last listed; null when it isn't there. */
+    private var study: String? = null
+
+    /** The devices' folders in `.orbit/study/`, by device, as last listed. */
+    private val studyFolders = mutableMapOf<String, String>()
+
+    /** The study records in them, by device and name, as last listed. */
+    private val studyRecords = mutableMapOf<Pair<String, String>, String>()
 
     override val name: String
         get() = describe(document(root))?.name ?: words.string(R.string.data_folder)
@@ -34,20 +54,37 @@ class DocumentFolder(private val resolver: ContentResolver, private val tree: Ur
     override fun files(): List<FolderFile> {
         val children = children(root)
         documents.clear()
+        listed.clear()
         media = children.firstOrNull { it.directory && it.name == MEDIA_DIRECTORY }?.id
         mediaDocuments = null
+        orbit = children.firstOrNull { it.directory && it.name == ORBIT_DIRECTORY }?.id
 
         return children
             .filter { !it.directory && it.name.endsWith(".md", ignoreCase = true) && !it.name.startsWith(".") }
             .map { child ->
                 documents[child.name] = child.id
+                listed[child.name] = child.file
                 child.file
             }
     }
 
-    /** A file's text, in whatever encoding it was written (see [decodeText]). */
-    override fun read(name: String): String =
-        resolver.openInputStream(uri(name))?.use { decodeText(it.readBytes()) } ?: throw FileNotFoundException(name)
+    /**
+     * A file's text, in whatever encoding it was written (see [decodeText]).
+     * One that stops partway through a character, or isn't the size it was
+     * listed at, is still being written, by a sync app say: [StillArriving].
+     */
+    override fun read(name: String): String {
+        val bytes = resolver.openInputStream(uri(name))?.use { it.readBytes() } ?: throw FileNotFoundException(name)
+        val size = listed[name]?.size ?: -1
+
+        if (endsMidCharacter(bytes) || (size > 0 && size != bytes.size.toLong())) {
+            throw StillArriving(name, decodeText(bytes))
+        }
+
+        return decodeText(bytes)
+    }
+
+    override fun describe(name: String): FolderFile? = documents[name]?.let { describe(document(it)) }?.file
 
     override fun write(name: String, text: String, create: Boolean): FolderFile {
         val uri = if (create) {
@@ -56,27 +93,43 @@ class DocumentFolder(private val resolver: ContentResolver, private val tree: Ur
             uri(name)
         }
 
-        writeBytes(uri, text.toByteArray())
+        // A file made for this write that didn't take it goes, rather than stay empty for a sync to take as a new map.
+        removedOnFailure(uri, made = create) {
+            writeBytes(uri, text.toByteArray())
+        }
+
         val written = describe(uri) ?: throw FileNotFoundException(name)
         documents[written.name] = written.id
+        listed[written.name] = written.file
         return written.file
     }
 
     override fun delete(name: String) {
-        DocumentsContract.deleteDocument(resolver, uri(name))
+        // A file its app didn't delete is still there: the map's deletion waits for the next sync.
+        if (!DocumentsContract.deleteDocument(resolver, uri(name))) {
+            throw IOException("Couldn't delete $name")
+        }
+
         documents -= name
+        listed -= name
     }
 
-    override fun media(): Map<String, Long> = mediaDocuments().mapValues { (_, child) -> child.file.size }
+    override fun media(): Map<String, FolderFile> = mediaDocuments().mapValues { (_, child) -> child.file }
 
     override fun readMedia(name: String, into: OutputStream): Boolean {
         val child = mediaDocuments()[name] ?: return false
         val input = resolver.openInputStream(document(child.id)) ?: return false
-        input.use { it.copyTo(into) }
+        val copied = input.use { it.copyTo(into) }
+
+        // One that isn't the size it was listed at is still being written, by a sync app say: what's there is only its start.
+        if (child.file.size > 0 && copied != child.file.size) {
+            throw IOException("$name is still arriving")
+        }
+
         return true
     }
 
-    override fun writeMedia(name: String, from: File) {
+    override fun writeMedia(name: String, from: File): FolderFile {
         val existing = mediaDocuments()[name]
 
         val uri = if (existing != null) {
@@ -86,19 +139,110 @@ class DocumentFolder(private val resolver: ContentResolver, private val tree: Ur
             DocumentsContract.createDocument(resolver, document(folder), mediaType(name), name) ?: throw IOException("Couldn't make $name")
         }
 
-        from.inputStream().use { input -> output(uri).use { input.copyTo(it) } }
-        val written = describe(uri) ?: throw FileNotFoundException(name)
-
         // A copy the folder didn't take whole goes, unless it was there before: the next sync tries again.
-        if (written.file.size >= 0 && written.file.size != from.length()) {
-            if (existing == null) {
-                runCatching { DocumentsContract.deleteDocument(resolver, uri) }
+        val written = removedOnFailure(uri, made = existing == null) {
+            from.inputStream().use { input -> writeOver(uri, from.length()) { input.copyTo(it) } }
+            val written = describe(uri) ?: throw FileNotFoundException(name)
+
+            if (written.file.size >= 0 && written.file.size != from.length()) {
+                throw IOException("$name didn't keep what was written")
             }
 
-            throw IOException("$name didn't keep what was written")
+            written
         }
 
         mediaDocuments()[written.name] = written
+        return written.file
+    }
+
+    override fun deviceRecords(): List<FolderFile> {
+        records.clear()
+        val devices = devicesFolder() ?: return emptyList()
+
+        return children(devices)
+            .filter { !it.directory && it.name.endsWith(".json", ignoreCase = true) }
+            .map { child ->
+                records[child.name] = child.id
+                child.file
+            }
+    }
+
+    override fun readDeviceRecord(name: String): String {
+        val id = records[name] ?: throw FileNotFoundException(name)
+        return resolver.openInputStream(document(id))?.use { it.readBytes().decodeToString() } ?: throw FileNotFoundException(name)
+    }
+
+    override fun writeDeviceRecord(name: String, text: String) {
+        val existing = records[name]?.let(::document)
+
+        val uri = existing ?: run {
+            val devices = devicesFolder() ?: makeFolder(makeFolder(root, ORBIT_DIRECTORY).also { orbit = it }, DEVICES_DIRECTORY)
+            DocumentsContract.createDocument(resolver, document(devices), RECORD_TYPE, name) ?: throw IOException("Couldn't make $name")
+        }
+
+        removedOnFailure(uri, made = existing == null) {
+            writeBytes(uri, text.toByteArray())
+        }
+
+        describe(uri)?.let { records[it.name] = it.id }
+    }
+
+    override fun studyRecords(): Map<String, List<FolderFile>> {
+        studyFolders.clear()
+        studyRecords.clear()
+        study = orbit?.let { folder -> children(folder).firstOrNull { it.directory && it.name == STUDY_DIRECTORY }?.id }
+        val folder = study ?: return emptyMap()
+
+        return children(folder).filter { it.directory }.associate { device ->
+            studyFolders[device.name] = device.id
+
+            device.name to children(device.id)
+                .filter { !it.directory && it.name.endsWith(".json", ignoreCase = true) }
+                .map { child ->
+                    studyRecords[device.name to child.name] = child.id
+                    child.file
+                }
+        }
+    }
+
+    override fun readStudyRecord(device: String, name: String): String {
+        val id = studyRecords[device to name] ?: throw FileNotFoundException(name)
+        return resolver.openInputStream(document(id))?.use { it.readBytes().decodeToString() } ?: throw FileNotFoundException(name)
+    }
+
+    override fun writeStudyRecord(device: String, name: String, text: String) {
+        val existing = studyRecords[device to name]?.let(::document)
+
+        val uri = existing ?: run {
+            val folder = studyFolders[device] ?: run {
+                val orbitFolder = orbit ?: makeFolder(root, ORBIT_DIRECTORY).also { orbit = it }
+                makeFolder(study ?: makeFolder(orbitFolder, STUDY_DIRECTORY).also { study = it }, device).also { studyFolders[device] = it }
+            }
+
+            DocumentsContract.createDocument(resolver, document(folder), RECORD_TYPE, name) ?: throw IOException("Couldn't make $name")
+        }
+
+        removedOnFailure(uri, made = existing == null) {
+            writeBytes(uri, text.toByteArray())
+        }
+
+        describe(uri)?.let { studyRecords[device to it.name] = it.id }
+    }
+
+    override fun deleteStudyRecord(device: String, name: String) {
+        val id = studyRecords[device to name] ?: return
+        DocumentsContract.deleteDocument(resolver, document(id))
+        studyRecords -= device to name
+    }
+
+    /** `.orbit/devices/`, if the folder has it. */
+    private fun devicesFolder(): String? = orbit?.let { folder -> children(folder).firstOrNull { it.directory && it.name == DEVICES_DIRECTORY }?.id }
+
+    /** A folder named `name` in `parent`, made unless it's there. */
+    private fun makeFolder(parent: String, name: String): String {
+        children(parent).firstOrNull { it.directory && it.name == name }?.let { return it.id }
+        val made = DocumentsContract.createDocument(resolver, document(parent), Document.MIME_TYPE_DIR, name) ?: throw IOException("Couldn't make $name")
+        return DocumentsContract.getDocumentId(made)
     }
 
     private fun makeMediaFolder(): String {
@@ -117,17 +261,50 @@ class DocumentFolder(private val resolver: ContentResolver, private val tree: Ur
 
     private fun document(id: String): Uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
 
-    /** Writes over a document, emptying it first: "wt" says so, though a few apps only take "w". */
     private fun writeBytes(uri: Uri, bytes: ByteArray) {
-        output(uri).use { it.write(bytes) }
+        writeOver(uri, bytes.size.toLong()) { it.write(bytes) }
     }
 
-    private fun output(uri: Uri): OutputStream =
-        try {
-            resolver.openOutputStream(uri, "wt")
+    /**
+     * Writes over a document, emptying it first: "wt" says so, though a few
+     * apps only take "w", which may keep the end of a longer document after
+     * what's written. That end is cut off where the `length` written ends;
+     * a document that keeps it all the same didn't take the write.
+     */
+    private fun writeOver(uri: Uri, length: Long, write: (OutputStream) -> Unit) {
+        val emptied = try {
+            resolver.openOutputStream(uri, "wt") ?: throw FileNotFoundException(uri.toString())
         } catch (unsupported: IllegalArgumentException) {
-            resolver.openOutputStream(uri, "w")
-        } ?: throw FileNotFoundException(uri.toString())
+            null
+        }
+
+        if (emptied != null) {
+            emptied.use(write)
+            return
+        }
+
+        (resolver.openOutputStream(uri, "w") ?: throw FileNotFoundException(uri.toString())).use(write)
+
+        if ((describe(uri)?.file?.size ?: -1) > length) {
+            runCatching { resolver.openFileDescriptor(uri, "rw")?.use { Os.ftruncate(it.fileDescriptor, length) } }
+
+            if ((describe(uri)?.file?.size ?: -1) > length) {
+                throw IOException("A document kept the end of what it held before")
+            }
+        }
+    }
+
+    /** Runs `write`, deleting the document at `uri` if it fails and the document was `made` for it. */
+    private inline fun <T> removedOnFailure(uri: Uri, made: Boolean, write: () -> T): T =
+        try {
+            write()
+        } catch (failure: Exception) {
+            if (made) {
+                runCatching { DocumentsContract.deleteDocument(resolver, uri) }
+            }
+
+            throw failure
+        }
 
     private class Child(val id: String, val name: String, val directory: Boolean, modified: Long, size: Long) {
         val file = FolderFile(name, modified, size)
@@ -141,6 +318,9 @@ class DocumentFolder(private val resolver: ContentResolver, private val tree: Ur
             val cursor = resolver.query(uri, COLUMNS, null, null, null) ?: throw IOException("Couldn't list the folder")
 
             cursor.use {
+                // A listing its app marks as failed isn't the folder's contents: none of its files would seem to be there.
+                it.extras.getString(DocumentsContract.EXTRA_ERROR)?.let { error -> throw IOException("Couldn't list the folder: $error") }
+
                 if (!it.extras.getBoolean(DocumentsContract.EXTRA_LOADING)) {
                     return rows(it)
                 }
@@ -183,6 +363,8 @@ class DocumentFolder(private val resolver: ContentResolver, private val tree: Ur
 private const val ACCESS = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
 
 private const val MARKDOWN_TYPE = "text/markdown"
+
+private const val RECORD_TYPE = "application/json"
 
 private const val LOADING_TRIES = 5
 private const val LOADING_WAIT = 1_000L

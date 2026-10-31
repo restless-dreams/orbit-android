@@ -4,17 +4,32 @@
     <!-- What screen readers say for a picture or video without a description or caption. %1$s is the idea's name. -->
     <string name="media_picture_of">Picture of %1$s</string>
     <string name="media_video_of">Video of %1$s</string>
-    <string name="media_picture_missing">This picture isn\'t on this phone.</string>
+    <string name="media_picture_missing">This picture isn\'t on this device.</string>
     <string name="media_picture_unreadable">This picture couldn\'t be shown.</string>
     <!-- The play button, for screen readers. %1$s is the video's caption. -->
     <string name="media_play_captioned">Play %1$s</string>
     <!-- The play button of a video without a caption. %1$s is the idea's name. -->
     <string name="media_play_video_of">Play the video of %1$s</string>
+    <!-- An animated GIF or WebP's buttons: it plays on its own, unless Android's animations are off. -->
+    <string name="media_play_animation">Play the animation</string>
+    <!-- A live photo: a still with the few seconds of motion and sound a phone recorded around it. "Live" is its mark, as phones call it. -->
+    <string name="media_live">Live</string>
+    <string name="media_live_photo">Live photo</string>
+    <string name="media_play_live_photo">Play the live photo</string>
+    <string name="media_pause_animation">Pause the animation</string>
     <!-- Which picture or video this is, of how many: 2 of 5. -->
     <string name="media_position">%1$d of %2$d</string>
     <string name="media_share_picture">Share the picture</string>
     <string name="media_share_video">Share the video</string>
-    <string name="media_video_missing">This video isn\'t on this phone.</string>
+    <!-- Asked when Orbit couldn't take out of a file being shared what it says beyond what it shows or plays: sharing it anyway is the person's choice, knowing what goes with it. -->
+    <string name="media_share_picture_as_it_is_title">Share this picture as it is?</string>
+    <string name="media_share_picture_as_it_is_text">Orbit couldn\'t take out where and when it was taken and on what device, so they\'d go with it.</string>
+    <string name="media_share_video_as_it_is_title">Share this video as it is?</string>
+    <string name="media_share_video_as_it_is_text">Orbit couldn\'t take out where and when it was recorded and on what device, so they\'d go with it.</string>
+    <string name="media_share_sound_as_it_is_title">Share this sound as it is?</string>
+    <string name="media_share_sound_as_it_is_text">Orbit couldn\'t take out where and when it was recorded and on what device, so they\'d go with it.</string>
+    <string name="media_share_as_it_is">Share as it is</string>
+    <string name="media_video_missing">This video isn\'t on this device.</string>
     <string name="media_video_unplayable">This video couldn\'t be played here.</string>
     <plurals name="media_seek_back">
         <item quantity="one">Back %d second</item>

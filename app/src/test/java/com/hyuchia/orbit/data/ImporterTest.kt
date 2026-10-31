@@ -3,11 +3,19 @@ package com.hyuchia.orbit.data
 import com.hyuchia.orbit.FileWords
 import com.hyuchia.orbit.page.ImportProblem
 import com.hyuchia.orbit.page.ImportWarning
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Locale
+
+/**
+ * A nested markdown list with two lines at the top, as a notes app or a
+ * markdown file writes it. As written, Orbit draws it around an untitled
+ * middle; read as an outline, its top line is the middle.
+ */
+private const val NESTED_LIST = "- Trip\n  - Flights\n    - Window seat\n  - Hotels\n- Packing\n  - Passport\n"
 
 class ImporterTest {
     @Test
@@ -41,6 +49,77 @@ class ImporterTest {
             Importer.markdownFor("https://example.com/articles/2026/10/maps-and-minds", "A long read about maps"),
         )
         assertEquals("# Groceries\n\n- Milk\n- Eggs\n", Importer.markdownFor("Milk\nEggs", "Groceries"))
+    }
+
+    @Test
+    fun `text indented as an outline keeps its branches as a new map`() {
+        assertTrue(Importer.isOutline("Trip\n  Flights\n    Window seat\n  Hotels"))
+        assertTrue(Importer.isOutline("Trip\n\tFlights"))
+        // Tabs count as four spaces among spaces, and blank lines don't count.
+        assertTrue(Importer.isOutline("Trip\n\n\tFlights\n    Hotels"))
+        assertTrue(Importer.isOutline("- Trip\n  - Flights"))
+        assertTrue(Importer.isOutline("• Groceries\n    1. Milk\n    - [ ] Bread\n    * [x] Butter"))
+    }
+
+    @Test
+    fun `a list without indents, or markdown with headings, makes the map it always has`() {
+        assertFalse(Importer.isOutline("Milk\nEggs\nBread"))
+        assertFalse(Importer.isOutline("- Milk\n- Eggs"))
+        // Lines all indented alike are a list without indents.
+        assertFalse(Importer.isOutline("  Milk\n  Eggs"))
+        assertFalse(Importer.isOutline("# Trip\n  Flights"))
+        assertFalse(Importer.isOutline("Notes\n## Trip\n  Flights"))
+        assertFalse(Importer.isOutline("---\ntheme: night\n---\n  Trip"))
+        assertFalse(Importer.isOutline("  \n"))
+    }
+
+    @Test
+    fun `a nested markdown list in a markdown file is kept byte for byte`() = runTest {
+        // Opened with Open a file or from a file manager, or dropped on the list: each goes through importFile.
+        listOf("Trip.md" to "text/markdown", "Trip.markdown" to "", "Trip.md" to "text/plain", "Trip" to "text/x-markdown").forEach { (name, type) ->
+            val plain = Importer.isPlainText(name, type)
+            assertFalse("$name ($type)", plain)
+            assertEquals(NESTED_LIST, Importer.newMap(NESTED_LIST, name.substringBeforeLast('.'), plain) { _, _ -> throw AssertionError("A markdown file isn't made again on a page") })
+        }
+    }
+
+    @Test
+    fun `a markdown file of paragraphs alone is kept as written, its frontmatter too`() = runTest {
+        // A journal's note: Orbit reads it as the note of a map without ideas yet, named by its title.
+        val journal = "---\ntitle: Journal\n---\nToday I walked by the river.\n\nThen I slept."
+        val plain = Importer.isPlainText("Journal.md", "text/markdown")
+        assertEquals("$journal\n", Importer.newMap(journal, "Journal", plain) { _, _ -> throw AssertionError("A markdown file isn't made again on a page") })
+        // The same lines shared as text still become a list.
+        assertEquals("# ---\n\n- title: Journal\n- ---\n- Today I walked by the river.\n- Then I slept.\n", Importer.newMap(journal, null, plain = true) { _, _ -> null })
+    }
+
+    @Test
+    fun `a nested markdown list shared as text is made on a page, its top line in the middle`() = runTest {
+        var asked: String? = null
+        // What the page makes of it (web/paste.test.ts checks this same list).
+        val middle = "# Trip\n\n- Flights\n  - Window seat\n- Hotels\n- Packing\n  - Passport\n"
+
+        val made = Importer.newMap(NESTED_LIST, null, plain = true) { text, _ ->
+            asked = text
+            middle
+        }
+
+        assertEquals(NESTED_LIST, asked)
+        assertEquals(middle, made)
+        // Where no page can make it, as on a WebView too old for maps, the list is kept as written.
+        assertEquals(NESTED_LIST, Importer.newMap(NESTED_LIST, null, plain = true) { _, _ -> null })
+    }
+
+    @Test
+    fun `text files make maps as shared text does, and markdown files are maps as written`() {
+        assertTrue(Importer.isPlainText("Trip.txt", "text/plain"))
+        assertTrue(Importer.isPlainText("Trip.TXT", ""))
+        assertTrue(Importer.isPlainText("Trip", "text/plain; charset=utf-8"))
+        assertFalse(Importer.isPlainText("Trip.MD", ""))
+        assertFalse(Importer.isPlainText("Trip.txt", "text/markdown"))
+        assertFalse(Importer.isPlainText("Trip.markdown", "application/octet-stream"))
+        assertFalse(Importer.isPlainText("Trip.yaml", "text/plain"))
+        assertFalse(Importer.isPlainText("Trip", "application/octet-stream"))
     }
 
     @Test

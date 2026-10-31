@@ -18,33 +18,41 @@ internal object MapKeys {
     val Outline = Keys(KeyEvent.KEYCODE_3, ctrl = true)
     val Edit = Keys(KeyEvent.KEYCODE_E, ctrl = true)
     val Present = Keys(KeyEvent.KEYCODE_F5)
+    val Study = Keys(KeyEvent.KEYCODE_S, ctrl = true, shift = true)
+    val LockNow = Keys(KeyEvent.KEYCODE_L, ctrl = true)
+    val PreviousIdea = Keys(KeyEvent.KEYCODE_DPAD_LEFT)
+    val NextIdea = Keys(KeyEvent.KEYCODE_DPAD_RIGHT)
+    val StopPresenting = Keys(KeyEvent.KEYCODE_ESCAPE)
 }
 
 /**
  * The map's keyboard shortcuts: the app's own, then the keys the map's page
  * answers itself, which the list shows alongside. `back` is what Back does
  * on the map: a panel closes, the map goes up a level, or the map closes.
+ * `lockNow` locks private maps at once, for a private map; none for another.
  */
 @Composable
-internal fun mapShortcuts(model: MapViewModel, ui: MapUi, present: () -> Unit, back: () -> Unit): List<ShortcutGroup> {
-    val idea = ui.sun.takeIf { ui.mode == "focus" }
+internal fun mapShortcuts(model: MapViewModel, ui: MapUi, present: () -> Unit, back: () -> Unit, lockNow: (() -> Unit)? = null): List<ShortcutGroup> {
+    val idea = ui.sun.takeIf { ui.focused }
     val map = listOfNotNull(
         Shortcut(stringResource(R.string.common_undo), listOf(MapKeys.Undo)) { model.undo() },
         Shortcut(stringResource(R.string.common_redo), listOf(MapKeys.Redo, Keys(KeyEvent.KEYCODE_Y, ctrl = true))) { model.redo() },
         Shortcut(stringResource(R.string.common_search_the_map), listOf(MapKeys.Search), anywhere = true) { model.show(Panel.Search) },
         Shortcut(stringResource(R.string.map_shortcut_the_orbit), listOf(MapKeys.Orbit), anywhere = true) {
-            if (ui.mode != "focus") {
+            if (!ui.focused) {
                 model.toggleView()
             }
         },
         Shortcut(stringResource(R.string.map_shortcut_the_whole_map), listOf(MapKeys.WholeMap), anywhere = true) {
-            if (ui.mode == "focus") {
+            if (ui.focused) {
                 model.toggleView()
             }
         },
         Shortcut(stringResource(R.string.common_outline), listOf(MapKeys.Outline), anywhere = true) { model.show(Panel.Outline) },
         idea?.let { node -> Shortcut(stringResource(R.string.map_shortcut_edit_the_idea_in_focus), listOf(MapKeys.Edit), anywhere = true) { model.show(Panel.Editor(node.id)) } },
         Shortcut(stringResource(R.string.common_present), listOf(MapKeys.Present, Keys(KeyEvent.KEYCODE_ENTER, ctrl = true))) { present() },
+        Shortcut(stringResource(R.string.study_study), listOf(MapKeys.Study)) { model.startStudy() },
+        lockNow?.let { lock -> Shortcut(stringResource(R.string.private_lock_private_maps_now), listOf(MapKeys.LockNow), anywhere = true) { lock() } },
         // With a panel open, Escape closes it wherever the focus is, before a field in it could take the key.
         Shortcut(stringResource(R.string.map_shortcut_back_up_a_level), listOf(Keys(KeyEvent.KEYCODE_ESCAPE)), anywhere = ui.panel != null) { back() },
     )
@@ -81,17 +89,32 @@ internal fun mapShortcuts(model: MapViewModel, ui: MapUi, present: () -> Unit, b
     )
 }
 
+/** While studying, the session's own keys, for the list: the session answers them itself. */
+@Composable
+internal fun studyShortcuts(): List<ShortcutGroup> = listOf(
+    ShortcutGroup(
+        stringResource(R.string.study_shortcuts),
+        listOf(
+            Shortcut(stringResource(R.string.study_shortcut_show), listOf(Keys(KeyEvent.KEYCODE_SPACE), Keys(KeyEvent.KEYCODE_ENTER))),
+            Shortcut(stringResource(R.string.study_again), listOf(Keys(KeyEvent.KEYCODE_1), Keys(KeyEvent.KEYCODE_DPAD_LEFT))),
+            Shortcut(stringResource(R.string.study_knew_it), listOf(Keys(KeyEvent.KEYCODE_2), Keys(KeyEvent.KEYCODE_DPAD_RIGHT))),
+            Shortcut(stringResource(R.string.study_undo_answer), listOf(Keys(KeyEvent.KEYCODE_Z, ctrl = true))),
+            Shortcut(stringResource(R.string.study_stop), listOf(Keys(KeyEvent.KEYCODE_ESCAPE))),
+        ),
+    ),
+)
+
 /** While presenting, the presentation's own keys, for the list: the presentation answers them itself. */
 @Composable
 internal fun presentingShortcuts(): List<ShortcutGroup> = listOf(
     ShortcutGroup(
         stringResource(R.string.map_shortcuts_presenting),
         listOf(
-            Shortcut(stringResource(R.string.map_shortcut_next), listOf(Keys(KeyEvent.KEYCODE_DPAD_RIGHT), Keys(KeyEvent.KEYCODE_SPACE), Keys(KeyEvent.KEYCODE_PAGE_DOWN))),
-            Shortcut(stringResource(R.string.common_back), listOf(Keys(KeyEvent.KEYCODE_DPAD_LEFT), Keys(KeyEvent.KEYCODE_PAGE_UP))),
+            Shortcut(stringResource(R.string.map_shortcut_next), listOf(MapKeys.NextIdea, Keys(KeyEvent.KEYCODE_SPACE), Keys(KeyEvent.KEYCODE_PAGE_DOWN))),
+            Shortcut(stringResource(R.string.common_back), listOf(MapKeys.PreviousIdea, Keys(KeyEvent.KEYCODE_PAGE_UP))),
             Shortcut(stringResource(R.string.map_shortcut_play_or_pause), listOf(Keys(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))),
             Shortcut(stringResource(R.string.map_shortcut_back_to_the_map), listOf(Keys(KeyEvent.KEYCODE_ESCAPE))),
-            Shortcut(stringResource(R.string.common_stop_presenting), listOf(Keys(KeyEvent.KEYCODE_ESCAPE))),
+            Shortcut(stringResource(R.string.common_stop_presenting), listOf(MapKeys.StopPresenting)),
         ),
     ),
 )

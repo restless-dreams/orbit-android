@@ -18,8 +18,14 @@ import java.util.Locale
  * the same however it's capitalized; the first spelling is kept.
  */
 object MapTags {
-    private val ENTRY = Regex("""^tags:\s*(.*?)\s*$""")
-    private val LIST_ITEM = Regex("""^\s*-(?:\s+(.*?))?\s*$""")
+    /** The `tags:` key and what follows it on its line, read in one pass however long its runs of spaces ([TEXT_BEFORE_SPACES]). */
+    private val ENTRY = Regex("""^tags:\s*+($TEXT_BEFORE_SPACES)\s*$""")
+
+    private val YAML_NODES = Regex("""^nodes\s*:.*""")
+
+    /** An item of the list under it (`- work`), read the same way. */
+    private val LIST_ITEM = Regex("""^\s*-(?:\s++($TEXT_BEFORE_SPACES))?\s*$""")
+
     private val SPACES = Regex("""\s+""")
 
     /** Text other YAML readers take for a number, a boolean or nothing: written in quotes (as Orbit's `needsQuotes`). */
@@ -66,10 +72,11 @@ object MapTags {
 
         val closing = closing(lines)
 
-        if (closing != null) {
-            lines.addAll(closing, written)
-        } else {
-            lines.addAll(0, listOf("---") + written + listOf("---", ""))
+        when {
+            closing != null -> lines.addAll(closing, written)
+            // A YAML map keeps its tags among its own keys: frontmatter would make it markdown.
+            yamlEnd(lines) != null -> lines.addAll(0, written)
+            else -> lines.addAll(0, listOf("---") + written + listOf("---", ""))
         }
 
         return lines.joinToString("\n")
@@ -151,6 +158,16 @@ object MapTags {
         return items
     }
 
+    /** Where the map's own keys start: after the frontmatter's opening line, or at the top of a YAML map. */
+    private fun frontmatterStart(lines: List<String>): Int = if (closing(lines) != null) 1 else 0
+
+    /**
+     * How far a YAML map's own keys go, as frontmatter's do (the whole text:
+     * `tags:` is one of its keys at the top, beside `nodes:`), when the text
+     * is a YAML map rather than markdown.
+     */
+    private fun yamlEnd(lines: List<String>): Int? = lines.size.takeIf { lines.any { YAML_NODES.matches(it.trimEnd()) } }
+
     /** The line closing the frontmatter, when the text starts with one. */
     private fun closing(lines: List<String>): Int? {
         if (lines.firstOrNull()?.trim() != "---") {
@@ -162,8 +179,8 @@ object MapTags {
 
     /** The lines of the `tags:` entry in the frontmatter: its own, then its list's. */
     private fun entry(lines: List<String>): IntRange? {
-        val closing = closing(lines) ?: return null
-        val start = (1 until closing).firstOrNull { ENTRY.matches(lines[it]) } ?: return null
+        val closing = closing(lines) ?: yamlEnd(lines) ?: return null
+        val start = (frontmatterStart(lines) until closing).firstOrNull { ENTRY.matches(lines[it]) } ?: return null
 
         // A list written on the key's own line has nothing under it.
         if (ENTRY.find(lines[start])!!.groupValues[1].isNotEmpty()) {

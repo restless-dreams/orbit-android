@@ -10,6 +10,8 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.webkit.ConsoleMessage
 import android.webkit.JsPromptResult
@@ -32,17 +34,21 @@ import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.MainActivity
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.media.isPlayerHost
-import java.io.File
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import java.io.File
 import kotlin.time.Duration.Companion.seconds
+
+/** The longest a map waits for its page's first frame before it shows anyway (see [OrbitPage.drawn]). */
+private val DRAWN_WAIT = 2.seconds
 
 /** Pages are served from the app under a secure origin, so they can use the web's modern APIs. */
 const val PAGE_HOST = "appassets.androidplatform.net"
@@ -83,11 +89,20 @@ class PageException(message: String) : Exception(message)
  * the map's page, or the audience's ([AUDIENCE_URL]). Either speaks the
  * app's language ([speak]).
  */
-class OrbitPage internal constructor(private val application: Context, mapsDirectory: File, private val pageUrl: String = PAGE_URL) {
+class OrbitPage internal constructor(private val application: Context, mapsDirectory: File, private val pageUrl: String = PAGE_URL) : MapPage {
     /** The page's path: the only one of the app's own this view loads as a page. */
     private val pagePath: String? = pageUrl.toUri().path
 
     private val context = MutableContextWrapper(application)
+
+    /**
+     * Whether what's typed into the page should stay out of keyboards'
+     * learning: while it shows a private map, words typed there would come
+     * back as suggestions in other apps.
+     */
+    @Volatile
+    override var incognito = false
+
     private var ready = false
     private val waiting = WaitingCommands()
     private var nextJob = 1
@@ -114,7 +129,7 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
     private var readableMaps: Set<String> = emptySet()
 
     /** Who hears the page's messages: the screen showing it. */
-    var listener: ((MapMessage) -> Unit)? = null
+    override var listener: ((MapMessage) -> Unit)? = null
 
     /** The map the page was last asked to draw; messages about any other one arrived late, and go nowhere. */
     private var expectedMap: String? = null
@@ -151,7 +166,7 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
         speak()
     }
 
-    fun send(command: MapCommand) {
+    override fun send(command: MapCommand) {
         send(command, job = null)
     }
 
@@ -241,7 +256,7 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
     }
 
     /** Sends a job and waits for its answer. */
-    suspend fun <T> request(answer: DeserializationStrategy<T>, command: (job: Int) -> MapCommand): T {
+    override suspend fun <T> request(answer: DeserializationStrategy<T>, command: (job: Int) -> MapCommand): T {
         if (!isAlive) {
             throw PageException(application.getString(R.string.page_stopped))
         }
@@ -372,6 +387,26 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
         webView.context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(webView.windowToken, 0)
     }
 
+    /**
+     * Waits until what the page shows now is ready to be drawn, so the next
+     * frame shows it: a big map paints a moment after the page says it's
+     * ready. A page out of sight is never drawn, so the wait ends after
+     * [DRAWN_WAIT] whatever happens.
+     */
+    override suspend fun drawn() {
+        val drawn = CompletableDeferred<Unit>()
+
+        webView.postVisualStateCallback(
+            0,
+            object : WebView.VisualStateCallback() {
+                override fun onComplete(requestId: Long) {
+                    drawn.complete(Unit)
+                }
+            },
+        )
+        withTimeoutOrNull(DRAWN_WAIT) { drawn.await() }
+    }
+
     private fun stopWaitingForFocus() {
         focusWaiter?.let { (observer, waiter) ->
             if (observer.isAlive) {
@@ -455,9 +490,21 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
             // The app's font, for the map: res/font/google_sans_flex.ttf is /res/font/google_sans_flex.ttf.
             .addPathHandler("/res/", WebViewAssetLoader.ResourcesPathHandler(application))
             .build()
-        val files = MapFiles(mapsDirectory)
+        // The map's page draws an animated picture's first frame: drawn moving, its planet would keep the page drawing.
+        // The audience's screen, like the room's browsers and web pages, plays it.
+        val files = MapFiles(mapsDirectory, FirstFrames(File(application.cacheDir, "first-frames")).takeIf { pageUrl != AUDIENCE_URL })
 
-        return WebView(context).apply {
+        return object : WebView(context) {
+            override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
+                val connection = super.onCreateInputConnection(outAttrs)
+
+                if (incognito) {
+                    outAttrs.imeOptions = outAttrs.imeOptions or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                }
+
+                return connection
+            }
+        }.apply {
             // The page is transparent: Compose paints the background, so there is never a white flash.
             setBackgroundColor(Color.TRANSPARENT)
             // A map has no forms to fill in, so the phone's autofill service, which can be another
@@ -513,7 +560,7 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
      * `players`, for the audience's page, YouTube's and Vimeo's players may
      * play protected videos, as Vimeo's are; nothing else is granted.
      */
-    private class QuietChrome(private val players: Boolean) : WebChromeClient() {
+    internal class QuietChrome(private val players: Boolean) : WebChromeClient() {
         override fun onConsoleMessage(message: ConsoleMessage): Boolean = !BuildConfig.DEBUG
 
         override fun onPermissionRequest(request: PermissionRequest) {

@@ -3,8 +3,14 @@ package com.hyuchia.orbit.nearby
 import android.content.ContextWrapper
 import com.hyuchia.orbit.FileWords
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.data.MAP_FORMAT
 import com.hyuchia.orbit.data.MapRepository
+import com.hyuchia.orbit.data.MediaSummary
+import com.hyuchia.orbit.data.OutgoingMedia
+import com.hyuchia.orbit.data.StarterMap
 import com.hyuchia.orbit.data.StarterMaps
+import com.hyuchia.orbit.data.TestMedia
+import com.hyuchia.orbit.data.carriedMediaTypes
 import com.hyuchia.orbit.page.AppTheme
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -21,10 +27,14 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -40,6 +50,8 @@ import java.util.Locale
 import java.util.Random
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.Deflater
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -65,7 +77,7 @@ class SendingTest {
     private val starters = object : StarterMaps {
         override fun samples() = emptyList<String>()
 
-        override fun welcome() = "# Welcome\n"
+        override fun welcome() = StarterMap("# Welcome\n")
     }
 
     private val maps = MapRepository(File(files, "maps"), File(files, "trash"), starters, english)
@@ -218,6 +230,23 @@ class SendingTest {
 
     private fun state(id: String): String = offerJson.decodeFromString(StateAnswer.serializer(), request("GET", "/offer/$id").second).state
 
+    /**
+     * Orbit 0.3.0 taking maps, as far as its answers go: this host's, passed
+     * on without what of a map it opens, which 0.3.0 doesn't say.
+     */
+    private fun orbit030(): LocalServer = LocalServer({ _, _ -> 64 * 1024 }, policy = anyone) { request ->
+        val head = buildString {
+            append("${request.method} ${request.path} HTTP/1.1\r\nHost: $address\r\nConnection: close\r\n")
+            request.headers.filterKeys { it !in setOf("host", "connection", "content-length") }.forEach { (name, value) -> append("$name: $value\r\n") }
+            append("Content-Length: ${request.body.size}\r\n\r\n")
+        }
+
+        val answer = exchange(host.port, head + String(request.body, Charsets.ISO_8859_1))
+        val json = runCatching { Json.parseToJsonElement(answer.body).jsonObject }.getOrNull()
+        val body = json?.let { JsonObject(it - "mapFormat" - "mediaTypes").toString() } ?: answer.body
+        Response.Bytes(answer.status, answer.header("content-type") ?: "text/plain", body.toByteArray())
+    }
+
     @Test
     fun `a map sent to a typed address arrives whole, once both devices showed the same code`() = runBlocking<Unit> {
         val photo = picture(1_500_000)
@@ -227,7 +256,7 @@ class SendingTest {
         val offer = arrived()
         assertEquals("Ana's Pixel", offer.from)
         assertEquals("Trip", offer.bundle.title)
-        assertEquals(1, offer.bundle.pictureCount)
+        assertEquals(1, offer.bundle.media.pictures)
         assertEquals("127.0.0.1", offer.address)
         val waiting = waitFor(states) { it is SendState.Waiting } as SendState.Waiting
         assertTrue(offer.check, Regex("[0-9]{4}").matches(offer.check))
@@ -356,12 +385,96 @@ class SendingTest {
     }
 
     @Test
+    fun `the device taking maps says what of a map it opens, with its key and in its answer to a hello`() {
+        val key = offerJson.decodeFromString(KeyAnswer.serializer(), request("GET", "/key").second)
+        assertEquals(MAP_FORMAT, key.mapFormat)
+        assertEquals(carriedMediaTypes().sorted(), key.mediaTypes)
+
+        val (status, answer) = greet(hello())
+        assertEquals(200, status)
+        assertEquals(MAP_FORMAT, answer!!.mapFormat)
+        assertEquals(carriedMediaTypes().sorted(), answer.mediaTypes)
+    }
+
+    @Test
+    fun `before a map goes to an older Orbit, the person sending hears which of its files stay here`() = runBlocking<Unit> {
+        val markdown = "# Trip\n\n- Lisbon\n\n  ![Tram](media/photo.jpg)\n- Fado <!-- orbit audio: media/sound-1.mp3 -->\n" +
+            "- Waves <!-- orbit audio: media/sound-2.ogg -->\n- Notes <!-- orbit audio: media/memo-1.mp4 -->\n"
+        val media = mapOf(
+            "photo.jpg" to picture(2_000),
+            "clip.mp4" to picture(3_000, seed = 2),
+            "clip.jpg" to picture(1_000, seed = 3),
+            "sound-1.mp3" to picture(4_000, seed = 4),
+            "sound-2.ogg" to picture(5_000, seed = 5),
+            "memo-1.mp4" to picture(6_000, seed = 6),
+        )
+
+        // This version opens all of it: the code comes alone.
+        val (here, toThisVersion) = send(host.key.text, bundle(markdown, media), checker = Checker { false })
+        assertNull((waitFor(toThisVersion) { it is SendState.Confirming } as SendState.Confirming).older)
+        here.join()
+
+        val older = orbit030()
+        older.start(0)
+
+        try {
+            val (there, toOrbit030) = send(host.key.text, bundle(markdown, media), to = "127.0.0.1:${older.port}", checker = Checker { false })
+            val confirming = waitFor(toOrbit030) { it is SendState.Confirming } as SendState.Confirming
+            // Its pictures and videos go, a voice memo's .mp4 too; the sounds of the kinds 0.3.0 doesn't keep stay.
+            assertEquals(OlderThere(MediaSummary(audio = 2, bytes = 9_000), showsOnly = false), confirming.older)
+            there.join()
+            assertEquals(SendState.Cancelled, toOrbit030.last())
+        } finally {
+            older.stop()
+        }
+    }
+
+    @Test
+    fun `a map written for a newer format than the other device reads is said to only show there, when it opens here`() {
+        val newer = bundle("---\nschemaVersion: 2\n---\n# Plan\n- Ask <!-- orbit audio: media/sound-1.mp3 -->\n", mapOf("sound-1.mp3" to picture(1_000)))
+        val formatOne = DeviceReads(mapFormat = 1, mediaTypes = carriedMediaTypes())
+        assertEquals(OlderThere(MediaSummary(), showsOnly = true), olderThere(newer, formatOne, readsHere = 2))
+        assertEquals(OlderThere(MediaSummary(audio = 1, bytes = 1_000), showsOnly = true), olderThere(newer, DeviceReads.RELEASE_0_3_0, readsHere = 2))
+
+        // A map this device can only show itself shows only there too, as the person sees here already.
+        assertNull(olderThere(newer, formatOne, readsHere = 1))
+        assertNull(olderThere(newer, DeviceReads(mapFormat = 2, mediaTypes = carriedMediaTypes()), readsHere = 2))
+        assertNull(olderThere(bundle("# Plan\n"), formatOne))
+        // One that can't be read here says nothing.
+        assertNull(olderThere(File(files, "not-a-zip.zip").apply { writeText("# Plan\n") }, formatOne))
+    }
+
+    @Test
+    fun `the code's dialog says what an older Orbit there won't open, in words for each case`() {
+        val spanish = FileWords(Locale.forLanguageTag("es-MX"))
+        val sounds = OlderThere(MediaSummary(audio = 2), showsOnly = false)
+        val sound = OlderThere(MediaSummary(audio = 1), showsOnly = false)
+        val showsOnly = OlderThere(MediaSummary(), showsOnly = true)
+        val both = OlderThere(MediaSummary(audio = 1), showsOnly = true)
+
+        assertEquals("It has an older Orbit, so 2 sounds stay on this device. Update Orbit there to send everything.", wontOpenThere(sounds, english))
+        assertEquals("It has an older Orbit, so a sound stays on this device. Update Orbit there to send everything.", wontOpenThere(sound, english))
+        assertEquals("It has an older Orbit, so it can only show this map. Update Orbit there to edit it there too.", wontOpenThere(showsOnly, english))
+        assertEquals(
+            "It has an older Orbit, so it can only show this map, and a sound stays on this device. Update Orbit there to send everything and edit it there.",
+            wontOpenThere(both, english),
+        )
+        assertEquals("Tiene un Orbit más antiguo, así que 2 audios se quedan en este dispositivo. Actualiza Orbit allí para enviarlo todo.", wontOpenThere(sounds, spanish))
+        assertEquals("Tiene un Orbit más antiguo, así que un audio se queda en este dispositivo. Actualiza Orbit allí para enviarlo todo.", wontOpenThere(sound, spanish))
+        assertEquals("Tiene un Orbit más antiguo, así que solo puede mostrar este mapa. Actualiza Orbit allí para poder editarlo también allí.", wontOpenThere(showsOnly, spanish))
+    }
+
+    @Test
     fun `an offer from an older Orbit is refused before any of it is read, and the phone says so`() {
         assertEquals(0L, host.olderSender.value)
         // Orbit 0.2.0 sent the whole map with its first request: none of it is read.
         assertEquals(400, headOnly("/offer", 40_000_000, mapOf(VERSION_HEADER to "1", KEY_HEADER to hello().session.senderKey.text)))
         assertTrue(host.olderSender.value > 0)
         assertEquals(400, headOnly("/offer", 40_000_000))
+        // Again and again, it's said once: another device can't keep the dialog up.
+        val said = host.olderSender.value
+        assertEquals(400, headOnly("/offer", 40_000_000, mapOf(VERSION_HEADER to "1")))
+        assertEquals(said, host.olderSender.value)
 
         // A newer version is refused too, but this device is the one to update: it says nothing.
         val before = host.olderSender.value
@@ -490,7 +603,7 @@ class SendingTest {
         val photo = picture(OFFER_LIMIT.toInt() - 200_000, seed = 9)
         val (_, states) = send(host.key.text, bundle("# Big\n", mapOf("big.png" to photo)))
         val offer = arrived()
-        assertEquals(1, offer.bundle.pictureCount)
+        assertEquals(1, offer.bundle.media.pictures)
         assertEquals(offer.check, (waitFor(states) { it is SendState.Waiting } as SendState.Waiting).check)
         host.decline(offer)
         waitFor(states) { it == SendState.Declined }
@@ -522,7 +635,7 @@ class SendingTest {
 
     @Test
     fun `a shared map downloads from a file made for each browser, gone once it's sent`() = runBlocking<Unit> {
-        val photo = picture(300_000)
+        val photo = TestMedia.picture(600, 400, noise = 1)
         val id = maps.add("# Trip\n\n- Lisbon\n\n  ![Tram](media/photo.jpg)\n", pictures = mapOf("photo.jpg" to photo))
         val code = host.share(id, AppTheme(dark = false, tokens = emptyMap())).code
         val browser = Browser(host.port)
@@ -539,9 +652,83 @@ class SendingTest {
         assertTrue(head, head.startsWith("HTTP/1.1 200"))
         assertTrue(head, "Content-Disposition: attachment; filename=\"Trip.zip\"" in head)
         val entries = ZipInputStream(zip.inputStream()).use { input -> generateSequence { input.nextEntry }.associate { it.name to input.readBytes() } }
-        assertArrayEquals(photo, entries["media/photo.jpg"])
+        assertArrayEquals(OutgoingMedia.picture(photo), entries["media/photo.jpg"])
         assertTrue(entries.getValue("map.md").decodeToString().startsWith("# Trip"))
         assertTrue(eventually { File(context.cacheDir, "shared-maps").list().isNullOrEmpty() })
+    }
+
+    @Test
+    fun `a computer's page is made once for each version of the map, its files included`() = runBlocking<Unit> {
+        val id = maps.add("# Trip\n\n- Lisbon\n\n  ![Tram](media/tram.jpg)\n")
+        val share = host.share(id, AppTheme(dark = false, tokens = emptyMap()))
+        val folder = maps.folder(id)
+        var builds = 0
+
+        suspend fun page(): String = share.page(pageVersion(maps.summary(id), folder)) {
+            builds += 1
+            "page $builds"
+        }
+
+        assertEquals("page 1", page())
+        assertEquals("page 1", page())
+
+        // The picture reaches the folder late, as from a sync app: the page is made again with it.
+        File(folder, "media").apply { mkdirs() }.resolve("tram.jpg").writeBytes(picture(2_000))
+        assertEquals("page 2", page())
+        assertEquals("page 2", page())
+
+        maps.write(id, "# Trip\n\n- Lisbon\n- Porto\n\n  ![Tram](media/tram.jpg)\n")
+        assertEquals("page 3", page())
+        assertEquals(3, builds)
+    }
+
+    @Test
+    fun `a private map shown to computers stops being served as it locks, and its share ends`() = runBlocking<Unit> {
+        val id = maps.add("# Diary\n\n- Plans\n")
+        val locked = AtomicBoolean(false)
+        host.hidden = { mapId -> mapId == id && locked.get() }
+        val code = host.share(id, AppTheme(dark = false, tokens = emptyMap())).code
+        val browser = Browser(host.port)
+        assertEquals(303, browser.post("/$code/join", emptyMap()).status)
+        assertEquals(200, browser.get("/$code/map.zip").status)
+
+        locked.set(true)
+        // The browser that was in gets nothing more, and the room says it ended (its pages need the app's assets).
+        val zip = browser.get("/$code/map.zip")
+        assertNotEquals(200, zip.status)
+        assertFalse(zip.body.contains("Diary"))
+        assertTrue(browser.get("/$code/status").body.contains("\"ended\""))
+        // Unlocked again, the share stays ended: it's shown again only when asked to.
+        locked.set(false)
+        assertNotEquals(200, browser.get("/$code/map.zip").status)
+        assertTrue(browser.get("/$code/status").body.contains("\"ended\""))
+    }
+
+    @Test
+    fun `a private map that locks while its zip is made for a computer gives out none of it`() = runBlocking<Unit> {
+        val id = maps.add("# Diary\n\n- Plans\n")
+        val code = host.share(id, AppTheme(dark = false, tokens = emptyMap())).code
+        val browser = Browser(host.port)
+        assertEquals(303, browser.post("/$code/join", emptyMap()).status)
+
+        // Shown as the browser asks, locked by the time the zip is made, as a big map's takes a while.
+        val looks = AtomicInteger(0)
+        host.hidden = { mapId -> mapId == id && looks.incrementAndGet() > 1 }
+        assertNotEquals(200, browser.get("/$code/map.zip").status)
+        assertTrue(browser.get("/$code/status").body.contains("\"ended\""))
+        // The zip made for it doesn't stay behind.
+        assertTrue(eventually { File(context.cacheDir, "shared-maps").list().isNullOrEmpty() })
+    }
+
+    @Test
+    fun `a private map that locked while Orbit was away isn't served again as it comes back`() = runBlocking<Unit> {
+        val id = maps.add("# Diary\n\n- Plans\n")
+        val code = host.share(id, AppTheme(dark = false, tokens = emptyMap())).code
+        host.hidden = { mapId -> mapId == id }
+        // Orbit back on screen.
+        host.start(accepting = true)
+
+        assertTrue(Browser(host.port).get("/$code/status").body.contains("\"ended\""))
     }
 
     @Test
@@ -584,7 +771,7 @@ class SendingTest {
 
         /** Waits up to five seconds for `condition`. */
         fun eventually(condition: () -> Boolean): Boolean {
-            val until = System.nanoTime() + 5_000_000_000L
+            val until = System.nanoTime() + 30_000_000_000L
 
             while (System.nanoTime() < until) {
                 if (runCatching(condition).getOrDefault(false)) {

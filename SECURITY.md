@@ -6,7 +6,7 @@ Security fixes go into the latest release of Orbit for Android.
 
 ## Reporting a vulnerability
 
-Please don't open a public issue for a suspected vulnerability. Report it privately instead, with **Report a vulnerability** under this repository's **Security** tab, and include:
+Please don't open a public issue for a suspected vulnerability. Report it privately instead, with **Report a vulnerability** under the **Security** tab of [github.com/restless-dreams/orbit-android](https://github.com/restless-dreams/orbit-android/security), or, if you can't use that, by email to [diana@hyuchia.com](mailto:diana@hyuchia.com). Include:
 
 - the app's version (Settings, About) or the commit, and which build: `play` or `libre`;
 - the steps to reproduce it;

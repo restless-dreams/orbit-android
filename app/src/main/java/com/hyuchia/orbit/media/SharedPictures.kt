@@ -4,9 +4,9 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import com.hyuchia.orbit.Logs
+import com.hyuchia.orbit.data.OutgoingMedia
 import com.hyuchia.orbit.data.mediaType
-import com.hyuchia.orbit.ui.exportFile
-import com.hyuchia.orbit.ui.shareFile
+import com.hyuchia.orbit.ui.shareMapExport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
@@ -18,26 +18,76 @@ import kotlin.math.max
 /** A picture drawn again to be shared is at most this many pixels on its longer side. */
 private const val REDRAWN_SIZE = 4096
 
+/** How sharing a file from a map went. */
+enum class Shared {
+    /** It went, without what its file says beyond what it shows or plays. */
+    Clean,
+
+    /** It didn't go: Orbit couldn't take that out, and its file would say it ([shareAsItIs] sends it if the person chooses). */
+    NotClean,
+
+    /** It didn't go: it couldn't be read or written. */
+    Failed,
+}
+
 /**
- * Shares a picture from a map's folder as a copy without its metadata (see
- * [SharedPictures]): a GIF, BMP or SVG as it is, since they carry none, and
- * a kind Orbit can't take it out of, such as HEIF, drawn again. A picture
- * that can't be read or drawn isn't shared, since its file would say what
- * it holds.
+ * Shares a picture from the folder of the map `mapId` as a copy without its
+ * metadata (see [SharedPictures]): a GIF without its comments and other
+ * apps' blocks, an SVG with only what draws it, a BMP with nothing but its
+ * picture ([OutgoingMedia]), and a kind Orbit can't take it out of, such as
+ * HEIF, drawn again. A picture that can't be read or drawn isn't shared
+ * ([Shared.NotClean]), since its file would say what it holds. Nothing
+ * opens for a private map that locked meanwhile ([shareMapExport]).
  */
-suspend fun sharePicture(context: Context, file: File, label: String) {
-    try {
-        val copy = withContext(Dispatchers.IO) { sharedCopy(file) }
+suspend fun sharePicture(context: Context, mapId: String, file: File, label: String): Shared = try {
+    val copy = withContext(Dispatchers.IO) { sharedCopy(file) }
 
-        if (copy == null) {
-            Logs.warn("OrbitMedia", "A picture couldn't be shared without its metadata")
-            return
-        }
-
+    if (copy == null) {
+        Shared.NotClean
+    } else {
         val (name, bytes) = copy
-        shareFile(context, exportFile(context, name) { it.write(bytes) }, mediaType(name), label)
+        shareMapExport(context, mapId, name, mediaType(name), label) { it.write(bytes) }
+        Shared.Clean
+    }
+} catch (failed: IOException) {
+    Logs.warn("OrbitMedia", "A picture couldn't be shared", failed)
+    Shared.Failed
+}
+
+/**
+ * Shares a video or a sound from the folder of the map `mapId` as a copy
+ * without what its file says beyond what it shows or plays, such as where
+ * and when it was recorded and on what, or its tags ([OutgoingMedia]), as a
+ * map's zip carries it. One Orbit can't read through isn't shared
+ * ([Shared.NotClean]), since its file would say what it holds. Nothing
+ * opens for a private map that locked while the copy was made
+ * ([shareMapExport]).
+ */
+suspend fun shareVideoOrSound(context: Context, mapId: String, file: File, type: String, label: String): Shared = try {
+    val outgoing = withContext(Dispatchers.IO) { OutgoingMedia.of(file) }
+
+    if (outgoing == null) {
+        Shared.NotClean
+    } else {
+        shareMapExport(context, mapId, file.name, type, label) { output -> outgoing.writeTo(output) }
+        Shared.Clean
+    }
+} catch (failed: IOException) {
+    Logs.warn("OrbitMedia", "A video or sound couldn't be shared", failed)
+    Shared.Failed
+}
+
+/**
+ * Shares a file from the folder of the map `mapId` exactly as it is, with
+ * all its file says: only once the person chose to, knowing what goes with
+ * it, after Orbit couldn't take that out ([Shared.NotClean]), and while the
+ * map doesn't show locked ([shareMapExport]).
+ */
+suspend fun shareAsItIs(context: Context, mapId: String, file: File, type: String, label: String) {
+    try {
+        shareMapExport(context, mapId, file.name, type, label) { output -> file.inputStream().use { it.copyTo(output) } }
     } catch (failed: IOException) {
-        Logs.warn("OrbitMedia", "A picture couldn't be shared", failed)
+        Logs.warn("OrbitMedia", "A file couldn't be shared as it is", failed)
     }
 }
 
@@ -46,8 +96,10 @@ private fun sharedCopy(file: File): Pair<String, ByteArray>? {
     val bytes = file.readBytes()
 
     return when (SharedPictures.kindOf(bytes)) {
-        SharedPictures.Kind.Plain -> file.name to bytes
-        SharedPictures.Kind.Jpeg, SharedPictures.Kind.Png, SharedPictures.Kind.WebP -> SharedPictures.withoutMetadata(bytes)?.let { file.name to it } ?: redrawn(file)
+        SharedPictures.Kind.Plain -> OutgoingMedia.picture(bytes)?.let { file.name to it } ?: redrawn(file)
+        // A drawing that can't be read through can't be drawn again either: it isn't shared.
+        SharedPictures.Kind.Svg -> SharedPictures.withoutMetadata(bytes)?.let { file.name to it }
+        SharedPictures.Kind.Jpeg, SharedPictures.Kind.Png, SharedPictures.Kind.WebP, SharedPictures.Kind.Gif -> SharedPictures.withoutMetadata(bytes)?.let { file.name to it } ?: redrawn(file)
         SharedPictures.Kind.Other -> redrawn(file)
     }
 }
@@ -94,7 +146,13 @@ internal object SharedPictures {
         Png,
         WebP,
 
-        /** GIF, BMP or SVG, which carry no camera's details, and go as they are. */
+        /** A GIF, which keeps its frames and looping, without comments or other apps' blocks. */
+        Gif,
+
+        /** An SVG drawing, which keeps only what draws it. */
+        Svg,
+
+        /** A BMP, whose headers say only what the picture is ([OutgoingMedia] empties what apps may keep around it). */
         Plain,
 
         /** Anything else, such as HEIF and AVIF: drawn again to be shared. */
@@ -105,7 +163,9 @@ internal object SharedPictures {
         bytes.startsWith(JPEG_START) -> Kind.Jpeg
         bytes.startsWith(PNG_SIGNATURE) -> Kind.Png
         bytes.startsWith(RIFF) && bytes.startsWith(WEBP, at = 8) -> Kind.WebP
-        bytes.startsWith(GIF) || bytes.startsWith(BMP) || looksLikeSvg(bytes) -> Kind.Plain
+        bytes.startsWith(GIF) -> Kind.Gif
+        looksLikeSvg(bytes) -> Kind.Svg
+        bytes.startsWith(BMP) -> Kind.Plain
         else -> Kind.Other
     }
 
@@ -113,14 +173,23 @@ internal object SharedPictures {
      * A JPEG, PNG or WebP picture's bytes with nothing but the picture: its
      * pixels, its color profile and which way up it is. Everything else goes,
      * EXIF and XMP (where a camera writes where the photo was taken), IPTC,
-     * comments, thumbnails and pictures stored after it. Null for any other
-     * kind, or a file that isn't whole.
+     * comments, thumbnails and pictures stored after it. A GIF keeps its
+     * frames and looping, and an SVG what draws it ([gifWithoutMetadata],
+     * [svgWithoutMetadata]). Null for any other kind, or a file that isn't
+     * whole.
      */
-    fun withoutMetadata(bytes: ByteArray): ByteArray? = when (kindOf(bytes)) {
-        Kind.Jpeg -> jpeg(bytes)
-        Kind.Png -> png(bytes)
-        Kind.WebP -> webP(bytes)
-        Kind.Plain, Kind.Other -> null
+    fun withoutMetadata(bytes: ByteArray): ByteArray? = try {
+        when (kindOf(bytes)) {
+            Kind.Jpeg -> jpeg(bytes)
+            Kind.Png -> png(bytes)
+            Kind.WebP -> webP(bytes)
+            Kind.Gif -> gifWithoutMetadata(bytes)
+            Kind.Svg -> svgWithoutMetadata(bytes)
+            Kind.Plain, Kind.Other -> null
+        }
+    } catch (malformed: RuntimeException) {
+        // A file made to trip the reader is one it can't read through, as a broken one is.
+        null
     }
 
     private fun jpeg(bytes: ByteArray): ByteArray? {
@@ -247,11 +316,13 @@ internal object SharedPictures {
         while (position + 8 <= bytes.size) {
             val length = bytes.intAt(position, bigEndian = true)
             val type = String(bytes, position + 4, 4, Charsets.ISO_8859_1)
-            val end = position + 12 + length
 
-            if (length < 0 || end > bytes.size) {
+            // Counted in Long: a length near 2³¹ would otherwise wrap around past the check.
+            if (length < 0 || position + 12L + length > bytes.size) {
                 return null
             }
+
+            val end = position + 12 + length
 
             if (type == "eXIf") {
                 orientation = orientationOf(bytes, position + 8, position + 8 + length) ?: orientation
@@ -304,11 +375,13 @@ internal object SharedPictures {
         while (position + 8 <= bytes.size) {
             val type = String(bytes, position, 4, Charsets.ISO_8859_1)
             val size = bytes.intAt(position + 4, bigEndian = false)
-            val end = position + 8 + size + size % 2
 
-            if (size < 0 || position + 8 + size > bytes.size) {
+            // Counted in Long: a size near 2³¹ would otherwise wrap around past the check.
+            if (size < 0 || position + 8L + size > bytes.size) {
                 return null
             }
+
+            val end = position + 8 + size + size % 2
 
             when (type) {
                 "EXIF" -> orientationOf(bytes, position + 8 + if (bytes.startsWith(EXIF_HEADER, at = position + 8)) EXIF_HEADER.size else 0, position + 8 + size)?.let { orientation = it }
@@ -373,12 +446,14 @@ internal object SharedPictures {
             else -> return null
         }
 
-        val directory = start + bytes.intAt(start + 4, bigEndian)
+        val offset = bytes.intAt(start + 4, bigEndian)
 
-        if (directory < start || directory + 2 > end) {
+        // Counted in Long: an offset near 2³¹ would otherwise wrap around past the check.
+        if (offset < 0 || start.toLong() + offset + 2 > end) {
             return null
         }
 
+        val directory = start + offset
         val entries = bytes.shortAt(directory, bigEndian)
 
         for (index in 0 until entries) {

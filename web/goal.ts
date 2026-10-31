@@ -34,8 +34,16 @@ const LARGEST = 1e15;
 /** A number written as text, the way YAML would read it unquoted. */
 const PLAIN_NUMBER = /^[+-]?(\d+(\.\d*)?|\.\d+)$/;
 
+/**
+ * The version of a goal's fields this app reads. A change older apps would
+ * misread raises it (`goal@2`), and they show such a goal as an idea like
+ * any other: not counted, without its ring or its steps.
+ */
+export const GOAL_VERSION = 1;
+
+/** A goal this app reads: one written for this version of a goal's fields, or an older one. */
 export const isGoal = (node: OrbitNode): boolean => {
-  return node.type?.trim().toLowerCase() === 'goal';
+  return node.type?.trim().toLowerCase() === 'goal' && (node.typeVersion ?? 1) <= GOAL_VERSION;
 };
 
 /** A number in an attribute: a plain number, or text that is one. Anything else is no number. */
