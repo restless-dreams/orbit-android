@@ -7,7 +7,7 @@ import org.junit.Test
 import java.io.File
 
 /** Every release, by its versionCode: the folder in src/test/resources/releases/ with the files it left on a phone. */
-private val RELEASES = mapOf(1 to "0.1.0", 2 to "0.1.1", 3 to "0.2.0", 4 to "0.3.0", 5 to "0.4.0")
+private val RELEASES = mapOf(1 to "0.1.0", 2 to "0.1.1", 3 to "0.2.0", 4 to "0.3.0", 5 to "0.4.0", 6 to "0.5.0")
 
 /**
  * The upgrade tests (ReleaseDataTest) open every release's files, which each

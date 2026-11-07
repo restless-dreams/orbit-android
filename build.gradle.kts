@@ -24,7 +24,7 @@ dependencies {
     ktlint(project(":code-style"))
 }
 
-val kotlinFiles = listOf("app/src/**/*.kt", "baselineprofile/src/**/*.kt", "code-style/src/**/*.kt", "*.kts", "*/*.kts")
+val kotlinFiles = listOf("app/src/**/*.kt", "baselineprofile/src/**/*.kt", "journeys/src/**/*.kt", "code-style/src/**/*.kt", "*.kts", "*/*.kts")
 
 tasks.register<JavaExec>("ktlintCheck") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP

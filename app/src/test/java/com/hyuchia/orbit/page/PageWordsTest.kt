@@ -8,6 +8,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Locale
 
@@ -16,6 +17,11 @@ class PageWordsTest {
     private val spanish = SpanishWords.pageWords()
 
     private fun asset(name: String): String = File("src/main/assets/map/$name").readText()
+
+    /** The web page for a map in `words`, as [WebPage.write] writes it. */
+    private fun webPage(title: String, words: PageWords): String =
+        ByteArrayOutputStream().also { WebPage.write(it, asset("web-page.html"), "", title, "# $title\n", AppTheme(dark = false, tokens = emptyMap()), emptyList(), null, words) }
+            .toString(Charsets.UTF_8.name())
 
     @Test
     fun pagesSpeakTheLanguageOfTheAppsStringsWithTheRegionOfTheAppsLocale() {
@@ -27,6 +33,16 @@ class PageWordsTest {
         // In none of them, the app's English, and its pages' too.
         assertEquals("en", pageLanguage(listOf(Locale.FRANCE, Locale.GERMANY), "en"))
         assertEquals("es", pageLanguage(emptyList(), "es"))
+    }
+
+    @Test
+    fun pagesWriteTimesOnThePhonesClock() {
+        // A date on a planet today shows its time: on a 24-hour clock where the phone keeps one, as the app's own times.
+        assertEquals("en-US-u-hc-h23", withHourCycle("en-US", is24Hour = true))
+        assertEquals("es-MX-u-hc-h12", withHourCycle("es-MX", is24Hour = false))
+        assertEquals("es-u-hc-h23", withHourCycle("es", is24Hour = true))
+        // One the language was given already gives way to the phone's.
+        assertEquals("en-US-u-hc-h12", withHourCycle("en-US-u-hc-h23", is24Hour = false))
     }
 
     @Test
@@ -87,7 +103,7 @@ class PageWordsTest {
 
     @Test
     fun aWebPageSpeaksTheLanguageOfItsWordsWithNothingLeftToFill() {
-        val page = WebPage.page(asset("web-page.html"), "", "Viaje", "# Viaje\n", AppTheme(dark = false, tokens = emptyMap()), emptyList(), null, spanish)
+        val page = webPage("Viaje", spanish)
         assertTrue(page.contains("<html lang=\"es-MX\">"))
         assertTrue(page.contains("title=\"Presentar (P)\""))
         assertTrue(page.contains("aria-label=\"Dejar de presentar (Esc)\""))
@@ -99,7 +115,7 @@ class PageWordsTest {
 
     @Test
     fun anEnglishWebPageReadsAsBefore() {
-        val page = WebPage.page(asset("web-page.html"), "", "Trip", "# Trip\n", AppTheme(dark = false, tokens = emptyMap()), emptyList(), null, english)
+        val page = webPage("Trip", english)
         assertTrue(page.contains("<html lang=\"en\">"))
         assertTrue(page.contains("<button class=\"page__present\" type=\"button\" title=\"Present (P)\">"))
         assertTrue(page.contains("\n  Present\n</button>"))

@@ -8,11 +8,16 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Private maps open with the phone's own fingerprint, face or screen lock, through Android's prompt. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Reminders when ideas' dates come, asked for on Android 13 and later as the first date is set. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Reminders set again after the phone restarts: Android forgets every app's alarms as it shuts down. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!--
-        WorkManager, which Glance runs the widgets on, adds three more to the built app: RECEIVE_BOOT_COMPLETED,
-        to schedule the widgets' updates again after the phone restarts; WAKE_LOCK, so an update isn't cut short
-        by the phone sleeping; and FOREGROUND_SERVICE, for urgent work on Android 11 and earlier. Orbit asks for
-        none of them itself. The stores list all six.
+        WorkManager, which Glance runs the widgets on, adds three more to the built app: RECEIVE_BOOT_COMPLETED
+        too, to schedule the widgets' updates again after the phone restarts; WAKE_LOCK, so an update isn't cut
+        short by the phone sleeping; and FOREGROUND_SERVICE, for urgent work on Android 11 and earlier. The stores
+        list them all. Reminders ask for no exact alarms: they come within minutes of their moment (see
+        reminders/AndroidReminders.kt).
     -->
 
     <!--
@@ -62,13 +67,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
             <!--
-                Open markdown and YAML files, zips of maps, and other apps' maps (OPML, FreeMind and Freeplane, XMind):
-                the types in data/MapFileTypes.kt, which MapFileTypesTest checks this against.
+                Open markdown and YAML files, zips of maps, other apps' maps (OPML, FreeMind and Freeplane, XMind), and
+                text files, which make maps as shared text does: markdown and YAML files an app calls plain text stay
+                maps as written. The types in data/MapFileTypes.kt, which MapFileTypesTest checks this against.
             -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="content" />
+                <data android:mimeType="text/plain" />
                 <data android:mimeType="text/markdown" />
                 <data android:mimeType="text/x-markdown" />
                 <data android:mimeType="application/yaml" />
@@ -130,6 +137,23 @@
         </activity>
 
         <!--
+            Files of any kind shared to Orbit join an idea: the one in focus on the map that's open,
+            or a new map's, named after the first. MainActivity tells them by this alias.
+        -->
+        <activity-alias
+            android:name=".AttachFiles"
+            android:exported="true"
+            android:label="@string/share_attach_to_idea"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity-alias>
+
+        <!--
             Quick capture: ideas added to a map without opening it, from the Quick Settings
             tile, a home screen widget's +, or text shared from another app.
         -->
@@ -184,6 +208,21 @@
         <receiver
             android:name=".widget.WidgetPinnedReceiver"
             android:exported="false" />
+
+        <!--
+            Reminders: their alarm, and the phone starting again, its clock or time zone changing, and Orbit
+            updated, which all leave alarms to set again. Only Android and Orbit itself send them.
+        -->
+        <receiver
+            android:name=".reminders.ReminderReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Something chosen in a share sheet Orbit opened: that share stays as private maps lock. -->
         <receiver

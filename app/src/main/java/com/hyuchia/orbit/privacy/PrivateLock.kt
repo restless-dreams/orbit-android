@@ -1,13 +1,19 @@
 package com.hyuchia.orbit.privacy
 
 import com.hyuchia.orbit.data.MapSummary
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 /**
  * What private maps show now. `locked` once Orbit locked them, until the
@@ -136,6 +142,33 @@ class PrivateLock(private val clock: () -> Long, screenLock: Boolean = true) {
     /** The screen turned off: private maps lock at once. */
     fun screenOff() {
         lock(away = true)
+    }
+
+    /**
+     * Runs `block` until it's done, or until private maps next lock, which
+     * cancels it: what it gives, or null once they've locked. For what names
+     * a private map while it's unlocked and can take a while, such as a
+     * message waiting for the one before it to go: it goes as they lock,
+     * as everything that names one does, even before it shows.
+     */
+    suspend fun <T : Any> unlessLocked(block: suspend () -> T): T? {
+        val locks = view.value.locks
+
+        return coroutineScope {
+            val done = async { block() }
+            // From the view as it is now: a lock since `locks` was read counts too.
+            val locked = launch { view.first { it.locks != locks }.also { done.cancel() } }
+
+            try {
+                done.await()
+            } catch (cancelled: CancellationException) {
+                // Stopped by the lock, not by whoever waits for it.
+                ensureActive()
+                null
+            } finally {
+                locked.cancel()
+            }
+        }
     }
 
     private fun current(): PrivateView = if (screenLock) {

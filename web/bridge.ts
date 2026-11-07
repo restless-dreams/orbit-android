@@ -19,11 +19,13 @@ import {
   renderToSVGString,
   serializeOrbitMarkdown,
   serializeOrbitYAML,
+  setNoteCheckbox,
   themeTokens,
 } from '@restless-dreams/orbit';
 import type {
   OrbitDocument,
   OrbitDocumentOptions,
+  OrbitFile,
   OrbitInsets,
   OrbitNewNode,
   OrbitNode,
@@ -106,6 +108,10 @@ interface NodeInfo {
 
   status: string | null;
   priority: number | null;
+
+  /** Its date, as Orbit writes it: `2026-11-20`, or `2026-11-20 09:30` with a time; one Orbit can't read stays in `attrs`, as written. */
+  due: string | null;
+
   tags: string[];
   collapsed: boolean;
   type: string | null;
@@ -125,6 +131,17 @@ interface NodeInfo {
 
   /** Its sound: a voice memo, music or a recording. */
   audio: Media | null;
+
+  /** The files it holds: PDFs, spreadsheets, any file. */
+  files: FileInfo[];
+}
+
+/** One of an idea's files, as the app shows it: its size only as a whole number of bytes, which the app's number holds. */
+export interface FileInfo {
+  src: string;
+  name: string | null;
+  type: string | null;
+  size: number | null;
 }
 
 /** The whole map for the app: every node, its options and the reader's place. */
@@ -199,6 +216,9 @@ export type Command =
   | { type: 'add'; parentId: string; node: Record<string, unknown>; index?: number | null }
   | { type: 'update'; id: string; changes: Record<string, unknown> }
   | { type: 'addToGoal'; id: string; amount: number }
+  | { type: 'checkNote'; id: string; line: number; checked: boolean }
+  | { type: 'addFiles'; id: string; files: FileInfo[] }
+  | { type: 'removeFile'; id: string; src: string }
   | { type: 'remove'; id: string }
   | { type: 'move'; id: string; parentId: string; index?: number | null }
   | { type: 'duplicate'; id: string }
@@ -225,6 +245,10 @@ export type Command =
   | { type: 'dropAt'; job: number; x: number; y: number }
   | { type: 'addNodes'; job: number; parentId: string; nodes: Record<string, unknown>[] }
   | { type: 'mapFromText'; job: number; text: string; subject: string | null }
+  | { type: 'cancel'; job: number }
+  | { type: 'spotlight'; id: string; insets: OrbitInsets; share: number | null }
+  | { type: 'endSpotlight' }
+  | { type: 'pictureShown'; job: number; src: string }
   | StudyCommand;
 
 type Job = Extract<Command, { job: number }>;
@@ -248,9 +272,28 @@ export type Message =
   | { type: 'result'; job: number; value?: unknown; error?: string }
   | { type: 'clipboard'; action: ClipboardAction; id: string }
   | { type: 'error'; message: string }
-  | { type: 'declined'; change: 'add' | 'update' | 'options'; message: string }
+  | { type: 'declined'; change: 'add' | 'update' | 'options' | 'checkNote'; message: string }
   | { type: 'dropTarget'; id: string | null }
-  | { type: 'dragOut'; id: string };
+  | { type: 'dragOut'; id: string }
+  | Spotlight;
+
+/**
+ * A node the app brought up close (`spotlight`, to sketch on it): where its
+ * circle is on the page, in CSS px from the page's top left, as the flight
+ * to it starts, once it rests there (again whenever it rests somewhere new,
+ * as the page changes size), and once the map is back as it was (`end`,
+ * at once when the node isn't drawn, so the app never waits). `scrim` is the
+ * color the map dims with, which the app dims its own bars with too.
+ */
+interface Spotlight {
+  type: 'spotlight';
+  id: string;
+  phase: 'start' | 'rest' | 'end';
+  x: number;
+  y: number;
+  radius: number;
+  scrim: string | null;
+}
 
 /** What Ctrl+C, Ctrl+X and Ctrl+V ask the app for: it has the clipboard. */
 type ClipboardAction = 'copy' | 'cut' | 'paste';
@@ -373,6 +416,7 @@ const nodeInfo = (renderer: OrbitSVGRenderer, node: OrbitNode, depth: number, in
     status: node.status ?? null,
     // Rounded, as the app shows it; a number past what the app holds, such as 1e12, is the nearest it does (whole-numbers.ts).
     priority: wholeNumber(node.priority, Math.round),
+    due: node.due ?? null,
     tags: node.tags ?? [],
     collapsed: node.collapsed === true,
     type: node.type ?? null,
@@ -386,6 +430,27 @@ const nodeInfo = (renderer: OrbitSVGRenderer, node: OrbitNode, depth: number, in
     embed: media(node.embed),
     attrs: node.attrs && Object.keys(node.attrs).length > 0 ? node.attrs : null,
     audio: media(node.audio),
+    files: (node.files ?? []).filter((file) => typeof file.src === 'string' && file.src !== '').map(fileInfo),
+  };
+};
+
+/** A file as the app has it: a size that isn't a whole number of bytes, or is past what's exact, said as none. */
+const fileInfo = (file: OrbitFile): FileInfo => {
+  return {
+    src: file.src,
+    name: file.name ?? null,
+    type: file.type ?? null,
+    size: Number.isSafeInteger(file.size) ? file.size! : null,
+  };
+};
+
+/** A file the app sends, as Orbit takes it: without the fields it said nothing of. */
+const orbitFile = (file: FileInfo): OrbitFile => {
+  return {
+    src: file.src,
+    ...(file.name === null || file.name === undefined ? {} : { name: file.name }),
+    ...(file.type === null || file.type === undefined ? {} : { type: file.type }),
+    ...(file.size === null || file.size === undefined ? {} : { size: file.size }),
   };
 };
 
@@ -564,6 +629,12 @@ const load = (command: Extract<Command, { type: 'load' }>): void => {
     onEdit: ({ kind, node }) => {
       refreshRings();
       postSaved(kind, node);
+    },
+    // Each frame of the flights is the page's own: the app hears where the node rests, and when the map is back.
+    onSpotlight: ({ phase, node, x, y, radius }) => {
+      if (phase !== 'move') {
+        post({ type: 'spotlight', id: node.id, phase, x, y, radius, scrim: scrimColor() });
+      }
     },
     onEditorOpen: ({ node, parent }) => post({ type: 'editorOpen', id: node?.id ?? null, parentId: parent?.id ?? null }),
     onEditorClose: ({ node }) => {
@@ -938,8 +1009,69 @@ const language = (words: Partial<PageWords>): void => {
 
 // Pictures, files and conversions
 
-/** Pictures in an SVG drawn as an image can't load files: put them in the SVG itself. */
-const inlinePictures = async (svg: string): Promise<string> => {
+/**
+ * The jobs at work that take a while, pictures of maps, each with what
+ * calls it off: the app sends `cancel` for a job no one waits for any more,
+ * as a thumbnail that scrolled away or one it gave up on. Its pictures stop
+ * loading, it stops at its next step, and it answers nothing.
+ */
+const working = new Map<number, AbortController>();
+
+/** Goes on with a job, unless the app called it off: then it stops here. */
+const goOn = (signal?: AbortSignal): void => {
+  if (signal?.aborted) {
+    throw new Error('Called off');
+  }
+};
+
+// A node up close, to sketch on
+
+/** The color the map dims with around a node up close, as the page resolves it from the map's style. */
+const scrimColor = (): string | null => {
+  const scrim = document.querySelector('.orbit__spotlight-scrim');
+  return scrim ? getComputedStyle(scrim).fill || null : null;
+};
+
+/**
+ * Brings a node up close for the app to sketch on: the app hears where it
+ * starts from at once, then where it rests. A node the map doesn't draw now
+ * ends there, so the app never waits for it.
+ */
+const spotlight = (command: Extract<Command, { type: 'spotlight' }>): void => {
+  const brought = map?.spotlight(command.id, { insets: command.insets, share: command.share ?? undefined }) ?? false;
+  const circle = brought ? map?.getNodeCircle(command.id) : null;
+
+  if (circle) {
+    post({ type: 'spotlight', id: command.id, phase: 'start', ...circle, scrim: scrimColor() });
+  } else if (!brought) {
+    post({ type: 'spotlight', id: command.id, phase: 'end', x: 0, y: 0, radius: 0, scrim: null });
+  }
+};
+
+/**
+ * Whether the picture at `src` (in the map's media) has loaded and been
+ * drawn: the app waits for it before lifting its own canvas off a planet, so
+ * the planet never shows without it. False when it can't be loaded.
+ */
+const pictureShown = async (src: string, signal?: AbortSignal): Promise<boolean> => {
+  const picture = new Image();
+  picture.src = new URL(src, baseUrl ?? location.href).href;
+
+  try {
+    await picture.decode();
+  } catch {
+    return false;
+  }
+
+  goOn(signal);
+  // The map draws it on its next frame, and shows it on the one after.
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  goOn(signal);
+  return true;
+};
+
+/** Pictures in an SVG drawn as an image can't load files: put them in the SVG itself. `signal` stops their loading. */
+const inlinePictures = async (svg: string, signal?: AbortSignal): Promise<string> => {
   if (!svg.includes('<image')) {
     return svg;
   }
@@ -954,7 +1086,7 @@ const inlinePictures = async (svg: string): Promise<string> => {
     }
 
     try {
-      const response = await fetch(href);
+      const response = await fetch(href, { signal });
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -1001,13 +1133,17 @@ const withoutBackground = (svg: string): string => {
   return new XMLSerializer().serializeToString(parsed);
 };
 
-const rasterize = async (svg: string, width: number, height: number, scale: number, type: string): Promise<string> => {
-  const url = URL.createObjectURL(new Blob([await inlinePictures(svg)], { type: 'image/svg+xml' }));
+const rasterize = async (svg: string, width: number, height: number, scale: number, type: string, signal?: AbortSignal): Promise<string> => {
+  const inlined = await inlinePictures(svg, signal);
+  goOn(signal);
+  const url = URL.createObjectURL(new Blob([inlined], { type: 'image/svg+xml' }));
 
   try {
     const image = new Image();
     image.src = url;
     await image.decode();
+    // Called off while the picture was read: it isn't drawn.
+    goOn(signal);
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(width * scale));
     canvas.height = Math.max(1, Math.round(height * scale));
@@ -1039,7 +1175,8 @@ const snapshotTheme = (parsed: OrbitDocument, job: SnapshotJob): OrbitRendererTh
 
 let snapshotCount = 0;
 
-const snapshot = async (job: SnapshotJob): Promise<string> => {
+/** A picture of a map, as `job` asks; `signal` calls it off. */
+const snapshot = async (job: SnapshotJob, signal?: AbortSignal): Promise<string> => {
   let svg: string;
   let width: number;
   let height: number;
@@ -1078,10 +1215,10 @@ const snapshot = async (job: SnapshotJob): Promise<string> => {
   }
 
   if (job.format === 'svg') {
-    return inlinePictures(svg);
+    return inlinePictures(svg, signal);
   }
 
-  return rasterize(svg, width, height, job.scale ?? 2, job.format === 'png' ? 'image/png' : 'image/webp');
+  return rasterize(svg, width, height, job.scale ?? 2, job.format === 'png' ? 'image/png' : 'image/webp', signal);
 };
 
 /**
@@ -1171,12 +1308,15 @@ const check = (text: string): { title: string; nodes: number; diagnostics: Diagn
 };
 
 const runJob = async (command: Job): Promise<void> => {
+  const calling = new AbortController();
+  working.set(command.job, calling);
+
   try {
     let value: unknown;
 
     switch (command.type) {
       case 'snapshot':
-        value = await snapshot(command);
+        value = await snapshot(command, calling.signal);
         break;
       case 'convert':
         value = convert(command.text, command.to);
@@ -1196,11 +1336,21 @@ const runJob = async (command: Job): Promise<void> => {
       case 'mapFromText':
         value = mapFromText(command.text, command.subject);
         break;
+      case 'pictureShown':
+        value = await pictureShown(command.src, calling.signal);
+        break;
     }
 
-    post({ type: 'result', job: command.job, value });
+    // A job called off answers nothing: no one waits for it.
+    if (!calling.signal.aborted) {
+      post({ type: 'result', job: command.job, value });
+    }
   } catch (error) {
-    post({ type: 'result', job: command.job, error: error instanceof Error ? error.message : String(error) });
+    if (!calling.signal.aborted) {
+      post({ type: 'result', job: command.job, error: error instanceof Error ? error.message : String(error) });
+    }
+  } finally {
+    working.delete(command.job);
   }
 };
 
@@ -1224,7 +1374,17 @@ const handle = (command: Command): void => {
     case 'addIdeas':
     case 'editMap':
     case 'mapFromText':
+    case 'pictureShown':
       void runJob(command);
+      return;
+    case 'cancel':
+      working.get(command.job)?.abort();
+      return;
+    case 'spotlight':
+      spotlight(command);
+      return;
+    case 'endSpotlight':
+      map?.endSpotlight();
       return;
     case 'copy':
       answer(command.job, () => {
@@ -1238,8 +1398,9 @@ const handle = (command: Command): void => {
       return;
     case 'paste':
       answer(command.job, () => {
-        // Nothing changes a map that can't be saved, as for the other changes.
-        if (!map || !canChange()) {
+        // Nothing changes a map that can't be saved, as for the other changes, nor one presented or made into a path:
+        // nothing pasted or dropped lands on it then, however late it comes.
+        if (!map || !editable()) {
           throw new Error('This map can\'t be changed');
         }
 
@@ -1249,7 +1410,7 @@ const handle = (command: Command): void => {
       return;
     case 'addNodes':
       answer(command.job, () => {
-        if (!map || !canChange()) {
+        if (!map || !editable()) {
           throw new Error('This map can\'t be changed');
         }
 
@@ -1340,6 +1501,53 @@ const handle = (command: Command): void => {
 
       const current = stepGoal(readGoal(node), command.amount);
       renderer.updateNode(command.id, { attrs: mergeAttributes(node.attrs, { current }) });
+      break;
+    }
+    case 'addFiles': {
+      // Added here, to the files the map has now, so files added one after another all stay; the ones it has are kept as
+      // they are, with the fields Orbit doesn't read.
+      const tree = renderer.getDocument()?.root;
+      const node = tree ? findNode(tree, command.id) : null;
+
+      if (!node) {
+        break;
+      }
+
+      const files = node.files ?? [];
+      const added = command.files.filter((file) => !files.some((there) => there.src === file.src)).map(orbitFile);
+
+      if (added.length > 0) {
+        changing('update', () => renderer.updateNode(command.id, { files: [...files, ...added] }));
+      }
+
+      break;
+    }
+    case 'removeFile': {
+      const tree = renderer.getDocument()?.root;
+      const node = tree ? findNode(tree, command.id) : null;
+      const files = node?.files ?? [];
+      const left = files.filter((file) => file.src !== command.src);
+
+      if (node && left.length < files.length) {
+        changing('update', () => renderer.updateNode(command.id, { files: left.length > 0 ? left : undefined }));
+      }
+
+      break;
+    }
+    case 'checkNote': {
+      // Checked here, in the note the map has now, so quick presses all count however fast they come, and the file
+      // changes just that box's line.
+      const tree = renderer.getDocument()?.root;
+      const node = tree ? findNode(tree, command.id) : null;
+      const note = node?.note !== undefined && Number.isInteger(command.line) ? setNoteCheckbox(node.note, command.line, command.checked) : null;
+
+      if (!node || note === null) {
+        // The note changed since the app showed it: the app shows it as it is.
+        post({ type: 'declined', change: 'checkNote', message: 'The note has no box on that line' });
+      } else if (note !== node.note) {
+        renderer.updateNode(command.id, { note });
+      }
+
       break;
     }
     case 'remove':
@@ -1518,11 +1726,16 @@ const typing = (element: Element | null): boolean =>
   element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || (element instanceof HTMLElement && element.isContentEditable);
 
 // Copy, cut and paste work on the idea with the keyboard's focus, or the one in focus: the app has the clipboard.
+// While the map is presented or made into a path, only copying does: nothing is cut from it or pasted onto it.
 window.addEventListener('keydown', (event) => {
   const action = CLIPBOARD_LETTERS[event.key.toLowerCase()] ?? CLIPBOARD_CODES[event.code];
   const focused = document.activeElement;
 
   if (!map || !action || event.defaultPrevented || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || typing(focused)) {
+    return;
+  }
+
+  if (presenting && action !== 'copy') {
     return;
   }
 

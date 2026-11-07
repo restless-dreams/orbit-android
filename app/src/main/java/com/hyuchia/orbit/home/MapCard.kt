@@ -46,6 +46,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -106,18 +107,18 @@ import com.hyuchia.orbit.ui.TimeWords
 import com.hyuchia.orbit.ui.WavyProgress
 import java.io.File
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
 /**
  * A map as Orbit draws it when it opens, in its own style or the app's
- * colors. Drawn off screen the first time, then kept until the map changes.
+ * colors. Drawn off screen the first time, then kept until the map changes:
+ * its text, or the media it has, by `pictureKey` ([com.hyuchia.orbit.data.MapSummary.pictureKey]).
  */
 @Composable
 fun MapThumbnail(
     id: String,
-    contentKey: String,
+    pictureKey: String,
     style: String?,
     branches: Int,
     modifier: Modifier = Modifier,
@@ -129,11 +130,11 @@ fun MapThumbnail(
     val look = mapStyle(style)
     val background = if (look.name == null) MaterialTheme.colorScheme.surfaceContainerHighest else look.background
 
-    val file by produceState<File?>(pictures.cachedThumbnail(id, contentKey, style, theme), id, contentKey, style, theme) {
-        if (value == null) {
-            value = pictures.thumbnail(id, contentKey, style, theme, markdown)
-        }
-    }
+    val file by rememberThumbnail(
+        listOf(id, pictureKey, style, theme),
+        cached = { pictures.cachedThumbnail(id, pictureKey, style, theme) },
+        draw = { pictures.thumbnail(id, pictureKey, style, theme, markdown) },
+    )
 
     Box(modifier.background(background), contentAlignment = Alignment.Center) {
         AnimatedVisibility(file == null, enter = fadeIn(), exit = fadeOut()) {
@@ -149,6 +150,18 @@ fun MapThumbnail(
             )
         }
     }
+}
+
+/**
+ * The picture of a map for `key`: the one drawn for it before, else drawn
+ * now. A new key, as when the map changes while it shows, draws it again,
+ * and the picture drawn last stays until the new one is ready, so the map
+ * never flashes its glyph meanwhile.
+ */
+@Composable
+internal fun rememberThumbnail(key: Any, cached: () -> File?, draw: suspend () -> File?): State<File?> {
+    val ready = remember(key) { cached() }
+    return produceState(ready, key) { value = ready ?: draw() }
 }
 
 /** What a card's menu can do with its map. */
@@ -180,9 +193,15 @@ data class MapCardActions(
 /** A card's corners on Home, its locked card's too. */
 internal val CardShape = RoundedCornerShape(24.dp)
 
+/**
+ * A map's card on Home: its picture, its name and what it holds, and how
+ * many of its cards are due `today`, as study counts days (see
+ * [com.hyuchia.orbit.study.rememberStudyDay]). A search's card shows where
+ * it found the words (`snippet`) instead.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MapCard(map: MapSummary, actions: MapCardActions, modifier: Modifier = Modifier, snippet: String? = null) {
+fun MapCard(map: MapSummary, actions: MapCardActions, today: Long, modifier: Modifier = Modifier, snippet: String? = null) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val haptics = LocalHapticFeedback.current
@@ -292,7 +311,7 @@ fun MapCard(map: MapSummary, actions: MapCardActions, modifier: Modifier = Modif
                 } else {
                     MapThumbnail(
                         id = map.id,
-                        contentKey = map.contentKey,
+                        pictureKey = map.pictureKey,
                         style = map.outline.style,
                         branches = map.outline.branches,
                         modifier = frame,
@@ -325,8 +344,9 @@ fun MapCard(map: MapSummary, actions: MapCardActions, modifier: Modifier = Modif
                             }
                         }
 
-                        // Cards studied on the other devices in the folder count too: each is due as its latest answer says.
-                        val due = remember(map.metadata.study, map.metadata.studyElsewhere) { dueCount(map.metadata.studyProgress, LocalDate.now().toEpochDay()) }
+                        // Cards studied on the other devices in the folder count too: each is due as its latest answer says. Ideas
+                        // that aren't cards anymore don't, as no session studies them; and `today` moves on at midnight.
+                        val due = remember(map.metadata.study, map.metadata.studyElsewhere, map.metadata.studyNotCards, today) { dueCount(map.metadata.studyCounted, today) }
 
                         if (due > 0 && snippet == null) {
                             DueCards(due)

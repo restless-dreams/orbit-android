@@ -60,9 +60,6 @@ internal const val MAP_TEXT_LIMIT = 8L * 1024 * 1024
 /** A heading or a list item: text with a shape Orbit can draw. */
 private val STRUCTURE = Regex("""^\s{0,3}#{1,6}\s|^\s*(?:[-*+]|\d+[.)])\s""")
 
-/** A YAML map: its nodes under a top-level `nodes:` key. */
-private val YAML_NODES = Regex("""(?m)^nodes:\s*$""")
-
 /** The longest a map's title gets from shared text; a longer line is kept whole as the map's note. */
 private const val TITLE_LENGTH = 80
 
@@ -147,6 +144,10 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
                     )
                 }
 
+                // A map's zip unpacks to about its size: one there's no room for here is refused before any of it is read.
+                val size = withContext(Dispatchers.IO) { fromProvider { nameAndSize(uri, resolver).second }?.takeIf { it > 0 } ?: zipLength(uri, resolver) }
+                maps.noRoomForBundle(size)?.let { return ImportResult.Failed(it) }
+
                 val bundle = withContext(Dispatchers.IO) { resolver.openInputStream(uri)?.use { maps.readBundle(it) } }
                     ?: return ImportResult.Failed(words.string(R.string.data_no_map_in_zip))
                 val existing = bundle.uuid?.let { uuid -> withContext(Dispatchers.IO) { maps.findByIdentity(uuid) } }
@@ -182,11 +183,54 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
         }
     }
 
+    /** How long a zip is, as its file says, when its app doesn't say in its listing; 0 when it can't tell, as for a stream. */
+    private fun zipLength(uri: Uri, resolver: ContentResolver): Long = try {
+        fromProvider { resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } }?.takeIf { it > 0 } ?: 0L
+    } catch (unknown: IOException) {
+        0L
+    }
+
     /** That files of kinds this version doesn't know stayed out of a zip, when some did: a newer Orbit's, say. */
     private fun leftOutNote(leftOut: Int): String? = words.plural(R.plurals.data_zip_files_left_out, leftOut, leftOut).takeIf { leftOut > 0 }
 
     /** Text shared from another app, or dropped on the list, with the title it came with (an article's, say). */
     suspend fun importShared(text: String, subject: String?): ImportResult = importText(text, title = subject, plain = true)
+
+    /**
+     * A new map for files shared to Orbit while no map is open: named after
+     * the first, and holding them all on its idea, each copied in as it is.
+     * One that can't join, too big or unreadable, is left out and said; with
+     * none that could, there's no map.
+     */
+    suspend fun newMapWithFiles(uris: List<Uri>, resolver: ContentResolver): ImportResult {
+        val first = uris.firstOrNull() ?: return ImportResult.Failed(words.string(R.string.data_nothing_to_make_a_map_from))
+        val title = ideaName(withContext(Dispatchers.IO) { displayName(first, resolver) }) ?: words.string(R.string.files_title)
+        val made = importText(title, plain = true) as? ImportResult.Imported ?: return ImportResult.Failed(words.string(R.string.files_unreadable))
+        val files = mutableListOf<AddedFile>()
+        val notes = mutableListOf<String>()
+
+        for (uri in uris) {
+            try {
+                files += maps.addFile(made.id, uri, resolver) {}
+            } catch (refused: MediaRefusedException) {
+                notes += refused.message.orEmpty()
+            } catch (stopped: CancellationException) {
+                throw stopped
+            } catch (failed: Exception) {
+                Logs.warn("Importer", "Couldn't copy a shared file", failed)
+                notes += words.string(R.string.files_unreadable)
+            }
+        }
+
+        if (files.isEmpty()) {
+            maps.delete(made.id)
+            return ImportResult.Failed(notes.firstOrNull() ?: words.string(R.string.files_unreadable))
+        }
+
+        val markdown = maps.read(made.id)
+        maps.write(made.id, "${markdown.trimEnd()}\n${filesAttribute(files)}\n", base = markdown)
+        return made.copy(notes = notes)
+    }
 
     /**
      * A map from text: orbit-md is kept as written, YAML becomes orbit-md,
@@ -209,7 +253,7 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
             return ImportResult.Failed(words.string(R.string.data_nothing_to_make_a_map_from))
         }
 
-        val markdown = if (yaml || YAML_NODES.containsMatchIn(trimmed)) {
+        val markdown = if (isYamlMap(text, yaml)) {
             val checked = try {
                 check(trimmed)
             } catch (unreadable: PageException) {
@@ -324,6 +368,15 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
         }
 
         /**
+         * Whether text that came in is a YAML map, to be made orbit-md: its
+         * file says so (`yamlFile`, by its name or type), or it reads as one
+         * the way Orbit tells YAML from markdown ([MapText.isYaml]). Markdown
+         * with a note or a fence that has a `nodes:` line stays markdown, and
+         * is kept as written.
+         */
+        fun isYamlMap(text: String, yamlFile: Boolean = false): Boolean = yamlFile || MapText.isYaml(text)
+
+        /**
          * The markdown of a new map from text that isn't YAML. A markdown file
          * (not `plain`) is a map as written, whatever's in it: Orbit reads one
          * of paragraphs alone, a journal's, as the note of a map without ideas
@@ -353,7 +406,7 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
                 return false
             }
 
-            return extension == "txt" || plain == "text/plain"
+            return extension == "txt" || plain == MapFileTypes.PLAIN_TEXT
         }
 
         /**

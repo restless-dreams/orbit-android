@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- As metas e seus números, e o progresso das metas e tarefas abaixo de uma ideia. Veja TRANSLATING.md. -->
+<resources>
+    <!-- Como uma meta conta, como o editor oferece -->
+    <string name="goal_way_saving_up">Economizar</string>
+    <string name="goal_way_paying_off">Quitar</string>
+    <string name="goal_way_counting">Contar</string>
+
+    <!-- Os números que cada forma de contar pede -->
+    <string name="goal_target">Objetivo</string>
+    <string name="goal_owed_at_the_start">Dívida inicial</string>
+    <string name="goal_how_many">Quantidade</string>
+    <string name="goal_saved_so_far">Economizado até agora</string>
+    <string name="goal_owed_now">Dívida atual</string>
+    <string name="goal_have_so_far">Até agora</string>
+    <string name="goal_currency">Moeda</string>
+    <string name="goal_currency_change">Moeda: %1$s. Alterar</string>
+    <string name="goal_find_a_currency">Pesquisar uma moeda</string>
+    <string name="goal_current_currency">Atual</string>
+    <string name="goal_whats_counted">O que você conta (opcional)</string>
+    <string name="goal_whats_counted_example">maçãs</string>
+    <string name="goal_amount_with_word">%1$s %2$s</string>
+
+    <!-- Números e valores que não podem ser aceitos -->
+    <string name="goal_write_a_number">Digite um número, como %1$s</string>
+    <string name="goal_number_too_big">Esse número é grande demais</string>
+    <string name="goal_number_zero_or_more">Use um número igual ou maior que 0</string>
+    <string name="goal_amount_above_zero">Digite um valor maior que 0</string>
+    <string name="goal_more_than_saved">É mais do que você economizou (%1$s)</string>
+    <string name="goal_more_than_owed">É mais do que você deve (%1$s)</string>
+
+    <!-- Avançar uma meta: de um em um ou por um valor, no menu, nos detalhes e em uma caixa de diálogo -->
+    <string name="goal_amount">Valor</string>
+    <string name="goal_add_an_amount">Adicionar um valor</string>
+    <string name="goal_menu_add_an_amount">Adicionar um valor…</string>
+    <string name="goal_add">Adicionar</string>
+    <string name="goal_take_off_an_amount">Retirar um valor</string>
+    <string name="goal_menu_take_off_an_amount">Retirar um valor…</string>
+    <string name="goal_take_off">Retirar</string>
+    <string name="goal_paid_an_amount">Paguei um valor</string>
+    <string name="goal_menu_paid_an_amount">Paguei um valor…</string>
+    <string name="goal_take_one_off">Subtrair um</string>
+    <string name="goal_add_one">Somar um</string>
+    <string name="goal_menu_goal">Meta…</string>
+    <string name="goal_menu_set_the_target">Definir o objetivo…</string>
+    <string name="goal_set_a_target">Definir um objetivo</string>
+    <string name="goal_details_add">Adicionar…</string>
+    <string name="goal_details_add_a_payment">Adicionar um pagamento…</string>
+
+    <!-- Os números de uma meta em palavras -->
+    <string name="goal_no_target_yet">Ainda sem objetivo</string>
+    <string name="goal_summary_paying_off">%1$s a pagar de %2$s · %3$s pago</string>
+    <string name="goal_summary_paid_off">%1$s a pagar de %2$s · Tudo pago</string>
+    <string name="goal_summary_reached">%1$s de %2$s · Meta alcançada</string>
+    <string name="goal_summary_saving_up">%1$s de %2$s · %3$s</string>
+    <plurals name="goal_summary_saving_up_to_go">
+        <item quantity="one">%1$s de %2$s · %3$s · falta %4$s</item>
+        <item quantity="many">%1$s de %2$s · %3$s · faltam %4$s</item>
+        <item quantity="other">%1$s de %2$s · %3$s · faltam %4$s</item>
+    </plurals>
+    <plurals name="goal_summary_counting_to_go">
+        <item quantity="one">%1$s de %2$s · falta %3$s</item>
+        <item quantity="many">%1$s de %2$s · faltam %3$s</item>
+        <item quantity="other">%1$s de %2$s · faltam %3$s</item>
+    </plurals>
+    <string name="goal_amount_of_target">%1$s de %2$s</string>
+    <string name="goal_brief_left">%1$s a pagar</string>
+    <string name="goal_brief_counting">%1$s/%2$s</string>
+
+    <!-- Quantas das metas e tarefas abaixo de uma ideia estão concluídas, e o progresso delas -->
+    <plurals name="goal_progress_done">
+        <item quantity="one">Concluídas: %1$s de %2$s · %3$s</item>
+        <item quantity="many">Concluídas: %1$s de %2$s · %3$s</item>
+        <item quantity="other">Concluídas: %1$s de %2$s · %3$s</item>
+    </plurals>
+    <plurals name="goal_progress_reached">
+        <item quantity="one">Alcançadas: %1$s de %2$s · %3$s</item>
+        <item quantity="many">Alcançadas: %1$s de %2$s · %3$s</item>
+        <item quantity="other">Alcançadas: %1$s de %2$s · %3$s</item>
+    </plurals>
+    <string name="goal_follows_the_ideas_under_it">Segue as metas e tarefas abaixo dela. %1$s</string>
+    <string name="goal_no_target_follows_the_ideas_under_it">Ainda sem objetivo. Enquanto isso, segue as metas e tarefas abaixo dela.</string>
+    <string name="goal_no_to_dos_or_goals_under_it">Ainda não há tarefas nem metas abaixo dela.</string>
+</resources>

@@ -1,6 +1,7 @@
 package com.hyuchia.orbit.data
 
 import com.hyuchia.orbit.FileWords
+import com.hyuchia.orbit.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
@@ -173,5 +174,38 @@ class FolderSyncPrivateCopiesTest {
         assertEquals(setOf(file), folder.texts.keys)
         assertEquals(file, maps.summary(back)!!.metadata.sync!!.file)
         assertEquals(emptyList<SyncRecord>(), maps.folderDeletions())
+    }
+
+    @Test
+    fun `a deleted private map's file stays out while the folder's deletions are damaged, and the sync says why`() = runTest {
+        start()
+        val diary = maps.add("# Diary\n- Today\n")
+        maps.setPrivate(diary, true)
+        val trip = maps.add("# Trip\n- Beach\n")
+        sync.syncNow()
+        val file = maps.summary(diary)!!.metadata.sync!!.file
+
+        maps.delete(diary)
+        // Another device changed the file before this one's sync deleted it: it stays, to come back as a map.
+        folder.change(file, "# Diary\n- Today\n- Tonight\n")
+        val deletions = File(root, "folder-deletions.json")
+        val recorded = deletions.readText()
+        // Damaged, as a disk can leave a file: not a list of deletions at all.
+        deletions.writeText("[{\"folder\":")
+        sync.syncNow()
+
+        // Not taken for no deletions: the diary doesn't come back as a map like any other, and the sync says why it waits.
+        assertTrue(maps.maps.value!!.none { it.title == "Diary" })
+        assertEquals(words.string(R.string.data_folder_deletions_unreadable), sync.state.value.problem)
+        // Nor are they written over by the next deletion, which waits: its map stays.
+        assertNull(maps.delete(trip))
+        assertTrue(maps.exists(trip))
+        assertEquals("[{\"folder\":", deletions.readText())
+
+        // Mended, the diary's file comes back as a private map.
+        deletions.writeText(recorded)
+        sync.syncNow()
+        assertTrue(map("Diary").metadata.isPrivate)
+        assertNull(sync.state.value.problem)
     }
 }

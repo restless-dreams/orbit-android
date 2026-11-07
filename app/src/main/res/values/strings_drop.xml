@@ -8,6 +8,8 @@
     <!-- Pictures, videos and sounds let go on a map, as they're copied into it. -->
     <string name="drop_adding_to">Adding to %1$s…</string>
     <string name="drop_adding_the_video_to">Adding the video to %1$s… %2$s</string>
+    <!-- A big video let go on the map, made smaller on the phone as it comes in: %1$s is the idea, %2$s how far along it is. -->
+    <string name="drop_making_the_video_smaller_for">Making the video smaller for %1$s… %2$s</string>
     <string name="drop_adding_the_sound_to">Adding the sound to %1$s… %2$s</string>
     <plurals name="drop_adding_some_to">
         <item quantity="one">Adding %1$d of %2$d to %3$s…</item>
@@ -59,6 +61,9 @@
     <!-- A text file let go on a map that's longer than a list of ideas would be: it adds nothing. -->
     <string name="drop_text_file_too_long">That file is too long to add as ideas. Drop it on your maps to make a map of it.</string>
     <string name="drop_not_into_itself">An idea can’t go inside itself</string>
+    <!-- A drop takes a while to add (its files read, its pictures copied): meanwhile the map was presented, made into a path, studied or
+         locked, or an earlier version of it shown, so it takes no changes, and the drop adds nothing. -->
+    <string name="drop_not_added_now">What you dropped wasn’t added: the map can’t change right now</string>
 
     <!-- What a picture, video or sound from another app is called on the map, when its file has no name. -->
     <string name="drop_picture">Picture</string>

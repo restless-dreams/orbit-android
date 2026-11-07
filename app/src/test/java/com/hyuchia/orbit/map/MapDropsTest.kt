@@ -33,8 +33,13 @@ class MapDropsTest {
     )
 
     @Test
-    fun `map files open as maps, whatever came with them`() {
+    fun `map files open as maps, whatever came with them, and the hint says so before they're let go`() {
         assertEquals(DropPlan.OpenMaps(listOf(map)), planDrop(listOf(text, map, picture)))
+        assertEquals(DropPlan.OpenMaps(listOf(map)), planDrop(listOf(text, map)))
+        // A drag of maps with text, or with pictures, videos or sounds, says it opens them as maps: what letting go does.
+        assertEquals(DropOffer.Maps, dropOffer(setOf(DropKind.Maps, DropKind.Ideas)))
+        assertEquals(DropOffer.Maps, dropOffer(setOf(DropKind.Ideas, DropKind.Maps, DropKind.Pictures)))
+        assertEquals(DropOffer.Maps, dropOffer(setOf(DropKind.Sounds, DropKind.Videos, DropKind.Maps)))
     }
 
     @Test
@@ -110,6 +115,21 @@ class MapDropsTest {
         assertFalse(takesDrops(ready.copy(history = HistoryUi(showing = 1_760_000_000_000)), locked = false))
         // The history open on the map as it is now: drops are the map's.
         assertTrue(takesDrops(ready.copy(history = HistoryUi()), locked = false))
+    }
+
+    @Test
+    fun `a map presented or studied takes no drop or paste, and no press that would lead to an edit`() {
+        val ready = MapUi(ready = true)
+        // A presentation's clock starts as the presentation does: here, at 0.
+        val presenting = ready.copy(presentation = Presentation(listOf("top"), 0, startedAt = 0L))
+        val studying = ready.copy(study = Study(start = "top", queue = listOf("card"), total = 1))
+
+        assertFalse(takesDrops(presenting, locked = false))
+        assertFalse(presenting.takesEdits)
+        assertFalse(studying.takesEdits)
+        assertFalse(ready.copy(pathMaking = true).takesEdits)
+        assertFalse(ready.copy(readOnly = ReadOnly.Newer).takesEdits)
+        assertTrue(ready.takesEdits)
     }
 
     @Test
@@ -205,5 +225,20 @@ class MapDropsTest {
     @Test
     fun `files that brought nothing at all say so`() {
         assertEquals(ImportResult.ImportedMany(added = 0, alreadyHere = 0), droppedMaps(List(2) { "Empty.zip" to ImportResult.ImportedMany(added = 0, alreadyHere = 0) }, FileWords(Locale.US)))
+    }
+
+    @Test
+    fun `a file of another kind joins the idea with every file let go with it, and text stays out`() {
+        val pdf = DroppedItem.File("content://files/9", "Ticket.pdf")
+        val photo = DroppedItem.Picture("content://photos/1", "Tram.jpg")
+        val notes = DroppedItem.TextFile("content://files/4", "Groceries.txt")
+
+        assertEquals(DropPlan.Files(listOf(pdf)), planDrop(listOf(pdf)))
+        assertEquals(DropPlan.Files(listOf(photo, pdf, notes)), planDrop(listOf(photo, pdf, DroppedItem.Text("https://example.com"), notes)))
+        // Maps still open as maps, whatever comes with them.
+        val map = DroppedItem.MapFile("content://files/5", "Trip.md")
+        assertEquals(DropPlan.OpenMaps(listOf(map)), planDrop(listOf(pdf, map)))
+        assertEquals(DropOffer.Files, dropOffer(setOf(DropKind.Files, DropKind.Pictures)))
+        assertEquals(DropOffer.Maps, dropOffer(setOf(DropKind.Files, DropKind.Maps)))
     }
 }

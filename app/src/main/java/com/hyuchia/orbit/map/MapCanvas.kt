@@ -32,13 +32,15 @@ import com.hyuchia.orbit.theme.parseCssColor
  * moves the page to a new place in its layout, which loses the focus. With
  * `focusable` false, it takes no focus at all and gives up any it has: the
  * screen over it, a study session, has the keys and its own buttons for Tab.
+ * With `heard` false, screen readers pass the page by: something over it
+ * speaks for it, as a sketch's canvas does for its planet.
  *
  * The map speaks the app's language, the screen's, which can differ from
  * the phone's: the page hears it as it moves into the screen, and again
  * if it changes while the map is open.
  */
 @Composable
-fun MapCanvas(model: MapViewModel, modifier: Modifier = Modifier, keyboardFocus: Boolean = false, focusable: Boolean = true) {
+fun MapCanvas(model: MapViewModel, modifier: Modifier = Modifier, keyboardFocus: Boolean = false, focusable: Boolean = true, heard: Boolean = true) {
     val generation by model.pageGeneration.collectAsState()
 
     key(generation) {
@@ -76,9 +78,9 @@ fun MapCanvas(model: MapViewModel, modifier: Modifier = Modifier, keyboardFocus:
         // Behind its lock, the page is invisible under the lock's cover: screen readers and the keyboard can't reach it,
         // nor can anything else that reads the screen. It takes part in no drag either, so neither its own text fields
         // nor the map take a drop, and nothing lights up. An idea on its way out is called back.
-        LaunchedEffect(locked) {
+        LaunchedEffect(locked, heard) {
             page.webView.visibility = if (locked) View.INVISIBLE else View.VISIBLE
-            page.webView.importantForAccessibility = if (locked) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+            page.webView.importantForAccessibility = if (locked || !heard) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
 
             if (locked && model.drops.letGo()) {
                 page.webView.cancelDragAndDrop()

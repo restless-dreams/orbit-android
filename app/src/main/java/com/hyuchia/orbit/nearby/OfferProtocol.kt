@@ -21,42 +21,48 @@ internal val offerJson = Json { ignoreUnknownKeys = true }
 /**
  * What `GET /key` answers: the key maps sent here are sealed to, for this
  * launch, and the version they're sealed with; and what of a map this
- * device opens, as its answer to a hello says ([OfferAnswer]), for a sender
- * that wants to know before it offers anything.
+ * device opens, and how big a map it takes, as its answer to a hello says
+ * ([OfferAnswer]), for a sender that wants to know before it offers anything.
  */
 @Serializable
-internal class KeyAnswer(val version: Int, val key: String, val mapFormat: Int? = null, val mediaTypes: List<String>? = null)
+internal class KeyAnswer(val version: Int, val key: String, val mapFormat: Int? = null, val mediaTypes: List<String>? = null, val mapSize: Long? = null, val files: Boolean? = null)
 
 /**
  * What `POST /offer` answers once the offer is open: its id, and the
  * receiver's half of the check code; and what of a map this device opens,
  * so the sender can say what won't open there before it goes: the newest
- * map format its Orbit reads (`MAP_FORMAT`), and the extensions of the
- * files it keeps in a map (`carriedMediaTypes`). Orbit 0.3.0 says neither
- * ([DeviceReads.RELEASE_0_3_0]).
+ * map format its Orbit reads (`MAP_FORMAT`), the extensions of the files it
+ * keeps in a map (`carriedMediaTypes`), and the most a map sent to it may
+ * be, sealed (`mapSize`, its `OFFER_LIMIT`), and whether it keeps ideas'
+ * files, of any kind (`files`). Orbit 0.3.0 says none of them, and 0.4.0
+ * says all but the last two ([DeviceReads.RELEASE_0_3_0]).
  */
 @Serializable
-internal class OfferAnswer(val id: String, val nonce: String, val mapFormat: Int? = null, val mediaTypes: List<String>? = null)
+internal class OfferAnswer(val id: String, val nonce: String, val mapFormat: Int? = null, val mediaTypes: List<String>? = null, val mapSize: Long? = null, val files: Boolean? = null)
 
 /**
  * What of a map a device taking maps opens: the newest map format its
- * Orbit reads, and the extensions of the files it keeps in a map, in lower
- * case. Answers only ever gain fields, so what one leaves unsaid is as
- * Orbit 0.3.0 had it: the only release that takes offers of this version
- * and says neither.
+ * Orbit reads, the extensions of the files it keeps in a map, in lower
+ * case, and the most a map sent to it may be, sealed. Answers only ever gain
+ * fields, so what one leaves unsaid is as Orbit 0.3.0 had it: the only
+ * release that takes offers of this version and says none of them; 0.4.0
+ * takes maps as big as it does, and says the rest.
  */
-internal data class DeviceReads(val mapFormat: Int, val mediaTypes: Set<String>) {
+internal data class DeviceReads(val mapFormat: Int, val mediaTypes: Set<String>, val mapSize: Long = OFFER_LIMIT_UP_TO_0_4_0, val ideaFiles: Boolean = false) {
     companion object {
-        /** What Orbit 0.3.0 opens: maps of format 1, with their pictures and videos. It plays no sounds, but keeps a voice memo, an `.mp4`. */
+        /** What Orbit 0.3.0 opens: maps of format 1, of up to 64 MiB sealed, with their pictures and videos. It plays no sounds, but keeps a voice memo, an `.mp4`. */
         val RELEASE_0_3_0 = DeviceReads(
             mapFormat = 1,
             mediaTypes = setOf("png", "jpg", "jpeg", "gif", "webp", "avif", "heic", "heif", "bmp", "svg", "mp4", "m4v", "webm", "mov"),
+            mapSize = OFFER_LIMIT_UP_TO_0_4_0,
         )
 
         /** What a device's answer says it opens, with what it leaves unsaid as Orbit 0.3.0 had it. */
-        fun of(mapFormat: Int?, mediaTypes: List<String>?): DeviceReads = DeviceReads(
+        fun of(mapFormat: Int?, mediaTypes: List<String>?, mapSize: Long? = null, files: Boolean? = null): DeviceReads = DeviceReads(
             mapFormat = mapFormat ?: RELEASE_0_3_0.mapFormat,
             mediaTypes = mediaTypes?.map { it.lowercase() }?.toSet() ?: RELEASE_0_3_0.mediaTypes,
+            mapSize = mapSize?.takeIf { it > 0 } ?: RELEASE_0_3_0.mapSize,
+            ideaFiles = files == true,
         )
     }
 }
@@ -65,9 +71,16 @@ internal data class DeviceReads(val mapFormat: Int, val mediaTypes: Set<String>)
 @Serializable
 internal class Reveal(val nonce: String)
 
-/** What `GET /offer/<id>` and `POST /offer/<id>` answer: waiting, opened or declined. */
+/**
+ * What `GET /offer/<id>` and the other requests about an offer answer:
+ * where it is (confirming, waiting, opened or declined), with the
+ * receiver's `proof` of it ([OfferSession.stateProof], in base64url). A
+ * device whose half of the check code says it proves its answers
+ * ([provesStates]) is believed only with one; Orbit 0.3.0 and 0.4.0 send
+ * none, and read past it.
+ */
 @Serializable
-internal class StateAnswer(val state: String)
+internal class StateAnswer(val state: String, val proof: String? = null)
 
 /** Whether an offer's id is one this device could have given: nothing that could change a request it's put in. */
 internal fun isOfferId(id: String): Boolean = id.length in 1..64 && id.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it == '-' }

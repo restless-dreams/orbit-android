@@ -23,9 +23,10 @@ internal const val STUDY_FORMAT = 1
  * its own records, and reads everyone's, so devices studying at the same
  * time never write the same file. `map` is the map's file in the folder,
  * and `was` the files it had before, so a map renamed on one device keeps
- * the answers the others still keep under its old name. A record says no
- * more than the map's file already does: its ideas' ids, and how each card
- * is going.
+ * the answers the others still keep under its old name. Beside how each
+ * card is going, a record says the map's ideas' ids, which its file says
+ * already, and its file's names, earlier ones included, which the privacy
+ * policy names along with the device's id.
  */
 @Serializable
 internal data class StudyRecord(

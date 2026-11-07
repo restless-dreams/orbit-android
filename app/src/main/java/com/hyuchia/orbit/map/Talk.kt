@@ -39,6 +39,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -69,6 +70,7 @@ import com.hyuchia.orbit.voice.Listening
 import com.hyuchia.orbit.voice.hearing
 import com.hyuchia.orbit.voice.ideasFrom
 import com.hyuchia.orbit.voice.listeningScreen
+import kotlinx.coroutines.flow.Flow
 
 /** Slid this far up while holding the +, a talk keeps listening once it's let go. */
 private val SlideToKeepListening = 72.dp
@@ -107,8 +109,8 @@ class Talk internal constructor(private val listening: Listening) {
     /** What TalkBack says a long press on the + does, in the screen's language. */
     internal var holdLabel = ""
 
-    /** The + is held. */
-    fun hold(): Boolean = begin()
+    /** The + is held: a talk begins, unless one is going on or still finishing its last idea, which has the microphone. */
+    fun hold(): Boolean = !active && begin()
 
     /** Slid up while holding: listen on after the + is let go. */
     fun keep() {
@@ -134,6 +136,19 @@ class Talk internal constructor(private val listening: Listening) {
         if (active) {
             listening.close()
             finished(null)
+        }
+    }
+
+    /**
+     * Ends the talk at once, as [cancel] does, each time `talkable` says the
+     * map can't be talked onto: as it locks, or as the recorder, a
+     * presentation or a study session takes the microphone or the map.
+     */
+    internal suspend fun endWhenNot(talkable: Flow<Boolean>) {
+        talkable.collect { can ->
+            if (!can) {
+                cancel()
+            }
         }
     }
 
@@ -170,8 +185,9 @@ fun rememberTalk(model: MapViewModel, onMessage: (String, String?, (() -> Unit)?
         val listening = Listening(
             context.applicationContext,
             onIdeas = { ideas ->
-                created.count += ideas.size
-                model.addSpoken(ideas)
+                if (model.addSpoken(ideas)) {
+                    created.count += ideas.size
+                }
             },
             onFinished = { problem -> created.finished(problem) },
         )
@@ -181,10 +197,18 @@ fun rememberTalk(model: MapViewModel, onMessage: (String, String?, (() -> Unit)?
     DisposableEffect(talk) { onDispose { talk.close() } }
     // Leaving the app ends a talk: the microphone isn't kept open in the background.
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { talk.stop() }
+    // The map locking, or the recorder, a presentation or a study session taking the microphone or the map, ends a talk
+    // at once: the idea being said is left out, and nothing said after it joins the map.
+    LaunchedEffect(talk) { talk.endWhenNot(model.talkable) }
 
-    fun start(keep: Boolean) {
-        model.startTalking()
+    /** Begins a talk, where the map can be talked onto now; false when it can't. */
+    fun start(keep: Boolean): Boolean {
+        if (!model.startTalking()) {
+            return false
+        }
+
         talk.start(keep)
+        return true
     }
 
     val needsTheMicrophone = stringResource(R.string.present_talk_needs_the_microphone)
@@ -217,15 +241,16 @@ fun rememberTalk(model: MapViewModel, onMessage: (String, String?, (() -> Unit)?
             Hearing.Service -> {
                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                     start(keep = false)
-                    true
                 } else {
                     permission.launch(Manifest.permission.RECORD_AUDIO)
                     false
                 }
             }
             Hearing.Screen -> {
-                model.startTalking()
-                screen.launch(listeningScreen(context))
+                if (model.startTalking()) {
+                    screen.launch(listeningScreen(context))
+                }
+
                 false
             }
             Hearing.None -> {

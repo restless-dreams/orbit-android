@@ -12,7 +12,7 @@
 export type Lock = 'unreadable' | 'newer' | 'deleted' | 'storage';
 
 /** The app's commands that change the map. */
-export const CHANGES: ReadonlySet<string> = new Set(['edit', 'editNew', 'add', 'update', 'addToGoal', 'remove', 'move', 'duplicate', 'options']);
+export const CHANGES: ReadonlySet<string> = new Set(['edit', 'editNew', 'add', 'update', 'addToGoal', 'checkNote', 'addFiles', 'removeFile', 'remove', 'move', 'duplicate', 'options']);
 
 /** Whether the map can be changed and saved now: it isn't locked, and isn't an earlier version on show. */
 export const changeable = (lock: Lock | null, showingVersion: boolean): boolean => {

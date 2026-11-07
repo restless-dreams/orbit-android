@@ -175,6 +175,66 @@ body {
   white-space: pre-wrap;
 }
 
+/*
+ * A note's checklists and tables (Orbit's renderNoteMarkdown) at the caption's size, in the audience's colors: the
+ * boxes and cells measured in em, so a TV's caption has them as big as its words. Nothing scrolls on a screen for an
+ * audience, so a table takes the caption's width and its cells wrap.
+ */
+.audience__note {
+  --_orbit-sheet-text: var(--audience-text);
+  --_orbit-sheet-muted-text: var(--audience-muted);
+  --_orbit-sheet-border: var(--audience-track);
+  --_orbit-chip-background: var(--audience-track);
+  --_orbit-control-active-background: var(--audience-accent);
+  --_orbit-control-active-text: var(--audience-on-accent);
+}
+
+.audience__note .orbit-note__checklist {
+  padding-left: 1.6em;
+}
+
+.audience__note .orbit-note__check {
+  gap: 0.55em;
+  margin-left: -1.6em;
+}
+
+.audience__note .orbit-note__box {
+  width: 1em;
+  height: 1em;
+  margin-top: 0.22em;
+  border-width: 0.11em;
+  border-radius: 0.22em;
+}
+
+.audience__note .orbit-note__box::after {
+  top: 0.04em;
+  left: 0.25em;
+  width: 0.32em;
+  height: 0.56em;
+  border-width: 0 0.11em 0.11em 0;
+}
+
+.audience__note .orbit-note__table {
+  margin: 0 0 0.6em;
+  overflow: hidden;
+  border-radius: 0.5em;
+}
+
+.audience__note .orbit-note__table table {
+  width: 100%;
+}
+
+/* A cell wraps between words, never inside one: a column keeps at least its longest word's width. */
+.audience__note .orbit-note__cell {
+  padding: 0.3em 0.6em;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.audience__note .orbit-note__cell--long {
+  min-width: 0;
+}
+
 .audience__idle {
   position: fixed;
   inset: 0;

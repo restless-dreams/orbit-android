@@ -25,7 +25,13 @@
 
     <!-- Over the map -->
     <string name="map_first_idea_hint">Tap + in the orbit to add your first idea, or hold the + below and say your ideas. Long-press any idea to rename, color or move it.</string>
-    <string name="map_stopped">The map stopped while Android freed memory. Your changes are saved.</string>
+    <!-- In the map's place, as a heading, after Android stopped the page that draws the map to free memory; map_stopped is under it. -->
+    <string name="map_stopped_title">The map stopped</string>
+    <string name="map_stopped">Android freed memory while it was open. Your changes are saved.</string>
+    <!-- In the map's place, as a heading, when the page that draws the map didn't load; map_did_not_load is under it. -->
+    <string name="map_did_not_load_title">The map didn\'t load</string>
+    <string name="map_did_not_load">The page that draws it couldn\'t start. Your map is safe.</string>
+    <!-- The button under map_stopped and map_did_not_load: a new page draws the map. -->
     <string name="map_load_it_again">Load it again</string>
     <string name="map_icon_for">Icon for %1$s</string>
     <string name="map_color_for">Color for %1$s</string>
@@ -64,6 +70,9 @@
     <string name="map_change_kept_in_history">This map changed elsewhere, so your last change is in its history.</string>
     <string name="map_change_not_saved">Orbit didn\'t save that change, because it would have emptied the map. Undo takes it back.</string>
     <string name="map_deleted_idea">Deleted “%1$s”</string>
+    <!-- Said once a box of a note's checklist is checked, or unchecked, with Undo. -->
+    <string name="map_checked_item">Checked “%1$s”</string>
+    <string name="map_unchecked_item">Unchecked “%1$s”</string>
     <!-- Copying an idea with everything under it, and pasting onto the map: text as ideas under one, a picture as its picture. -->
     <string name="map_copy">Copy</string>
     <string name="map_paste_as_ideas">Paste as ideas</string>
@@ -72,6 +81,8 @@
     <string name="map_cut_idea">Cut “%1$s”</string>
     <string name="map_too_much_to_copy">That’s too much to copy at once</string>
     <string name="map_nothing_to_paste">There’s nothing to paste: copy some text or a picture first</string>
+    <!-- Ideas copied in another map whose pictures, videos and sounds couldn't be copied into this one, as on a full disk. -->
+    <string name="map_paste_media_failed">Orbit couldn\'t copy the pictures, videos and sounds of those ideas into this map, so nothing was pasted.</string>
     <string name="map_pasted_the_picture">Pasted the picture</string>
     <plurals name="map_pasted_ideas">
         <item quantity="one">Pasted %d idea</item>
@@ -197,6 +208,37 @@
     <string name="map_folded_description">They show as a count until you fly into it</string>
     <string name="map_copying_the_video">Copying the video…</string>
     <string name="map_copying_the_video_percent">Copying the video… %1$s</string>
+    <!-- A big video from the phone, chosen for an idea or let go on the map: made smaller on the phone, at 1080p, or kept as it is. The quantity is how many videos. -->
+    <plurals name="map_smaller_offer_title">
+        <item quantity="one">Make this video smaller?</item>
+        <item quantity="other">Make these videos smaller?</item>
+    </plurals>
+    <!-- %1$s is how big they are, %2$s about how big they'd be made smaller, sizes as data_megabytes says them; %3$d is how many videos. -->
+    <plurals name="map_smaller_offer">
+        <item quantity="one">It\'s %1$s. Made smaller on this device, at 1080p, it comes to about %2$s: quicker to send and back up, and it leaves the map more room.</item>
+        <item quantity="other">These %3$d videos come to %1$s. Made smaller on this device, at 1080p, they come to about %2$s: quicker to send and back up, and they leave the map more room.</item>
+    </plurals>
+    <!-- The same, when they're too big for the map as they are: %3$d is how many videos. -->
+    <plurals name="map_smaller_offer_too_big">
+        <item quantity="one">It\'s %1$s, more than this map can keep as it is. Made smaller on this device, at 1080p, it comes to about %2$s.</item>
+        <item quantity="other">These %3$d videos come to %1$s, more than this map can keep as they are. Made smaller on this device, at 1080p, they come to about %2$s.</item>
+    </plurals>
+    <plurals name="map_make_it_smaller">
+        <item quantity="one">Make it smaller</item>
+        <item quantity="other">Make them smaller</item>
+    </plurals>
+    <plurals name="map_keep_it_as_it_is">
+        <item quantity="one">Keep it as it is</item>
+        <item quantity="other">Keep them as they are</item>
+    </plurals>
+    <string name="map_making_the_video_smaller">Making the video smaller…</string>
+    <string name="map_making_the_video_smaller_percent">Making the video smaller… %1$s</string>
+    <!-- Under it while it's made: %1$s is how big it was, %2$s about how big it will be. -->
+    <string name="map_smaller_from_to">From %1$s to about %2$s</string>
+    <string name="map_stop_making_smaller">Stop</string>
+    <!-- Once it's on its idea: %1$s is how big it came out, %2$s how big it was. -->
+    <string name="map_made_the_video_smaller">Made the video smaller: %1$s instead of %2$s</string>
+    <string name="map_cannot_make_videos_smaller">This device can\'t make videos smaller, so it\'s kept as it is</string>
     <string name="map_remove_tag">Remove %1$s</string>
     <string name="map_add_a_tag">Add a tag</string>
     <string name="map_bold">Bold</string>
@@ -209,6 +251,8 @@
 
     <!-- An idea's details -->
     <string name="map_priority">Priority %1$d</string>
+    <!-- An idea's status, as screen readers say it in its details: %1$s is the status, as Done. -->
+    <string name="map_status_said">Status: %1$s</string>
     <string name="map_go_to">Go to %1$s</string>
     <string name="map_open_link">Open link</string>
     <string name="map_no_note_yet">No note yet.</string>

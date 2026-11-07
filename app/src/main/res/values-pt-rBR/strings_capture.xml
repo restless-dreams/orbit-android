@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- O painel que captura ideias em um mapa sem abri-lo. Veja TRANSLATING.md. -->
+<resources>
+    <string name="capture_title">Adicionar a um mapa</string>
+    <string name="capture_no_maps">Ainda não há mapas. Abra o Orbit para começar um.</string>
+    <string name="capture_map">Mapa</string>
+    <string name="capture_your_idea">Sua ideia</string>
+    <plurals name="capture_ideas_one_on_each_line">
+        <item quantity="one">%d ideia, uma em cada linha</item>
+        <item quantity="many">%d ideias, uma em cada linha</item>
+        <item quantity="other">%d ideias, uma em cada linha</item>
+    </plurals>
+    <string name="capture_one_idea_on_each_line">Uma ideia em cada linha</string>
+    <string name="capture_add">Adicionar</string>
+    <plurals name="capture_add_ideas">
+        <item quantity="one">Adicionar %d ideia</item>
+        <item quantity="many">Adicionar %d ideias</item>
+        <item quantity="other">Adicionar %d ideias</item>
+    </plurals>
+    <string name="capture_added_idea">Ideia adicionada a %1$s</string>
+    <plurals name="capture_added_ideas">
+        <item quantity="one">%1$d ideia adicionada a %2$s</item>
+        <item quantity="many">%1$d ideias adicionadas a %2$s</item>
+        <item quantity="other">%1$d ideias adicionadas a %2$s</item>
+    </plurals>
+    <string name="capture_added_idea_to_locked_map">Sua ideia foi adicionada</string>
+    <plurals name="capture_added_ideas_to_locked_map">
+        <item quantity="one">%d ideia adicionada</item>
+        <item quantity="many">%d ideias adicionadas</item>
+        <item quantity="other">%d ideias adicionadas</item>
+    </plurals>
+    <string name="capture_problem">O Orbit não conseguiu adicionar nada a %1$s. Suas ideias continuam aqui.</string>
+    <string name="capture_problem_with_reason">O Orbit não conseguiu adicionar nada a %1$s. %2$s. Suas ideias continuam aqui.</string>
+    <string name="capture_problem_refused">O Orbit não conseguiu adicionar nada a %1$s, porque o mapa não pode ser alterado aqui. Suas ideias continuam aqui.</string>
+    <string name="capture_problem_missing">O Orbit não conseguiu adicionar nada a %1$s. O mapa não está mais aqui. Suas ideias continuam aqui.</string>
+    <string name="capture_problem_kept_changing">O Orbit não conseguiu adicionar nada a %1$s. O mapa não parava de mudar. Suas ideias continuam aqui.</string>
+    <string name="capture_adding">Adicionando…</string>
+    <string name="capture_problem_not_written">O Orbit não conseguiu adicionar nada a %1$s. O armazenamento deste dispositivo está cheio? Suas ideias continuam aqui.</string>
+</resources>

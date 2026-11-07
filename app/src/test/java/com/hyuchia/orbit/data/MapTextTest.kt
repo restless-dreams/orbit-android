@@ -239,6 +239,37 @@ class MapTextTest {
     }
 
     @Test
+    fun `a YAML map is searched for its ideas and notes, never for the words of its structure`() {
+        val yaml = """
+            title: Biology
+            nodes:
+              - text: Cells
+                status: done
+                color: "#4CAF50"
+                note: The **smallest** unit of [life](https://example.com/life)
+                children:
+                  - text: Nucleus
+                    note: |
+                      Holds the DNA.
+
+                      Has a *membrane*.
+                  - { text: Ribosome, note: "Makes proteins", priority: high }
+                  - Mitochondrion
+        """.trimIndent()
+        val text = MapText.searchText(yaml)
+
+        assertEquals(
+            listOf("Cells", "The smallest unit of life", "Nucleus", "Holds the DNA.", "Has a membrane.", "Ribosome", "Makes proteins", "Mitochondrion"),
+            text.lines().filter { it.isNotBlank() },
+        )
+
+        // The words its structure uses, which every YAML map would match on, and values no one writes to be read.
+        for (word in listOf("nodes", "children", "text", "note", "status", "done", "color", "4CAF50", "priority", "high", "example.com")) {
+            assertFalse("“$word” is searched", text.contains(word))
+        }
+    }
+
+    @Test
     fun retitlingKeepsTheRootsAttributes() {
         assertEquals("# Holidays <!-- orbit icon: 🌴 -->\n## Food", MapText.retitle("# Trip <!-- orbit icon: 🌴 -->\n## Food", "Holidays", words))
         assertEquals("---\ntitle: \"Plans: 2027\"\n---\n# Plans: 2027\n", MapText.retitle("---\ntitle: Plans\n---\n# Plans\n", "Plans: 2027", words))
@@ -280,6 +311,55 @@ class MapTextTest {
         assertFalse(MapText.hasContent("#  <!-- orbit id: empty -->\n"))
         assertFalse(MapText.hasContent("---\ntheme: night\n---\n\n# \n"))
         assertFalse(MapText.hasContent("<!--\norbit\nstatus: done\n-->\n#\n-\n"))
+    }
+
+    @Test
+    fun `a YAML map's ideas written in flow style are read as Orbit reads them`() {
+        // Orbit's own example writes some children this way; a whole idea can be written in braces too.
+        val yaml = """
+            title: Product roadmap
+            nodes:
+              - text: Product roadmap
+                children:
+                  - text: Research
+                    status: done
+                    children: [User interviews, Competitor teardown]
+                  - { text: Build, status: active, children: [{ text: Frontend, children: [App shell] }, Backend] }
+                  - text: Launch
+        """.trimIndent() + "\n"
+
+        val ideas = MapText.ideas(yaml)
+        assertEquals(listOf("Product roadmap", "Research", "User interviews", "Competitor teardown", "Build", "Frontend", "App shell", "Backend", "Launch"), ideas.map { it.name })
+        assertEquals(listOf(null, 0, 1, 1, 0, 4, 5, 4, 0), ideas.map { it.parent })
+
+        // Home counts them, and their statuses, as the map does.
+        val outline = MapText.outline(yaml, words)
+        assertEquals(3, outline.branches)
+        assertEquals(8, outline.ideas)
+        assertEquals(1.0, outline.progress.done, 0.0)
+
+        // The list of nodes on its line, and a list going on over several lines, with comments in it.
+        assertEquals(listOf("Trip", "Tokyo", "Kyoto"), MapText.ideas("title: Trip\nnodes: [{ text: Trip, children: [Tokyo, Kyoto] }]\n").map { it.name })
+        val over = "nodes:\n  - text: Trip\n    children: [\n      Tokyo,  # the capital\n      # and then\n      { text: Kyoto, status: done }\n    ]\n  - Osaka\n"
+        assertEquals(listOf("", "Trip", "Tokyo", "Kyoto", "Osaka"), MapText.ideas(over).map { it.name })
+        assertEquals(listOf(null, 0, 1, 1, 0), MapText.ideas(over).map { it.parent })
+    }
+
+    @Test
+    fun `hashtags at the end of an idea are its tags, not its name, as Orbit reads them`() {
+        val markdown = "# Trip\n- Launch #web #ads\n- Offline sync #frontend #sprint-3 <!-- orbit status: done -->\n- C#\n- Fix #42\n- ship \\#notatag\n"
+
+        assertEquals(listOf("Trip", "Launch", "Offline sync", "C#", "Fix #42", "ship #notatag"), MapText.ideas(markdown).map { it.name })
+    }
+
+    @Test
+    fun `what a YAML idea's other keys hold isn't ideas`() {
+        // Tags, a note's lines and a picture's fields, written as lists and blocks, however they're indented.
+        val yaml = "nodes:\n  - text: Trip\n    tags:\n      - travel\n    links:\n    - https://example.com\n    note: |\n      - pack light\n" +
+            "    image:\n      src: media/map.png\n      text: The route\n    children:\n      - Tokyo # the capital\n      - text: Kyoto\n        tags: [old, temples]\n"
+
+        assertEquals(listOf("Trip", "Tokyo", "Kyoto"), MapText.ideas(yaml).map { it.name })
+        assertEquals(listOf(null, 0, 0), MapText.ideas(yaml).map { it.parent })
     }
 
     @Test
@@ -348,6 +428,41 @@ class MapTextTest {
         assertEquals("Trip", outline.title)
         assertEquals(listOf("Lisbon${spaces}trip", "Tram"), MapText.ideas(yaml).map { it.name })
         assertEquals(1.0, outline.progress.done, 0.0)
+    }
+
+    @Test(timeout = 5_000)
+    fun `a line of thousands of brackets or comments that never close is read in one pass`() {
+        // Read once from each, as the patterns did, 20,000 of these took seconds.
+        val brackets = "[".repeat(20_000)
+        val links = "![a](".repeat(5_000)
+        val comments = "<!--".repeat(5_000)
+        val orbit = "<!-- orbit".repeat(2_000)
+        val markdown = "# Trip $brackets\n- $links\n- $comments\n- Fado $orbit\n$brackets\n## Map $comments x -->\n"
+
+        assertEquals("Trip $brackets", MapText.outline(markdown, words).title)
+        assertEquals(listOf("Trip $brackets", links, comments, "Fado $orbit", "Map"), MapText.ideas(markdown).map { it.name })
+        assertTrue(MapText.searchText(markdown).contains(brackets))
+        assertTrue(MapText.hasContent(markdown))
+        assertTrue(MapText.retitle(markdown, "Porto", words).startsWith("# Porto\n"))
+    }
+
+    @Test
+    fun `links and comments read in one pass come out as the patterns made them`() {
+        // The patterns a line's links and comments were read with, which took seconds on lines of thousands of brackets.
+        val link = Regex("""!?\[([^\]]*)]\([^)]*\)""")
+        val comment = Regex("""(?<!\s)\s*<!--.*?-->""")
+        val orbit = Regex("""<!--\s*orbit\b(.*?)-->""")
+        val pieces = listOf("[", "]", "(", ")", "!", "a", " ", "  ", "<!--", "-->", "orbit", "orbits", "-", ">", "<", "b c", "_")
+        val random = java.util.Random(7)
+
+        repeat(20_000) {
+            val text = (0 until random.nextInt(14)).joinToString("") { pieces[random.nextInt(pieces.size)] }
+
+            assertEquals(text, link.replace(text) { it.groupValues[1] }, MapText.linkWords(text))
+            assertEquals(text, comment.replace(text, ""), MapText.withoutComments(text))
+            assertEquals(text, comment.find(text)?.value, MapText.commentsIn(text).firstOrNull()?.let(text::substring))
+            assertEquals(text, orbit.find(text)?.groupValues?.get(1), MapText.orbitComment(text))
+        }
     }
 
     @Test

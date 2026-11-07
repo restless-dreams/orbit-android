@@ -2,6 +2,8 @@ package com.hyuchia.orbit.data
 
 import com.hyuchia.orbit.FileWords
 import com.hyuchia.orbit.page.EditedMap
+import com.hyuchia.orbit.page.Renamed
+import com.hyuchia.orbit.study.StudyCard
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -73,22 +75,42 @@ class MapEditsTest {
     }
 
     @Test
+    fun `a map renamed from Home keeps its path, its rehearsal and its cards on its center's new id`() = runTest {
+        val (repository, _) = loaded()
+        // The page says the new name gave the center a new id, as Orbit gives ideas ids from their text.
+        val renaming = MapEdits(repository, { markdown, title, _ -> EditedMap(markdown = MapText.retitle(markdown, title!!, words), renamed = listOf(Renamed("trip", "voyage"))) }, words)
+        val trip = repository.add("# Trip\n## Food\n")
+        val known = StudyCard(box = 3, due = 20_007, first = 20_000)
+        repository.savePath(trip, listOf("trip", "food"))
+        repository.saveRehearsal(trip, mapOf("trip" to 12, "food" to 30))
+        repository.saveStudy(trip, mapOf("trip" to known))
+
+        assertEquals(MapEditResult.Written, renaming.rename(trip, "Voyage"))
+
+        val metadata = repository.summary(trip)!!.metadata
+        assertEquals("# Voyage\n## Food\n", repository.read(trip))
+        assertEquals(listOf("voyage", "food"), metadata.path)
+        assertEquals(mapOf("voyage" to 12, "food" to 30), metadata.rehearsal)
+        assertEquals(mapOf("voyage" to known), metadata.study)
+    }
+
+    @Test
     fun `a tag is renamed or taken out in every map that has it, whatever its capitals`() = runTest {
         val (repository, edits) = loaded()
         val trip = repository.add("---\ntags: [Work, japan]\n---\n\n# Trip\n")
         val plan = repository.add("---\ntheme: night\ntags: [work]\n---\n\n# Plan\n")
         val other = repository.add("# Other\n")
 
-        assertEquals(TagRename(changed = 2, left = 0), edits.renameTag("WORK", "Office"))
+        assertEquals(TagRename(changed = 2), edits.renameTag("WORK", "Office"))
         assertEquals("---\ntags: [Office, japan]\n---\n\n# Trip\n", repository.read(trip))
         assertEquals("---\ntheme: night\ntags: [Office]\n---\n\n# Plan\n", repository.read(plan))
         assertEquals("# Other\n", repository.read(other))
 
         // Renamed to a tag the map has already, it's one tag.
-        assertEquals(TagRename(changed = 1, left = 0), edits.renameTag("japan", "office"))
+        assertEquals(TagRename(changed = 1), edits.renameTag("japan", "office"))
         assertEquals("---\ntags: [Office]\n---\n\n# Trip\n", repository.read(trip))
 
-        assertEquals(TagRename(changed = 2, left = 0), edits.renameTag("office", null))
+        assertEquals(TagRename(changed = 2), edits.renameTag("office", null))
         assertEquals("# Trip\n", repository.read(trip))
         assertEquals("---\ntheme: night\n---\n\n# Plan\n", repository.read(plan))
     }
@@ -103,7 +125,7 @@ class MapEditsTest {
         assertEquals(MapEditResult.Newer, edits.rename(newer, "Roadmap"))
         assertEquals(MapEditResult.Newer, edits.setTags(newer, listOf("home")))
         assertEquals(MapEditResult.Unreadable, edits.rename(unreadable, "Roadmap"))
-        assertEquals(TagRename(changed = 1, left = 2), edits.renameTag("work", "office"))
+        assertEquals(TagRename(changed = 1, kept = mapOf(newer to MapEditResult.Newer, unreadable to MapEditResult.Unreadable)), edits.renameTag("work", "office"))
         assertEquals("---\nschemaVersion: 2\ntags: [work]\n---\n# Plan\n", repository.read(newer))
         assertEquals("---\ntags: [work]\n---\n# Plan <!-- unreadable -->\n", repository.read(unreadable))
         assertEquals("---\ntags: [office]\n---\n# Trip\n", repository.read(trip))
@@ -112,6 +134,33 @@ class MapEditsTest {
         val copy = edits.duplicate(newer)
         assertNull(copy.id)
         assertEquals(MapEditResult.Newer, copy.result)
+    }
+
+    @Test
+    fun `a tag renamed in every map says which maps kept it, and why`() = runTest {
+        val (repository, edits) = loaded()
+        val full = repository.add("---\ntags: [work]\n---\n# Full\n")
+        val unreadable = repository.add("---\ntags: [work]\n---\n# Locked away\n")
+        val busy = repository.add("---\ntags: [work]\n---\n# Busy\n")
+        val trip = repository.add("---\ntags: [work]\n---\n# Trip\n")
+        val busyFile = File(maps, "$busy/map.md")
+        // Each time the busy map's tags are changed, it changes again first, as a map another device keeps writing would.
+        meanwhile = { if (asked.last().contains("# Busy")) busyFile.writeText("---\ntags: [work]\n---\n# Busy\n- ${asked.size}\n") }
+        // A folder nothing can be written into fails each write as a full disk does.
+        File(maps, full).setWritable(false)
+        File(maps, "$unreadable/map.md").setReadable(false)
+
+        val renamed = try {
+            edits.renameTag("work", "office")
+        } finally {
+            File(maps, full).setWritable(true)
+            File(maps, "$unreadable/map.md").setReadable(true)
+        }
+
+        assertEquals(1, renamed.changed)
+        assertEquals(mapOf(full to MapEditResult.NotWritten, unreadable to MapEditResult.Refused, busy to MapEditResult.KeptChanging), renamed.kept)
+        assertEquals(listOf("work"), MapTags.read(repository.read(full)))
+        assertEquals(listOf("office"), MapTags.read(repository.read(trip)))
     }
 
     @Test

@@ -25,15 +25,16 @@ class MapFileTypesTest {
     private fun Element.types(): Set<String> = values("data", "android:mimeType")
 
     @Test
-    fun `files open with Orbit for every type a map comes as`() {
+    fun `files open with Orbit for every type a map comes as, and text files, as markdown an app calls plain text is`() {
         val typed = filters.single { it.action() == "android.intent.action.VIEW" && MapFileTypes.ANY_FILE !in it.types() }
-        assertEquals(MapFileTypes.MAPS, typed.types())
+        assertEquals(MapFileTypes.OPENED, typed.types())
+        assertEquals(MapFileTypes.MAPS + "text/plain", MapFileTypes.OPENED)
     }
 
     @Test
     fun `files shared to Orbit become maps for every type a map comes as, and text`() {
         val shared = filters.single { it.action() == "android.intent.action.SEND" }
-        assertEquals(MapFileTypes.MAPS + "text/plain", shared.types())
+        assertEquals(MapFileTypes.OPENED, shared.types())
     }
 
     @Test

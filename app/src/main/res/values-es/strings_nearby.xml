@@ -48,6 +48,8 @@
     <string name="nearby_send_maps_already_waiting">Ya tiene mapas esperando respuesta. Vuelve a intentarlo cuando se respondan.</string>
     <string name="nearby_send_update_this_device">Actualiza Orbit en este dispositivo y vuelve a intentarlo.</string>
     <string name="nearby_send_no_room_there">No tiene espacio para el mapa.</string>
+    <string name="nearby_send_update_for_size">Tiene un Orbit más antiguo, que no admite un mapa tan grande (%1$s). Actualiza Orbit allí y vuelve a enviarlo.</string>
+    <string name="nearby_send_no_room_here">No hay espacio en este dispositivo para preparar el mapa para enviarlo.</string>
 
     <!-- Un mapa que llegó de otro dispositivo, o de un archivo de un mapa que ya está aquí -->
     <string name="nearby_arrival_newer_version_from">%2$s te envió una versión más reciente de “%1$s”</string>
@@ -114,6 +116,7 @@
     <string name="nearby_join_from_the_page">Únete desde la página en la dirección que muestra el teléfono.</string>
     <string name="nearby_server_busy">Hay demasiadas conexiones. Vuelve a intentarlo en un momento.</string>
     <string name="nearby_server_wrong_address">Ábrelo con la dirección que muestra el teléfono.</string>
+    <string name="nearby_no_room_for_the_zip">No hay espacio en el teléfono para crear el zip del mapa. Libera espacio allí y vuelve a descargarlo.</string>
     <string name="nearby_let_new_people_in">Dejar entrar a personas nuevas</string>
     <string name="nearby_let_new_people_in_description">Desactívalo cuando ya haya entrado todo el mundo. Quienes ya entraron se quedan.</string>
     <string name="nearby_lockout_make_a_new_pin">Un dispositivo escribió demasiados PIN incorrectos, así que debe esperar antes de volver a intentarlo. Si no fue nadie de la sala, crea un PIN nuevo.</string>

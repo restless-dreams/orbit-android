@@ -20,6 +20,22 @@
         <item quantity="one">The tag stays on %1$d map that Orbit can only show: a newer version made it, or it can’t read all of it.</item>
         <item quantity="other">The tag stays on %1$d maps that Orbit can only show: a newer version made them, or it can’t read all of them.</item>
     </plurals>
+    <!-- The same, about one map, by its title: %1$s. -->
+    <string name="home_tag_stays_on_map_only_shown">The tag stays on “%1$s”, which Orbit can only show: a newer version made it, or it can’t read all of it.</string>
+    <!-- A tag renamed or taken out in every map stays on a map whose change the storage couldn't take: %1$s is its title. -->
+    <string name="home_tag_stays_on_map_not_saved">The tag stays on “%1$s”: Orbit couldn’t save the change. Is this device’s storage full?</string>
+    <!-- The same, for several maps: %1$d counts them. -->
+    <plurals name="home_tag_stays_on_maps_not_saved">
+        <item quantity="one">The tag stays on %1$d map: Orbit couldn’t save the change. Is this device’s storage full?</item>
+        <item quantity="other">The tag stays on %1$d maps: Orbit couldn’t save the change. Is this device’s storage full?</item>
+    </plurals>
+    <!-- A tag renamed or taken out in every map stays on a map Orbit couldn't change, as one that kept changing meanwhile: %1$s is its title. -->
+    <string name="home_tag_stays_on_map_not_changed">The tag stays on “%1$s”: Orbit couldn’t change it. Try again.</string>
+    <!-- The same, for several maps: %1$d counts them. -->
+    <plurals name="home_tag_stays_on_maps_not_changed">
+        <item quantity="one">The tag stays on %1$d map: Orbit couldn’t change it. Try again.</item>
+        <item quantity="other">The tag stays on %1$d maps: Orbit couldn’t change them. Try again.</item>
+    </plurals>
     <string name="home_pinned_maps">Pinned</string>
     <string name="home_everything_else">Everything else</string>
     <string name="home_clear_the_search">Clear the search</string>

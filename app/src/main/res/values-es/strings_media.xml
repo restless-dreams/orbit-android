@@ -35,5 +35,9 @@
         <item quantity="other">Avanzar %d segundos</item>
     </plurals>
     <string name="media_open_in_another_app">Abrir en otra app</string>
+    <string name="media_open_video_as_it_is_title">¿Abrir este video tal como está?</string>
+    <string name="media_open_video_as_it_is_text">Orbit no pudo quitarle dónde y cuándo se grabó ni con qué dispositivo, así que la app en la que lo abras también los recibiría.</string>
+    <string name="media_open_as_it_is">Abrir tal como está</string>
+    <string name="media_open_video_failed">Orbit no pudo hacer la copia de este video que se abre en otra app. Puede que este dispositivo no tenga espacio para ella.</string>
     <string name="media_watch_on">Ver en %1$s</string>
 </resources>

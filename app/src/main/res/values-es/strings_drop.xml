@@ -8,6 +8,7 @@
     <!-- Pictures, videos and sounds let go on a map, as they're copied into it. -->
     <string name="drop_adding_to">Agregando a %1$s…</string>
     <string name="drop_adding_the_video_to">Agregando el video a %1$s… %2$s</string>
+    <string name="drop_making_the_video_smaller_for">Haciendo más pequeño el video para %1$s… %2$s</string>
     <string name="drop_adding_the_sound_to">Agregando el audio a %1$s… %2$s</string>
     <plurals name="drop_adding_some_to">
         <item quantity="one">Agregando %1$d de %2$d a %3$s…</item>
@@ -64,6 +65,7 @@
     <string name="drop_nothing_to_add">Orbit no puede agregar eso a un mapa</string>
     <string name="drop_text_file_too_long">Ese archivo es demasiado largo para agregarlo como ideas. Suéltalo en tus mapas para hacer un mapa con él.</string>
     <string name="drop_not_into_itself">Una idea no puede ir dentro de sí misma</string>
+    <string name="drop_not_added_now">Lo que soltaste no se agregó: el mapa no puede cambiar en este momento</string>
 
     <!-- What a picture, video or sound from another app is called on the map, when its file has no name. -->
     <string name="drop_picture">Imagen</string>

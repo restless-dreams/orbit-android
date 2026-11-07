@@ -34,19 +34,31 @@ object MapTags {
     private val SPECIAL = Regex("""[:,#\[\]{}&*!|>'"%@`]""")
     private val CONTROL = Regex("""[\u0000-\u001F\u007F]""")
 
-    /** The map's tags, each once. */
+    /** What the escapes in a double-quoted YAML string stand for, as Orbit reads them; any other is the character itself (`\"`, `\\`, `\/`). */
+    private val ESCAPES = mapOf('b' to '\b', 'f' to '\u000C', 'n' to '\n', 'r' to '\r', 't' to '\t', '0' to '\u0000')
+
+    /** What a quote that opens a quoted value comes after, inside a value: a space, or the start of a list, a mapping, an item or a key's value. */
+    private const val QUOTE_OPENERS = " \t[{,:"
+
+    /**
+     * The map's tags, each once, read as Orbit's YAML reads them: a comment
+     * after a value (` # …`) isn't a tag, nor part of one; a quoted tag keeps
+     * its commas, quotes and escapes (`"say \"hi\""`, `'it''s'`); and a list
+     * on the key's line may go on over the next ones.
+     */
     fun read(markdown: String): List<String> {
         val lines = markdown.lines()
         val entry = entry(lines) ?: return emptyList()
-        val value = ENTRY.find(lines[entry.first])!!.groupValues[1]
+        val value = withoutComment(ENTRY.find(lines[entry.first])!!.groupValues[1])
 
         val tags = when {
-            value.startsWith("[") -> split(value.removePrefix("[").removeSuffix("]"))
-            value.isNotEmpty() -> split(value)
-            else -> lines.subList(entry.first + 1, entry.last + 1).mapNotNull { LIST_ITEM.find(it)?.groupValues?.get(1) }
+            value.startsWith("[") -> flowItems(continuing(lines, entry).fold(value) { list, line -> "$list ${withoutComment(line)}" })
+            // Words apart with commas, as Orbit reads a tag's text, quoted or not.
+            value.isNotEmpty() -> scalar(value).split(',')
+            else -> lines.subList(entry.first + 1, entry.last + 1).mapNotNull { LIST_ITEM.find(it)?.groupValues?.get(1) }.map { scalar(withoutComment(it)) }
         }
 
-        return normalize(tags.map(::unquote))
+        return normalize(tags)
     }
 
     /**
@@ -122,41 +134,153 @@ object MapTags {
         append('"')
     }
 
-    private fun unquote(value: String): String {
+    /**
+     * A YAML scalar's text: a double-quoted one with its escapes read
+     * (`\"`, `\\`, `\n`, `é`…), a single-quoted one with its `''` as one
+     * quote, and a plain one as it's written, as Orbit reads each.
+     */
+    private fun scalar(value: String): String {
         val trimmed = value.trim()
 
         return when {
-            trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"') ->
-                trimmed.substring(1, trimmed.length - 1).replace("\\\"", "\"").replace("\\\\", "\\")
-            trimmed.length >= 2 && trimmed.startsWith('\'') && trimmed.endsWith('\'') ->
-                trimmed.substring(1, trimmed.length - 1).replace("''", "'")
+            trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"') -> unescaped(trimmed.substring(1, trimmed.length - 1))
+            trimmed.length >= 2 && trimmed.startsWith('\'') && trimmed.endsWith('\'') -> trimmed.substring(1, trimmed.length - 1).replace("''", "'")
             else -> trimmed
         }
     }
 
-    /** A list's items, apart at commas outside quotes. */
-    private fun split(text: String): List<String> {
-        val items = mutableListOf<String>()
-        val item = StringBuilder()
-        var quote: Char? = null
+    /** A double-quoted YAML string's text with its escapes read, as Orbit reads them: one it doesn't know is the character after the `\`. */
+    private fun unescaped(text: String): String = buildString {
+        var index = 0
 
-        for (character in text) {
-            when {
-                quote != null && character == quote -> quote = null
-                quote == null && (character == '"' || character == '\'') -> quote = character
-                quote == null && character == ',' -> {
-                    items.add(item.toString())
-                    item.clear()
-                    continue
-                }
+        while (index < text.length) {
+            val character = text[index]
+
+            if (character != '\\' || index + 1 >= text.length) {
+                append(character)
+                index += 1
+                continue
             }
 
-            item.append(character)
+            val escape = text[index + 1]
+            val hex = text.substring(index + 2, minOf(index + 6, text.length))
+
+            if (escape == 'u' && hex.length == 4 && hex.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }) {
+                append(hex.toInt(16).toChar())
+                index += 6
+                continue
+            }
+
+            append(ESCAPES[escape] ?: escape)
+            index += 2
+        }
+    }
+
+    /**
+     * A YAML list written on one line or several (`[work, "japan trip"]`),
+     * as its items' text: each quoted, or plain up to the next comma or the
+     * list's end, as Orbit reads one.
+     */
+    private fun flowItems(text: String): List<String> {
+        val items = mutableListOf<String>()
+        var index = 1
+
+        while (index < text.length) {
+            val character = text[index]
+
+            when {
+                character.isWhitespace() || character == ',' -> index += 1
+                character == ']' -> break
+                else -> {
+                    val end = if (character == '"' || character == '\'') quoteEnd(text, index) else plainEnd(text, index)
+                    items += scalar(text.substring(index, end))
+                    index = end
+                }
+            }
         }
 
-        items.add(item.toString())
         return items
     }
+
+    /** Where a quoted string starting at `start` ends: past its closing quote (not an escaped one, nor `''`), or at the text's end. */
+    private fun quoteEnd(text: String, start: Int): Int {
+        val quote = text[start]
+        var index = start + 1
+
+        while (index < text.length) {
+            when {
+                quote == '"' && text[index] == '\\' -> index += 2
+                quote == '\'' && text[index] == '\'' && text.getOrNull(index + 1) == '\'' -> index += 2
+                text[index] == quote -> return index + 1
+                else -> index += 1
+            }
+        }
+
+        return text.length
+    }
+
+    /** Where a plain item of a list starting at `start` ends: at a comma or the list's end. */
+    private fun plainEnd(text: String, start: Int): Int {
+        var index = start
+
+        while (index < text.length && text[index] != ',' && text[index] != ']' && text[index] != '}') {
+            index += 1
+        }
+
+        return index
+    }
+
+    /**
+     * A YAML value without the comment after it (` # …`), as Orbit reads one:
+     * a `#` that starts the value, or comes inside its quotes, is the value's
+     * own (`C#`, `"#1 # first"`), and a quote opens only at the value's start
+     * or after a space or `[`, `{`, `,`, `:`, so `it's` is plain text.
+     */
+    private fun withoutComment(value: String): String {
+        var index = 0
+
+        while (index < value.length) {
+            val character = value[index]
+
+            when {
+                (character == '"' || character == '\'') && (index == 0 || value[index - 1] in QUOTE_OPENERS) -> index = quoteEnd(value, index)
+                character == '#' && index > 0 && value[index - 1].isWhitespace() -> return value.substring(0, index).trimEnd()
+                else -> index += 1
+            }
+        }
+
+        return value
+    }
+
+    /** How many more `[` than `]` a list's line opens, outside its quotes and comment: a list that hasn't closed goes on over the next line. */
+    private fun opened(line: String): Int {
+        val text = withoutComment(line)
+        var open = 0
+        var index = 0
+
+        while (index < text.length) {
+            val character = text[index]
+
+            when {
+                (character == '"' || character == '\'') && (index == 0 || text[index - 1] in QUOTE_OPENERS) -> index = quoteEnd(text, index)
+                else -> {
+                    if (character == '[') {
+                        open += 1
+                    } else if (character == ']') {
+                        open -= 1
+                    }
+
+                    index += 1
+                }
+            }
+        }
+
+        return open
+    }
+
+    /** The lines a list on the `tags:` line goes on over, trimmed, without the comments on lines of their own. */
+    private fun continuing(lines: List<String>, entry: IntRange): List<String> =
+        lines.subList(entry.first + 1, entry.last + 1).map { it.trim() }.filterNot { it.startsWith("#") }
 
     /** Where the map's own keys start: after the frontmatter's opening line, or at the top of a YAML map. */
     private fun frontmatterStart(lines: List<String>): Int = if (closing(lines) != null) 1 else 0
@@ -181,20 +305,29 @@ object MapTags {
     private fun entry(lines: List<String>): IntRange? {
         val closing = closing(lines) ?: yamlEnd(lines) ?: return null
         val start = (frontmatterStart(lines) until closing).firstOrNull { ENTRY.matches(lines[it]) } ?: return null
-
-        // A list written on the key's own line has nothing under it.
-        if (ENTRY.find(lines[start])!!.groupValues[1].isNotEmpty()) {
-            return start..start
-        }
-
+        val value = ENTRY.find(lines[start])!!.groupValues[1]
         var end = start
 
-        // A list under it: its items, as deep as the key or deeper.
-        while (end + 1 < closing && (LIST_ITEM.matches(lines[end + 1]) || lines[end + 1].isBlank())) {
+        // A list written on the key's own line has nothing under it, but may go on over the next lines until it closes.
+        if (value.isNotEmpty()) {
+            if (withoutComment(value).startsWith("[")) {
+                var open = opened(value)
+
+                while (open > 0 && end + 1 < closing) {
+                    end += 1
+                    open += lines[end].trim().takeUnless { it.startsWith("#") }?.let(::opened) ?: 0
+                }
+            }
+
+            return start..end
+        }
+
+        // A list under it: its items, as deep as the key or deeper, with comments and blank lines among them.
+        while (end + 1 < closing && (LIST_ITEM.matches(lines[end + 1]) || lines[end + 1].isBlank() || lines[end + 1].trimStart().startsWith("#"))) {
             end += 1
         }
 
-        while (end > start && lines[end].isBlank()) {
+        while (end > start && (lines[end].isBlank() || lines[end].trimStart().startsWith("#"))) {
             end -= 1
         }
 

@@ -37,7 +37,10 @@ class DroppedTest {
         assertEquals(DropKind.Maps, dropKindOf("application/vnd.xmind.workbook"))
         // A file that says nothing of what it is may be a map: its name says, once it's let go.
         assertEquals(DropKind.Maps, dropKindOf("application/octet-stream"))
-        assertNull(dropKindOf("application/pdf"))
+        // Any other kind of file joins an idea's files.
+        assertEquals(DropKind.Files, dropKindOf("application/pdf"))
+        assertEquals(DropKind.Files, dropKindOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+        assertNull(dropKindOf(""))
         assertEquals(DropKind.Sounds, dropKindOf("audio/mpeg"))
         assertEquals(DropKind.Sounds, dropKindOf("audio/mp4"))
     }
@@ -52,10 +55,10 @@ class DroppedTest {
         assertEquals(DroppedItem.MapFile("content://files/6", "Plan.xmind"), droppedFile("content://files/6", null, "Plan.xmind"))
         assertEquals(DroppedItem.MapFile("content://files/7", null), droppedFile("content://files/7", "application/zip", null))
         assertEquals(DroppedItem.TextFile("content://files/8", "Groceries.txt"), droppedFile("content://files/8", "text/plain", "Groceries.txt"))
-        assertNull(droppedFile("content://files/9", "application/pdf", "Ticket.pdf"))
-        assertNull(droppedFile("content://files/10", "application/octet-stream", "Archive.tar"))
-        // A video Orbit can't keep in a map isn't one.
-        assertNull(droppedFile("content://files/11", "video/x-matroska", "Film.mkv"))
+        // Any other file joins an idea's files, as it is: a video Orbit can't keep as the idea's video too.
+        assertEquals(DroppedItem.File("content://files/9", "Ticket.pdf"), droppedFile("content://files/9", "application/pdf", "Ticket.pdf"))
+        assertEquals(DroppedItem.File("content://files/10", "Archive.tar"), droppedFile("content://files/10", "application/octet-stream", "Archive.tar"))
+        assertEquals(DroppedItem.File("content://files/11", "Film.mkv"), droppedFile("content://files/11", "video/x-matroska", "Film.mkv"))
     }
 
     @Test
@@ -68,7 +71,8 @@ class DroppedTest {
         // One Orbit can't keep is still a sound: adding it says why it can't.
         assertEquals(DroppedItem.Sound("content://sounds/5", "Call.amr"), droppedFile("content://sounds/5", "audio/amr", "Call.amr"))
         assertEquals(DroppedItem.Video("content://videos/6", "Walk.mp4"), droppedFile("content://videos/6", "video/mp4", "Walk.mp4"))
-        assertNull(droppedFile("content://files/7", "application/octet-stream", "Call.amr"))
+        // One that says nothing of itself, of a kind Orbit doesn't play, joins an idea's files.
+        assertEquals(DroppedItem.File("content://files/7", "Call.amr"), droppedFile("content://files/7", "application/octet-stream", "Call.amr"))
     }
 
     @Test

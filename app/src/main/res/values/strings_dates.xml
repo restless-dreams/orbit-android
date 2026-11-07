@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- An idea's date, in its editor, its long-press menu, its details and the outline. -->
+    <string name="map_section_date">Date</string>
+    <string name="map_date_add">Add a date</string>
+    <string name="map_date_add_time">Add a time</string>
+    <string name="map_date_remove">Remove the date</string>
+    <string name="map_date_change">Change the date</string>
+    <string name="map_date_change_time">Change the time</string>
+    <!-- The time picker's title, and its button that leaves the date without a time. -->
+    <string name="map_date_time_title">Time</string>
+    <string name="map_date_no_time">No time</string>
+    <!-- What TalkBack says of the time's chip: %1$s is the time, "9:30 AM". -->
+    <string name="map_date_time_label">Time: %1$s</string>
+    <!-- What TalkBack says of the date's chip: %1$s is the date, "Fri, Nov 20". -->
+    <string name="map_date_label">Date: %1$s</string>
+    <!-- A date that's past while the idea isn't done: %1$s is the date. -->
+    <string name="map_date_overdue_label">Overdue: %1$s</string>
+    <string name="map_date_overdue">Overdue</string>
+    <!-- Under the date in the editor: when it reminds, or why it won't. %1$s is 9:00 on the phone's clock. -->
+    <string name="map_date_reminds_at">Orbit reminds you at %1$s that day</string>
+    <string name="map_date_reminds_then">Orbit reminds you then</string>
+    <string name="map_date_reminders_off">Reminders are off in Settings</string>
+    <string name="map_date_notifications_off">Notifications are off for Orbit, so it can’t remind you</string>
+    <!-- Asked once, on Android 13 and later, as the first date is set. -->
+    <string name="reminders_ask_title">Remind you when it comes?</string>
+    <string name="reminders_ask_text">Orbit can remind you on this device when an idea’s date comes. Allow its notifications for that.</string>
+    <string name="reminders_ask_allow">Allow</string>
+    <string name="reminders_ask_not_now">Not now</string>
+</resources>

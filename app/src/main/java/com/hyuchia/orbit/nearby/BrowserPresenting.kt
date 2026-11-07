@@ -11,6 +11,7 @@ import com.hyuchia.orbit.data.OutgoingCopies
 import com.hyuchia.orbit.data.isSoundFile
 import com.hyuchia.orbit.data.mediaType
 import com.hyuchia.orbit.data.soundNamesIn
+import com.hyuchia.orbit.data.withoutFiles
 import com.hyuchia.orbit.page.AudienceCommand
 import com.hyuchia.orbit.page.PageWords
 import com.hyuchia.orbit.page.escapeHtml
@@ -102,15 +103,23 @@ class BrowserPresenting internal constructor(
     /** The latest of each kind of command, for a browser that joins halfway. */
     private val latest = ConcurrentHashMap<String, String>()
 
+    /**
+     * Held while a command goes out and while a browser catches up and joins
+     * the streams, so a browser hears each command once: in what it catches
+     * up with, or as it's sent, never in neither.
+     */
+    private val sending = Any()
+
     /** The files the map being presented plays as sounds: they play from the presenter's phone, and stay there. */
     @Volatile private var sounds: Set<String> = emptySet()
 
     /**
-     * The files of its media folder the map being presented points at
+     * The files of its media folder the map being presented shows
      * ([MediaNames.references]): the room gets none but these, as a zip of the
      * map carries none but these. The folder keeps others for the map's
      * earlier versions, such as a picture taken off it, which stay on the
-     * phone whatever name a browser guesses.
+     * phone whatever name a browser guesses, and its ideas' files, which stay
+     * there too ([withoutFiles]).
      */
     @Volatile private var shownFiles: Set<String> = emptySet()
 
@@ -134,26 +143,34 @@ class BrowserPresenting internal constructor(
 
         override fun send(command: AudienceCommand) {
             val json = encode(command)
+            // What a map points at is worked out before the lock: a big map's text takes a while to read.
+            val files = (command as? AudienceCommand.Show)?.let { soundNamesIn(it.markdown).toSet() to MediaNames.references(withoutFiles(it.markdown)).toSet() }
 
-            when (command) {
-                is AudienceCommand.Show -> {
-                    latest.clear()
-                    latest[SHOW] = json
-                    sounds = soundNamesIn(command.markdown).toSet()
-                    shownFiles = MediaNames.references(command.markdown).toSet()
+            synchronized(sending) {
+                when (command) {
+                    is AudienceCommand.Show -> {
+                        latest.clear()
+                        latest[SHOW] = json
+
+                        files?.let { (soundFiles, pointedAt) ->
+                            sounds = soundFiles
+                            shownFiles = pointedAt
+                        }
+                    }
+                    is AudienceCommand.Captions -> latest[CAPTIONS] = json
+                    is AudienceCommand.Step -> latest[STEP] = json
+                    AudienceCommand.End -> latest.clear()
+                    is AudienceCommand.Media, is AudienceCommand.Playback, is AudienceCommand.Seek, AudienceCommand.CloseMedia -> Unit
                 }
-                is AudienceCommand.Captions -> latest[CAPTIONS] = json
-                is AudienceCommand.Step -> latest[STEP] = json
-                AudienceCommand.End -> latest.clear()
-                is AudienceCommand.Media, is AudienceCommand.Playback, is AudienceCommand.Seek, AudienceCommand.CloseMedia -> Unit
-            }
 
-            shown = shown.after(command, clock())
-            streams.keys.forEach { it.send(json) }
+                shown = shown.after(command, clock())
+                // Streams only queue what they're sent, so the lock is held for no write.
+                streams.keys.forEach { it.send(json) }
+            }
         }
 
         override fun reckon(media: ShownMedia?) {
-            shown = media
+            synchronized(sending) { shown = media }
         }
 
         override fun close() {
@@ -249,7 +266,11 @@ class BrowserPresenting internal constructor(
         else -> Response.notFound()
     }
 
-    /** A member's stream, which first catches up with the presentation so far. */
+    /**
+     * A member's stream, which first catches up with the presentation so
+     * far, and from then on hears each command: at once, as one step, so a
+     * command sent meanwhile is in one or the other.
+     */
     private fun follow(member: Member): EventStream {
         lateinit var stream: EventStream
 
@@ -261,10 +282,13 @@ class BrowserPresenting internal constructor(
             watchingNow.value = streams.size
         }
 
-        listOf(SHOW, CAPTIONS, STEP).mapNotNull { latest[it] }.forEach(stream::send)
-        // A video playing, at about where it is now.
-        shown?.takeIf { latest.containsKey(SHOW) }?.let { stream.send(encode(it.command(clock()))) }
-        streams[stream] = member.id
+        synchronized(sending) {
+            listOf(SHOW, CAPTIONS, STEP).mapNotNull { latest[it] }.forEach(stream::send)
+            // A video playing, at about where it is now.
+            shown?.takeIf { latest.containsKey(SHOW) }?.let { stream.send(encode(it.command(clock()))) }
+            streams[stream] = member.id
+        }
+
         joining.streamOpened(member.id)
         watchingNow.value = streams.size
 

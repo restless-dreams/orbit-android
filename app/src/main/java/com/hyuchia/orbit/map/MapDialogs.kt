@@ -1,5 +1,7 @@
 package com.hyuchia.orbit.map
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -18,10 +20,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
+import com.hyuchia.orbit.data.IdeaDate
 import com.hyuchia.orbit.data.TRASH_DAYS
 import com.hyuchia.orbit.home.tagCounts
 import com.hyuchia.orbit.nearby.SendSheet
 import com.hyuchia.orbit.privacy.CoverDialog
+import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.theme.OrbitPalette
 import com.hyuchia.orbit.theme.parseCssColor
 import com.hyuchia.orbit.ui.ColorPickerDialog
@@ -53,6 +57,15 @@ internal class MapDialogsState(
 
     /** The idea whose color is being picked. */
     var pickingColor by mutableStateOf<String?>(null)
+
+    /** The idea files are being picked for, from its long-press menu. */
+    var pickingFiles by mutableStateOf<String?>(null)
+
+    /** The idea whose date, or its time, is being picked. */
+    var pickingDate by mutableStateOf<DatePick?>(null)
+
+    /** Asking for notifications, as the first date was set. */
+    var askingNotifications by mutableStateOf(false)
 
     /** The goal an amount is being added to, taken off or paid, from its long-press menu. */
     var changingGoal by changingGoal
@@ -86,6 +99,24 @@ internal fun rememberMapDialogs(): MapDialogsState {
  */
 @Composable
 internal fun MapDialogs(model: MapViewModel, ui: MapUi, dialogs: MapDialogsState, title: String) {
+    val context = LocalContext.current
+
+    // Files for the idea whose long-press menu asked: any kind, several at once, from Android's document picker.
+    val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        val nodeId = dialogs.pickingFiles
+        dialogs.pickingFiles = null
+
+        if (nodeId != null) {
+            model.addFiles(nodeId, uris, context.contentResolver)
+        }
+    }
+
+    LaunchedEffect(dialogs.pickingFiles) {
+        if (dialogs.pickingFiles != null) {
+            pickFiles.launch(arrayOf("*/*"))
+        }
+    }
+
     dialogs.pickingIcon?.let { nodeId ->
         val node = ui.nodes[nodeId]
         EmojiPickerSheet(
@@ -116,6 +147,30 @@ internal fun MapDialogs(model: MapViewModel, ui: MapUi, dialogs: MapDialogsState
                 onDismiss = { dialogs.pickingColor = null },
             )
         }
+    }
+
+    dialogs.pickingDate?.let { pick ->
+        val node = ui.nodes[pick.nodeId]
+        val date = node?.date
+        val context = LocalContext.current
+        val settings = LocalAppSettings.current
+
+        fun picked(chosen: IdeaDate) {
+            dialogs.pickingDate = null
+            model.update(pick.nodeId, "due", JsonPrimitive(chosen.text))
+            // A date to remind of: Android 13 and later ask first, once, saying why.
+            dialogs.askingNotifications = asksForNotifications(context, settings.reminders, settings.notificationsAsked)
+        }
+
+        when {
+            node == null -> dialogs.pickingDate = null
+            pick.part == DatePart.Time && date != null -> IdeaTimePicker(date, ::picked, onDismiss = { dialogs.pickingDate = null })
+            else -> IdeaDayPicker(date, ::picked, onDismiss = { dialogs.pickingDate = null })
+        }
+    }
+
+    if (dialogs.askingNotifications) {
+        NotificationsAsk(onDone = { dialogs.askingNotifications = false })
     }
 
     val goalNode = dialogs.changingGoal?.let { ui.nodes[it] }

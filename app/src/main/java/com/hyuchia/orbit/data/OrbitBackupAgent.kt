@@ -7,6 +7,9 @@ import android.app.backup.FullBackupDataOutput
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import java.io.File
+import java.io.FileInputStream
+import java.io.IOException
+import java.io.InputStream
 
 /** What a file adds to a backup besides its bytes: the archive's record of it, and padding, at most. */
 private const val BACKUP_FILE_OVERHEAD = 2048L
@@ -45,16 +48,18 @@ private const val FOLDER_DELETIONS = "folder-deletions.json"
  * the settings, go into any. A backup stops altogether past its
  * quota, 25 MB on Google's cloud, and one video from the phone can be more
  * than that. So the settings and the maps' text and details go first, the
- * most recently changed map first, then the pictures, sounds and videos the
- * maps point at, smallest first, as long as they fit; how many maps' text
+ * most recently changed map first, then the pictures, sounds, ideas' files
+ * and videos the maps point at, smallest first, as long as they fit; how many maps' text
  * didn't fit, if any did, is noted for Settings to say. Moving to a new
  * phone, from Android 12 on, takes the maps' history, the trash and what the
  * folder maps are kept in still has to delete too, as its backup rules
  * allow. Restoring is Android's own, each file back where it was, at the
  * time it was last changed, but written beside its place first and only
- * then given its name, so a restore cut short never leaves half a file. A
- * backup that leaves private maps out carries how many, and a restore from
- * it keeps that count for Home to say ([privateMapsLeftOutOfRestore]).
+ * then given its name, once all of it came, so a restore cut short never
+ * leaves half a file: the folder's deletions too, which Orbit reads itself
+ * ([restoreFile]). A backup that leaves private maps out carries how many,
+ * and a restore from it keeps that count for Home to say
+ * ([privateMapsLeftOutOfRestore]).
  */
 class OrbitBackupAgent : BackupAgent() {
     override fun onBackup(oldState: ParcelFileDescriptor?, data: BackupDataOutput?, newState: ParcelFileDescriptor?) {
@@ -83,35 +88,97 @@ class OrbitBackupAgent : BackupAgent() {
     }
 
     override fun onRestoreFile(data: ParcelFileDescriptor, size: Long, destination: File, type: Int, mode: Long, mtime: Long) {
-        restoreFile(destination, type, mtime, filesDir) { target -> super.onRestoreFile(data, size, target, type, mode, mtime) }
+        // The backup's stream, which Android goes on reading from for the files after this one: it isn't closed here.
+        restoreFile(destination, type, size, mtime, filesDir, { FileInputStream(data.fileDescriptor) }) { target -> super.onRestoreFile(data, size, target, type, mode, mtime) }
     }
 }
 
 /**
- * Restores one file of `type` to `destination`, through `restore`, Android's
- * own restore into the file it's given. Android restores only what the backup
- * rules name: a file they name on its own (the folder's deletions, directly
- * in `filesDir`) is written where it is, since one beside it wouldn't be
- * restored; one in a folder they name is written beside its place first, as
- * Orbit writes every file, and only then given its name, so a restore stopped
- * partway through never takes the place of what's there. Then its time.
+ * Restores one file of `type`, `size` bytes long, to `destination`, through
+ * `restore`, Android's own restore into the file it's given. Each file is
+ * written beside its place first, as Orbit writes every file, and only given
+ * its name once all of it came: Android stops at the end of a backup cut
+ * short without saying so, and a restore stopped partway through never takes
+ * the place of what's there. Android restores only what the backup rules
+ * name, and a file they name on its own, as the folder's deletions directly
+ * in `filesDir`, only in its very place, never beside it: that one's bytes
+ * Orbit reads itself, from `bytes`, the backup's stream ([restoreWhole]).
+ * Then its time.
  */
-internal fun restoreFile(destination: File, type: Int, mtime: Long, filesDir: File, restore: (File) -> Unit) {
-    if (type != BackupAgent.TYPE_FILE || destination.parentFile?.canonicalPath == filesDir.canonicalPath) {
+internal fun restoreFile(destination: File, type: Int, size: Long, mtime: Long, filesDir: File, bytes: () -> InputStream, restore: (File) -> Unit) {
+    if (type != BackupAgent.TYPE_FILE) {
         restore(destination)
         fixTime(destination, type, mtime)
+        return
+    }
+
+    if (destination.name == FOLDER_DELETIONS && destination.parentFile?.canonicalPath == filesDir.canonicalPath) {
+        if (restoreWhole(bytes(), size, destination) && mtime > 0) {
+            destination.setLastModified(if (mtime < MILLISECONDS_FROM) mtime * 1000 else mtime)
+        }
+
         return
     }
 
     val partial = File(destination.parentFile, ".${destination.name}.partial")
     restore(partial)
 
-    if (!partial.renameTo(destination)) {
+    if (!partial.isFile || partial.length() != size || !partial.renameTo(destination)) {
         partial.delete()
         return
     }
 
     fixTime(destination, type, mtime)
+}
+
+/**
+ * Restores `size` bytes of `input`, the backup's stream, to `destination`,
+ * whole or not at all ([writeAtomically]): a stream that ends before they all
+ * came, or a file that can't be written, leaves what's there as it was. All
+ * of them are read however that goes, as Android reads a file it doesn't
+ * restore, so the backup's next file starts where it should, and none past
+ * them. Returns whether it was restored.
+ */
+internal fun restoreWhole(input: InputStream, size: Long, destination: File): Boolean {
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var left = size
+
+    /** The next piece of the file's bytes, read into `buffer`: how many, none once they're all read or the stream has ended. */
+    fun next(): Int {
+        val read = if (left > 0) input.read(buffer, 0, minOf(buffer.size.toLong(), left).toInt()).coerceAtLeast(0) else 0
+        left -= read
+        return read
+    }
+
+    val restored = try {
+        writeAtomically(destination) { output ->
+            var read = next()
+
+            while (read > 0) {
+                output.write(buffer, 0, read)
+                read = next()
+            }
+
+            if (left > 0) {
+                throw IOException("The backup ended partway through ${destination.name}")
+            }
+        }
+
+        true
+    } catch (failed: IOException) {
+        false
+    }
+
+    // What a write that failed left of them is read all the same, and let go.
+    try {
+        do {
+            val read = next()
+        } while (read > 0)
+    } catch (ended: IOException) {
+        // A stream that fails has no more of them to give.
+    }
+
+    return restored
 }
 
 /**
@@ -159,6 +226,7 @@ internal fun backupFiles(files: File, quota: Long, newPhone: Boolean, privateMap
     chosen.takeWhole(filesIn(File(files, "datastore")).filterNot(::isWidgetState))
     val pictures = mutableListOf<File>()
     val sounds = mutableListOf<File>()
+    val ideaFiles = mutableListOf<File>()
     val videos = mutableListOf<File>()
     val earlier = mutableListOf<File>()
     val entries = File(files, MAPS_DIRECTORY).listFiles().orEmpty()
@@ -173,12 +241,15 @@ internal fun backupFiles(files: File, quota: Long, newPhone: Boolean, privateMap
         }
 
         val text = File(entry, MAP_FILE).takeIf { it.isFile }?.let { runCatching { it.readTextSafely() }.getOrNull() }.orEmpty()
-        val pointedAt = MediaNames.references(text).toSet()
+        // Its ideas' files are of any kind: the text names them, and Orbit's own names (`file-…`) say an earlier version's.
+        val files = fileNamesIn(text).toSet()
+        val pointedAt = MediaNames.references(text).toSet() + files
 
         for (file in media.listFiles().orEmpty()) {
             when {
-                !file.isFile || !isMediaName(file.name) -> Unit
+                !file.isFile || !(isMediaName(file.name) || file.name in files || isIdeaFileName(file.name)) -> Unit
                 file.name !in pointedAt -> earlier += file
+                file.name in files -> ideaFiles += file
                 isSoundFile(file.name) -> sounds += file
                 isVideoName(file.name) -> videos += file
                 else -> pictures += file
@@ -186,7 +257,7 @@ internal fun backupFiles(files: File, quota: Long, newPhone: Boolean, privateMap
         }
     }
 
-    (bySize(pictures) + bySize(sounds) + bySize(videos)).forEach(chosen::take)
+    (bySize(pictures) + bySize(sounds) + bySize(ideaFiles) + bySize(videos)).forEach(chosen::take)
 
     if (newPhone) {
         val history = File(files, HISTORY_DIRECTORY)

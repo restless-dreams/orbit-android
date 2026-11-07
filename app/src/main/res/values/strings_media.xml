@@ -40,6 +40,12 @@
         <item quantity="other">Forward %d seconds</item>
     </plurals>
     <string name="media_open_in_another_app">Open in another app</string>
+    <!-- Asked when a video opened in another app can't go there without what its file says beyond what it shows and plays: opening it anyway is the person's choice, knowing what goes with it, as media_share_video_as_it_is_title asks. -->
+    <string name="media_open_video_as_it_is_title">Open this video as it is?</string>
+    <string name="media_open_video_as_it_is_text">Orbit couldn\'t take out where and when it was recorded and on what device, so the app you open it in would get them too.</string>
+    <string name="media_open_as_it_is">Open as it is</string>
+    <!-- When no copy of a video could be made to open in another app, as on a device that's full. -->
+    <string name="media_open_video_failed">Orbit couldn\'t make the copy of this video that another app opens. This device may not have room for it.</string>
     <!-- %1$s is the video's site: YouTube or Vimeo. -->
     <string name="media_watch_on">Watch on %1$s</string>
 </resources>

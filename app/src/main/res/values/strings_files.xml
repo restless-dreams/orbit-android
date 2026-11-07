@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Files on ideas: PDFs, documents, spreadsheets, any file an idea holds, opened in another app. See TRANSLATING.md. -->
+<resources>
+    <!-- The heading over an idea's files, in its details and its editor. -->
+    <string name="files_title">Files</string>
+    <!-- The editor's button that picks files from the device for the idea. -->
+    <string name="files_add">Add files</string>
+    <!-- The long-press menu's item that does the same. -->
+    <string name="files_add_a_file">Add a file</string>
+    <!-- What tapping a file in the details does, for TalkBack. -->
+    <string name="files_open_in_another_app">Open in another app</string>
+    <!-- The editor's button that takes a file off its idea. %1$s is the file's name. -->
+    <string name="files_remove">Take %1$s off</string>
+    <!-- Said once a file is taken off, with Undo. %1$s is the file's name. -->
+    <string name="files_removed">Took “%1$s” off</string>
+    <!-- Said once files joined an idea, with Undo. %1$s is the idea. -->
+    <plurals name="files_added">
+        <item quantity="one">Added a file to “%1$s”</item>
+        <item quantity="other">Added %2$d files to “%1$s”</item>
+    </plurals>
+    <!-- While a file is copied in. %1$s is its name. -->
+    <string name="files_copying">Copying %1$s…</string>
+    <!-- Under the file being copied, while more follow it. -->
+    <plurals name="files_left">
+        <item quantity="one">%1$d more after it</item>
+        <item quantity="other">%1$d more after it</item>
+    </plurals>
+
+    <!-- Asked before a file leaves Orbit for another app. %1$s is the file's name. -->
+    <string name="files_open_title">Open “%1$s” in another app?</string>
+    <string name="files_open_text">It goes to that app as it is. Orbit can\'t take out what a file like this may say beyond what it shows, such as who made it, when and where.</string>
+    <!-- The same, for a file on a private map. -->
+    <string name="files_open_text_private">It goes to that app as it is. Orbit can\'t take out what a file like this may say beyond what it shows, such as who made it, when and where. The copy that app reads is deleted when this private map locks.</string>
+    <string name="files_open">Open</string>
+    <!-- When no app on the device opens a file. %1$s is its kind, such as “PDF” or “Spreadsheet”. -->
+    <string name="files_no_app">No app on this device opens a file like this (%1$s).</string>
+    <string name="files_open_failed">Couldn\'t open that file.</string>
+    <!-- A file the map names that isn't on this device, as one an older device in the folder didn't keep. -->
+    <string name="files_missing">That file isn\'t on this device.</string>
+    <!-- Under a file the map names that isn't on this device, after its kind and size. -->
+    <string name="files_not_here">Not on this device</string>
+    <string name="files_unreadable">Couldn\'t copy that file.</string>
+
+    <!-- The kinds of file, under each file's name beside its size, as the map's details show them. -->
+    <string name="files_kind_pdf">PDF</string>
+    <string name="files_kind_document">Document</string>
+    <string name="files_kind_spreadsheet">Spreadsheet</string>
+    <string name="files_kind_presentation">Presentation</string>
+    <string name="files_kind_picture">Picture</string>
+    <string name="files_kind_video">Video</string>
+    <string name="files_kind_sound">Sound</string>
+    <string name="files_kind_archive">Archive</string>
+    <string name="files_kind_text">Text</string>
+    <string name="files_kind_other">File</string>
+
+    <!-- Why a file can't join an idea. %1$s and %2$s are sizes, such as “12.4 MB”. -->
+    <string name="data_file_too_big">That file is %1$s, and a map keeps files of up to %2$s, so it can still go to your other devices.</string>
+    <string name="data_file_past_limit">That file is more than %1$s, and a map keeps files of up to that, so it can still go to your other devices.</string>
+    <string name="data_file_past_map_room">This map\'s pictures, videos, sounds and files come to %1$s already. With this file they\'d be more than the %2$s a map can carry when it\'s shared or backed up.</string>
+    <string name="data_no_room_for_file">There isn\'t room on this device for that file.</string>
+</resources>

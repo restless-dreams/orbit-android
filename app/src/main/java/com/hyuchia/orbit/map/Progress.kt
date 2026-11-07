@@ -4,26 +4,41 @@ import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.MapState
 import com.hyuchia.orbit.page.PROGRESS_VERSION
 
-/** Statuses Orbit draws as done: a to-do with one is done. */
-private val DONE_STATUS = Regex("done|complete|completed|shipped|finished|closed")
+/** How a to-do's status reads, as Orbit colors its dot: done, in progress, blocked or to do. */
+enum class StatusTone { Done, Active, Blocked, ToDo }
 
-/**
- * Statuses that make an idea a to-do: the words Orbit draws as to do, in
- * progress, blocked or done. Any other status, such as "primary key" in a
- * map of a database, is a label.
- */
-private val TO_DO_STATUS = Regex(
-    "todo|to[ -]?do|planned|backlog|next|open|active|doing|in[ -]?progress|wip|started|ongoing|" +
-        "blocked|stuck|at[ -]?risk|failed|done|complete|completed|shipped|finished|closed",
+/** The words of each tone, in any case, as Orbit reads them (its `statusTone`). */
+private val TONES = listOf(
+    StatusTone.Done to Regex("done|complete|completed|shipped|finished|closed"),
+    StatusTone.Active to Regex("active|doing|in[ -]?progress|wip|started|ongoing"),
+    StatusTone.Blocked to Regex("blocked|stuck|at[ -]?risk|failed"),
+    StatusTone.ToDo to Regex("todo|to[ -]?do|planned|backlog|next|open"),
 )
 
-private val MapNode.statusWord: String get() = status?.trim()?.lowercase().orEmpty()
+/**
+ * The tone of `status`, read as Orbit reads it: without the spaces around it,
+ * whatever its capitals. Null for any other status, such as "primary key" in
+ * a map of a database, which is a label.
+ */
+fun statusTone(status: String?): StatusTone? {
+    val word = status?.trim()?.lowercase() ?: return null
+    return TONES.firstOrNull { (_, words) -> words.matches(word) }?.first
+}
 
-/** A to-do: an idea whose status is one of a to-do's (see [TO_DO_STATUS]). */
-val MapNode.isToDo: Boolean get() = TO_DO_STATUS.matches(statusWord)
+/**
+ * The idea's status as the map reads it, the same everywhere it shows:
+ * without the spaces around it, and none when that leaves nothing.
+ */
+val MapNode.shownStatus: String? get() = status?.trim()?.ifEmpty { null }
+
+/** Whether the idea's status is `word`, whatever its capitals and the spaces around it. */
+fun MapNode.hasStatus(word: String): Boolean = shownStatus.equals(word, ignoreCase = true)
+
+/** A to-do: an idea whose status has a to-do's tone. */
+val MapNode.isToDo: Boolean get() = statusTone(status) != null
 
 /** A to-do that's done. */
-val MapNode.isDone: Boolean get() = DONE_STATUS.matches(statusWord)
+val MapNode.isDone: Boolean get() = statusTone(status) == StatusTone.Done
 
 /** An idea of the Progress kind, written for this version of Progress or an older one (see [PROGRESS_VERSION]). */
 val MapNode.isProgress: Boolean get() = type?.trim().equals("progress", ignoreCase = true) && (typeVersion ?: 1) <= PROGRESS_VERSION

@@ -4,9 +4,11 @@ import com.hyuchia.orbit.Logs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import java.io.File
 import java.io.IOException
+import java.nio.file.Files
 
 /** Earlier versions of a map: in `history/<map>/` (and in a map's own folder before layout 2, see [StorageLayout]). */
 const val HISTORY_DIRECTORY = "history"
@@ -94,10 +96,22 @@ internal class MapHistory(store: MapStore) : MapPart(store) {
     }
 
     /** The map's kept versions, with when each was the map: files with a version's name, and nothing else that happens to have one. */
-    fun versionFiles(id: String): List<Pair<Long, File>> =
-        File(historyDirectory, id).listFiles().orEmpty().mapNotNull { file ->
+    fun versionFiles(id: String): List<Pair<Long, File>> = versionFilesOrNull(id).orEmpty()
+
+    /**
+     * The map's kept versions, as [versionFiles] lists them, or null when its
+     * history may be there but can't be listed now: what its versions point
+     * at isn't known then, so nothing is deleted by it. Only a history that's
+     * surely not there has none.
+     */
+    fun versionFilesOrNull(id: String): List<Pair<Long, File>>? {
+        val history = File(historyDirectory, id)
+        val files = history.listFiles() ?: return if (Files.notExists(history.toPath())) emptyList() else null
+
+        return files.mapNotNull { file ->
             VERSION_NAME.matchEntire(file.name)?.groupValues?.get(1)?.toLongOrNull()?.takeIf { file.isFile }?.let { it to file }
         }
+    }
 
     /** When each kept version was the map, originals left out: they're never thinned, and don't count as checkpoints. */
     fun versionTimes(id: String): List<Long> =
@@ -106,14 +120,24 @@ internal class MapHistory(store: MapStore) : MapPart(store) {
     /**
      * Keeps `text` in the map's history for `reason`, unless it's `unless`
      * (the text about to replace it) or the same as the latest version; then
-     * thins the history out as it ages (see [versionsToKeep]).
+     * thins the history out as it ages (see [versionsToKeep]). The latest
+     * version being `text` already, a big change's reason is its own from
+     * then on, so thinning keeps it as one, and the history says why.
      */
     fun keepVersionText(id: String, text: String, unless: String? = null, reason: VersionReason) {
         val history = File(historyDirectory, id)
         val times = versionTimes(id)
         val latest = times.maxOrNull()?.let { File(history, "$it.md") }
 
-        if (text == unless || (latest != null && latest.isFile && latest.readTextSafely() == text)) {
+        if (text == unless) {
+            return
+        }
+
+        if (latest != null && latest.isFile && latest.readTextSafely() == text) {
+            if (isBigChange(reason)) {
+                keptBeforeBigChange(history, latest.name, reason)
+            }
+
             return
         }
 
@@ -156,17 +180,42 @@ internal class MapHistory(store: MapStore) : MapPart(store) {
     }
 
     /**
-     * Records why the version in the file `name` was kept. Entries for
+     * Records why the version in the file `name` was kept, with what a newer
+     * Orbit wrote `beside` an earlier reason for it, as [recordReasons] does.
+     */
+    fun recordReason(history: File, name: String, reason: VersionReason, beside: JsonObject? = null) =
+        recordReasons(history, mapOf(name to JsonObject(beside.orEmpty() + reason.toJson())))
+
+    /**
+     * Records why the versions in the files `entries` names were kept, each
+     * entry as it's given, so one a newer version wrote, as a zip of every
+     * map brings it, keeps what this version doesn't know. Entries for
      * versions that are gone (thinned out, here or by an older release) go
      * with them, judged by the files' times, so a newer Orbit's own versions
      * keep theirs; anything else in the file stays as it was.
      */
-    fun recordReason(history: File, name: String, reason: VersionReason) {
+    fun recordReasons(history: File, entries: Map<String, JsonElement>) {
         val file = File(history, REASONS_FILE)
         val whole = runCatching { mapsJson.parseToJsonElement(file.readTextSafely()) as? JsonObject }.getOrNull() ?: JsonObject(emptyMap())
         val times = history.list().orEmpty().map { it.substringBefore('.') }.toSet()
-        val entries = reasonEntries(history).filterKeys { it.substringBefore('.') in times } + (name to reason.toJson())
-        writeAtomically(file, JsonObject(whole + ("versions" to JsonObject(entries))).toString())
+        val kept = reasonEntries(history).filterKeys { it.substringBefore('.') in times } + entries
+        writeAtomically(file, JsonObject(whole + ("versions" to JsonObject(kept))).toString())
+    }
+
+    /**
+     * Says the version in the file `name` was kept before a big change,
+     * `reason`, when it was kept for another reason or none. One kept before
+     * a big change keeps its own reason, and one whose reason a newer Orbit
+     * wrote, which this one can't read, keeps that; whatever else a newer
+     * Orbit wrote beside a reason stays.
+     */
+    private fun keptBeforeBigChange(history: File, name: String, reason: VersionReason) {
+        val entry = reasonEntries(history)[name]
+        val known = (entry as? JsonObject)?.let(VersionReason::read)
+
+        if (entry == null || known != null && !isBigChange(known)) {
+            recordReason(history, name, reason, beside = entry as? JsonObject)
+        }
     }
 
     /** Whether a version was kept before a big change, which thinning keeps over the others of its stretch: the map as it was before it may be wanted back. */

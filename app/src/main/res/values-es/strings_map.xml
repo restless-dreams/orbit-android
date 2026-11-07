@@ -25,7 +25,10 @@
 
     <!-- Sobre el mapa -->
     <string name="map_first_idea_hint">Toca + en la órbita para agregar tu primera idea, o mantén presionado el + de abajo y di tus ideas. Mantén presionada cualquier idea para cambiarle el nombre o el color, o para moverla.</string>
-    <string name="map_stopped">El mapa se detuvo mientras Android liberaba memoria. Tus cambios están guardados.</string>
+    <string name="map_stopped_title">El mapa se detuvo</string>
+    <string name="map_stopped">Android liberó memoria mientras estaba abierto. Tus cambios están guardados.</string>
+    <string name="map_did_not_load_title">El mapa no cargó</string>
+    <string name="map_did_not_load">La página que lo dibuja no pudo iniciarse. Tu mapa está a salvo.</string>
     <string name="map_load_it_again">Volver a cargarlo</string>
     <string name="map_icon_for">Ícono de %1$s</string>
     <string name="map_color_for">Color de %1$s</string>
@@ -64,6 +67,8 @@
     <string name="map_change_kept_in_history">Este mapa cambió en otro lugar, así que tu último cambio está en su historial.</string>
     <string name="map_change_not_saved">Orbit no guardó ese cambio porque habría vaciado el mapa. Deshacer lo revierte.</string>
     <string name="map_deleted_idea">Se eliminó “%1$s”</string>
+    <string name="map_checked_item">Se marcó “%1$s”</string>
+    <string name="map_unchecked_item">Se desmarcó “%1$s”</string>
     <string name="map_copy">Copiar</string>
     <string name="map_paste_as_ideas">Pegar como ideas</string>
     <string name="map_paste_the_picture">Pegar la imagen</string>
@@ -71,6 +76,7 @@
     <string name="map_cut_idea">Se cortó “%1$s”</string>
     <string name="map_too_much_to_copy">Es demasiado para copiar de una vez</string>
     <string name="map_nothing_to_paste">No hay nada que pegar: primero copia texto o una imagen</string>
+    <string name="map_paste_media_failed">Orbit no pudo copiar a este mapa las imágenes, los videos y los audios de esas ideas, así que no se pegó nada.</string>
     <string name="map_pasted_the_picture">Se pegó la imagen</string>
     <plurals name="map_pasted_ideas">
         <item quantity="one">Se pegó %d idea</item>
@@ -198,6 +204,37 @@
     <string name="map_folded_description">Se muestran como un número hasta que vueles a ella</string>
     <string name="map_copying_the_video">Copiando el video…</string>
     <string name="map_copying_the_video_percent">Copiando el video… %1$s</string>
+    <plurals name="map_smaller_offer_title">
+        <item quantity="one">¿Hacer este video más pequeño?</item>
+        <item quantity="many">¿Hacer estos videos más pequeños?</item>
+        <item quantity="other">¿Hacer estos videos más pequeños?</item>
+    </plurals>
+    <plurals name="map_smaller_offer">
+        <item quantity="one">Pesa %1$s. Hecho más pequeño en este dispositivo, a 1080p, pesa unos %2$s: se envía y se respalda más rápido, y le deja más espacio al mapa.</item>
+        <item quantity="many">Estos %3$d videos pesan %1$s. Hechos más pequeños en este dispositivo, a 1080p, pesan unos %2$s: se envían y se respaldan más rápido, y le dejan más espacio al mapa.</item>
+        <item quantity="other">Estos %3$d videos pesan %1$s. Hechos más pequeños en este dispositivo, a 1080p, pesan unos %2$s: se envían y se respaldan más rápido, y le dejan más espacio al mapa.</item>
+    </plurals>
+    <plurals name="map_smaller_offer_too_big">
+        <item quantity="one">Pesa %1$s, más de lo que este mapa puede guardar tal como está. Hecho más pequeño en este dispositivo, a 1080p, pesa unos %2$s.</item>
+        <item quantity="many">Estos %3$d videos pesan %1$s, más de lo que este mapa puede guardar tal como están. Hechos más pequeños en este dispositivo, a 1080p, pesan unos %2$s.</item>
+        <item quantity="other">Estos %3$d videos pesan %1$s, más de lo que este mapa puede guardar tal como están. Hechos más pequeños en este dispositivo, a 1080p, pesan unos %2$s.</item>
+    </plurals>
+    <plurals name="map_make_it_smaller">
+        <item quantity="one">Hacerlo más pequeño</item>
+        <item quantity="many">Hacerlos más pequeños</item>
+        <item quantity="other">Hacerlos más pequeños</item>
+    </plurals>
+    <plurals name="map_keep_it_as_it_is">
+        <item quantity="one">Dejarlo como está</item>
+        <item quantity="many">Dejarlos como están</item>
+        <item quantity="other">Dejarlos como están</item>
+    </plurals>
+    <string name="map_making_the_video_smaller">Haciendo el video más pequeño…</string>
+    <string name="map_making_the_video_smaller_percent">Haciendo el video más pequeño… %1$s</string>
+    <string name="map_smaller_from_to">De %1$s a unos %2$s</string>
+    <string name="map_stop_making_smaller">Detener</string>
+    <string name="map_made_the_video_smaller">Se hizo el video más pequeño: %1$s en lugar de %2$s</string>
+    <string name="map_cannot_make_videos_smaller">Este dispositivo no puede hacer videos más pequeños, así que se quedó como está</string>
     <string name="map_remove_tag">Quitar %1$s</string>
     <string name="map_add_a_tag">Agregar una etiqueta</string>
     <string name="map_bold">Negrita</string>
@@ -210,6 +247,7 @@
 
     <!-- Los detalles de una idea -->
     <string name="map_priority">Prioridad %1$d</string>
+    <string name="map_status_said">Estado: %1$s</string>
     <string name="map_go_to">Ir a %1$s</string>
     <string name="map_open_link">Abrir enlace</string>
     <string name="map_no_note_yet">Todavía no hay una nota.</string>

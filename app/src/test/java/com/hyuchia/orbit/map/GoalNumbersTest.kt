@@ -65,6 +65,29 @@ class GoalNumbersTest {
     }
 
     @Test
+    fun aDecimalPointTwiceOrMarksThatGroupNothingAreNoNumber() {
+        // Read as 12.3 or 123, a number typed another way would be saved as another number, without a word.
+        for (locale in listOf(english, mexican)) {
+            assertEquals("Write a number, like 12.5", problem("1.2.3", locale))
+            assertEquals("Write a number, like 12.5", problem("1,2.5", locale))
+            assertEquals("Write a number, like 12.5", problem("1,234,56", locale))
+            assertEquals("Write a number, like 12.5", problem("1234,567.5", locale))
+        }
+
+        for (locale in listOf(german, spanish)) {
+            assertEquals("Write a number, like 12,5", problem("1.2.3", locale))
+            assertEquals("Write a number, like 12,5", problem("1,2,3", locale))
+            assertEquals("Write a number, like 12,5", problem("1.2,5", locale))
+            assertEquals("Write a number, like 12,5", problem("1,250,000", locale))
+        }
+
+        // Grouped as people group them, in threes or as in India, they read as ever.
+        assertEquals(BigDecimal(1234567), read("12,34,567", Locale.forLanguageTag("en-IN")))
+        assertEquals(BigDecimal("1234567.5"), read("1,234,567.5", english))
+        assertEquals(BigDecimal(1234567), read("1.234.567", german))
+    }
+
+    @Test
     fun numbersAreKeptToSixDecimals() {
         assertEquals(BigDecimal("0.333333"), read("0.33333333", english))
         assertEquals(BigDecimal(5), read("5.000", english))
@@ -144,6 +167,22 @@ class GoalNumbersTest {
         assertEquals("$0 por pagar de $4,800 · Todo pagado", GoalNumbers.summary(card, spanishWords, mexican))
         assertEquals("Aún sin objetivo", GoalNumbers.summary(Goal(null, BigDecimal.ZERO, BigDecimal.ZERO), spanishWords, mexican))
         assertEquals("Escribe un número, como 12.5", (GoalNumbers.read("cinco", mexican) as NumberReading.Problem).message(spanishWords))
+    }
+
+    @Test
+    fun aGoalsNumbersInBrazilianPortugueseAgreeWithWhatsToGo() {
+        val brazilian = Locale.forLanguageTag("pt-BR")
+        val portugueseWords = FileWords(brazilian)
+        val apples = Goal(target = BigDecimal(5), current = BigDecimal(2), start = BigDecimal.ZERO, unit = "maçãs")
+        assertEquals("2 de 5 maçãs · faltam 3", GoalNumbers.summary(apples, portugueseWords, brazilian))
+        assertEquals("4 de 5 maçãs · falta 1", GoalNumbers.summary(apples.copy(current = BigDecimal(4)), portugueseWords, brazilian))
+        // A fraction to go reads as more than one, after Brazil's decimal comma.
+        assertEquals("3,5 de 5 km · faltam 1,5", GoalNumbers.summary(apples.copy(current = BigDecimal("3.5"), unit = "km"), portugueseWords, brazilian))
+        assertEquals("5 de 5 maçãs · Meta alcançada", GoalNumbers.summary(apples.copy(current = BigDecimal(5)), portugueseWords, brazilian))
+        val card = Goal(target = BigDecimal.ZERO, current = BigDecimal.ZERO, start = BigDecimal(4800), unit = "BRL")
+        assertEquals("R$ 0 a pagar de R$ 4.800 · Tudo pago", plain(GoalNumbers.summary(card, portugueseWords, brazilian)))
+        assertEquals("Ainda sem objetivo", GoalNumbers.summary(Goal(null, BigDecimal.ZERO, BigDecimal.ZERO), portugueseWords, brazilian))
+        assertEquals("Digite um número, como 12,5", (GoalNumbers.read("cinco", brazilian) as NumberReading.Problem).message(portugueseWords))
     }
 
     @Test

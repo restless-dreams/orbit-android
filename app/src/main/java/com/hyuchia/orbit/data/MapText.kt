@@ -90,39 +90,69 @@ private val YAML_ITEM = Regex("""^(\s*)-\s++($TEXT_BEFORE_SPACES)\s*$""")
 private val YAML_KEY = Regex("""^(\s*)([A-Za-z][\w-]*)\s*:\s*+($TEXT_BEFORE_SPACES)\s*$""")
 private val YAML_SCHEMA_VERSION = Regex("""^schemaVersion\s*:\s*["']?([\d.]+)["']?\s*$""", RegexOption.MULTILINE)
 
-/** A comment and the spaces before it, from where they start: a long run of spaces with no comment after it is looked along once, rather than once from each of its spaces. */
-private val ATTRIBUTE_COMMENT = Regex("""(?<!\s)\s*<!--.*?-->""")
-
-private val INLINE_ATTRIBUTES = Regex("""<!--\s*orbit\b(.*?)-->""")
 /** A line of an attribute block, or one attribute of a line's comment: `target: 5`. */
 private val ATTRIBUTE = Regex("""^\s*([A-Za-z][\w-]*)\s*:\s*+($TEXT_BEFORE_SPACES)\s*$""")
+
+/** An HTML comment's start and end, as a line has them: `<!-- … -->`. */
+private const val COMMENT_OPEN = "<!--"
+private const val COMMENT_CLOSE = "-->"
+
+/** The word that starts a comment of a node's attributes: `<!-- orbit status: done -->`. */
+private const val ORBIT = "orbit"
+
 /** An attribute comment on a line of its own, under its node. */
 private val ATTRIBUTE_LINE = Regex("""^\s*<!--\s*orbit\b(.*?)-->\s*$""")
 private val CHECKBOX = Regex("""^\[([ xX/])]\s+""")
-private val LINK = Regex("""!?\[([^\]]*)]\([^)]*\)""")
 private val EMPHASIS = Regex("""[*_~`]+""")
 /** Emphasis around words, as an idea's name has it: underscores inside a word (`copy_versions`) are the name's own. */
 private val WRAPPING_EMPHASIS = Regex("""[*~`]+|(?<!\w)_+|_+(?!\w)""")
 /** A heading's or list item's marker with nothing after it. */
 private val BARE_MARKER = Regex("""#{1,6}|[-*+]|\d+[.)]""")
 
-/** The attributes the outline reads: a node's status, and what makes it a goal or a Progress idea, and a goal's numbers. */
-private val COUNTED_ATTRIBUTES = setOf("status", "type") + GOAL_ATTRIBUTES
+/** A tag as a hashtag at the end of an idea's name writes it, without its `#`: `web`, `sprint-3`, `team/web`. */
+private val HASHTAG = Regex("""[\p{L}\p{N}_][\p{L}\p{N}_/-]*""")
+
+/** The attributes a light reading reads: a node's status, what makes it a goal or a Progress idea and a goal's numbers, and its date. */
+private val READ_ATTRIBUTES = setOf("status", "type", "due") + GOAL_ATTRIBUTES
 
 /** A type with the version of its fields it was written for, as Orbit reads one: `goal@2`. */
 private val VERSIONED_TYPE = Regex("""^(.*\S)@(\d+)$""")
 
-/** An idea as a light reading of a map's text has it: its name, and where it sits (its parent's place in the list; none for the map's center). */
-data class TextIdea(val name: String, val parent: Int?)
+/** The key a YAML node's note is under. */
+private const val NOTE = "note"
 
-/** A node as the outline reads it: its name, where it sits, and the attributes that count its progress. */
-private class ScannedNode(val id: String, var parentId: String?, var name: String) {
+/** The keys a YAML node's children are under, as Orbit reads them: `children`, or another it takes for it when that one isn't there. */
+private val YAML_CHILDREN = listOf("children", "items", "nodes", "subnodes")
+
+/**
+ * An idea as a light reading of a map's text has it: its name, and where it
+ * sits (its parent's place in the list; none for the map's center). A center
+ * no one wrote is `madeUp`: Orbit makes one up for a YAML map with several
+ * ideas at its top, or none, named by the map's title.
+ */
+data class TextIdea(val name: String, val parent: Int?, val madeUp: Boolean = false)
+
+/** A YAML flow value (`[…]`, `{…}`) as a light reading has it: a list, a mapping, or a scalar's text. */
+private sealed interface Flow {
+    class Scalar(val text: String) : Flow
+
+    class Sequence(val items: List<Flow>) : Flow
+
+    class Mapping(val entries: Map<String, Flow>) : Flow
+}
+
+/** A node as the outline reads it: its name, where it sits, and the attributes that count its progress. A center Orbit makes up is `madeUp`. */
+private class ScannedNode(val id: String, var parentId: String?, var name: String, val madeUp: Boolean = false) {
     var status: String? = null
+
+    /** Its note's lines, as a YAML map writes it (`note:`), for Home's search. */
+    var note: List<String> = emptyList()
+
     val attributes = mutableMapOf<String, String>()
 
     fun read(attributes: Map<String, String>) {
         for ((key, value) in attributes) {
-            if (key in COUNTED_ATTRIBUTES) {
+            if (key in READ_ATTRIBUTES) {
                 this.attributes[key] = value
             }
         }
@@ -139,6 +169,7 @@ private class ScannedNode(val id: String, var parentId: String?, var name: Strin
             text = "",
             parentId = parentId,
             status = status,
+            due = attributes["due"],
             // A type's version, as Orbit reads it (`goal@2`): a goal or Progress written for a newer one counts as an idea like any
             // other (MapNode.isGoal), and so does one for a version past what an Int holds.
             type = versioned?.groupValues?.get(1) ?: type,
@@ -147,6 +178,23 @@ private class ScannedNode(val id: String, var parentId: String?, var name: Strin
         )
     }
 }
+
+/**
+ * An idea with a date, as a light reading of a map's text finds it: what
+ * reminders come from, read without a page.
+ */
+data class DatedIdea(
+    /** Its name as it reads, its icon included. */
+    val name: String,
+
+    /** Where it is: its place among its parent's ideas at each level, from the center's (none for the center itself). */
+    val path: List<Int>,
+
+    val date: IdeaDate,
+
+    /** Its status, which says whether it's done: a done idea doesn't remind. */
+    val status: String?,
+)
 
 /** What a light reading of a map's text found: its first title, its planets and ideas counted, and every node. */
 private class Scan(val title: String?, val branches: Int, val ideas: Int, val nodes: List<ScannedNode>)
@@ -166,12 +214,11 @@ object MapText {
         val frontmatter = frontmatter(lines)
         // A YAML map's keys at the top say what frontmatter would.
         val options = if (yaml) yamlKeys(lines) else frontmatter.values
-        val scan = if (yaml) scanYaml(lines) else scan(lines, frontmatter.bodyStart)
+        val scan = if (yaml) scanYaml(lines, titleOf(options)) else scan(lines, frontmatter.bodyStart)
         val mapNodes = scan.nodes.map { it.toMapNode() }
         val fallback = if (yaml) null else lines.drop(frontmatter.bodyStart).firstOrNull { it.isNotBlank() }?.trim()
         return MapOutline(
-            // A title that's a YAML list or map (or the start of one) isn't a name.
-            title = options["title"]?.takeUnless { it.startsWith("[") || it.startsWith("{") } ?: scan.title?.ifBlank { null } ?: fallback ?: words.string(R.string.common_untitled_map),
+            title = titleOf(options) ?: scan.title?.ifBlank { null } ?: fallback ?: words.string(R.string.common_untitled_map),
             branches = scan.branches,
             ideas = scan.ideas,
             progress = mapNodes.firstOrNull()?.let { root -> MapProgress(mapNodes).under(root) } ?: Rollup(),
@@ -187,10 +234,41 @@ object MapText {
      */
     fun ideas(markdown: String): List<TextIdea> {
         val lines = markdown.lines()
-        val nodes = (if (isYaml(lines)) scanYaml(lines) else scan(lines, frontmatter(lines).bodyStart)).nodes
+        val nodes = (if (isYaml(lines)) scanYaml(lines, titleOf(yamlKeys(lines))) else scan(lines, frontmatter(lines).bodyStart)).nodes
         val places = nodes.withIndex().associate { (index, node) -> node.id to index }
-        return nodes.map { TextIdea(it.name, it.parentId?.let(places::get)) }
+        return nodes.map { TextIdea(it.name, it.parentId?.let(places::get), it.madeUp) }
     }
+
+    /**
+     * Every idea in the map's text with a date Orbit reads (its `due`), with
+     * its name, its place and its status, in the order the text has them: the
+     * same light reading as [outline]. A `due` Orbit can't read isn't a date.
+     */
+    fun dates(markdown: String): List<DatedIdea> {
+        val lines = markdown.lines()
+        val nodes = (if (isYaml(lines)) scanYaml(lines, titleOf(yamlKeys(lines))) else scan(lines, frontmatter(lines).bodyStart)).nodes
+        val paths = mutableMapOf<String, List<Int>>()
+        val children = mutableMapOf<String, Int>()
+        val dated = mutableListOf<DatedIdea>()
+
+        // Each node comes after its parent, and after the siblings before it.
+        for (node in nodes) {
+            val parent = node.parentId
+            val path = if (parent == null) emptyList() else paths[parent].orEmpty() + children.getOrDefault(parent, 0)
+
+            if (parent != null) {
+                children[parent] = children.getOrDefault(parent, 0) + 1
+            }
+
+            paths[node.id] = path
+            IdeaDate.parse(node.attributes["due"])?.let { dated += DatedIdea(node.name, path, it, node.status) }
+        }
+
+        return dated
+    }
+
+    /** The title a map's options give it: one that's a YAML list or map (or the start of one) isn't a name. */
+    private fun titleOf(options: Map<String, String>): String? = options["title"]?.takeUnless { it.startsWith("[") || it.startsWith("{") }
 
     /** The headings and list items of the map's text after its frontmatter, as the outline reads them. */
     private fun scan(lines: List<String>, bodyStart: Int): Scan {
@@ -211,7 +289,7 @@ object MapText {
 
         fun addNode(parent: ScannedNode?, text: String): ScannedNode {
             val node = ScannedNode("node-${nodes.size}", parent?.id, name(text))
-            INLINE_ATTRIBUTES.find(text)?.let { node.read(inlineAttributes(it.groupValues[1])) }
+            orbitComment(text)?.let { node.read(inlineAttributes(it)) }
             // A checkbox says the status, before any in the line's comment.
             nodeStatus(text)?.let { node.status = it }
             nodes += node
@@ -322,9 +400,17 @@ object MapText {
         return Scan(title, branches, ideas, nodes)
     }
 
-    /** The map's words without markup, a line per node or paragraph, to search in. */
+    /**
+     * The map's words without markup, a line per node or paragraph, to search
+     * in. A YAML map's are its ideas' names and notes (see [yamlSearchText]).
+     */
     fun searchText(markdown: String): String {
         val lines = markdown.lines()
+
+        if (isYaml(lines)) {
+            return yamlSearchText(lines)
+        }
+
         val body = lines.drop(frontmatter(lines).bodyStart)
         val words = StringBuilder()
         var inAttributes = false
@@ -350,6 +436,25 @@ object MapText {
 
             if (cleaned.isNotEmpty() && !cleaned.startsWith("```")) {
                 words.append(cleaned).append('\n')
+            }
+        }
+
+        return words.toString()
+    }
+
+    /**
+     * A YAML map's words to search in, as [searchText] has a markdown map's:
+     * each idea's name, then its note's lines, a line each, without markup.
+     * Never the words of its structure, its keys (`children`, `text`,
+     * `status`), nor values no one writes to be read, such as a status, a
+     * color or a picture's address: every YAML map would match on those.
+     */
+    private fun yamlSearchText(lines: List<String>): String {
+        val words = StringBuilder()
+
+        for (node in YamlNodes(lines).read()) {
+            for (line in listOf(node.name) + node.note) {
+                clean(line).takeIf { it.isNotEmpty() }?.let { words.append(it).append('\n') }
             }
         }
 
@@ -399,7 +504,7 @@ object MapText {
                 rest = rest.substring(end + 3)
             }
 
-            rest = rest.replace(ATTRIBUTE_COMMENT, "")
+            rest = withoutComments(rest)
             val opened = rest.indexOf("<!--")
 
             if (opened >= 0) {
@@ -467,7 +572,7 @@ object MapText {
                 continue
             }
 
-            val attributes = ATTRIBUTE_COMMENT.find(line)?.value.orEmpty()
+            val attributes = commentsIn(line).firstOrNull()?.let(line::substring).orEmpty()
 
             lines[index] = if (heading != null) {
                 "${heading.groupValues[1]} ${escapeTitle(newTitle)}$attributes"
@@ -547,6 +652,9 @@ object MapText {
 
         return Frontmatter(values, minOf(index + 1, lines.size))
     }
+
+    /** Whether a map's text is YAML, as Orbit tells one from markdown (see the reading of its lines below). */
+    fun isYaml(text: String): Boolean = isYaml(text.lines())
 
     /**
      * Whether `lines` are a YAML map, as Orbit tells one from markdown: its
@@ -928,64 +1036,327 @@ object MapText {
      * A YAML map's nodes, as [scan] reads a markdown map's: each item of
      * `nodes:` and of its `children:`, named by its `text:` (or by the item
      * itself, `- Chlorophyll`), under the item it's indented under, with the
-     * attributes that count its progress. Several at the top share a center
-     * named by the map's `title:`, as Orbit makes one up.
+     * attributes that count its progress; written in flow style too, as
+     * `children: [Stamens, { text: Petals, status: done }]` or a whole item
+     * in braces, on one line or over several (see [YamlNodes]). Several at the
+     * top share a center named by the map's `title`, as Orbit makes one up: a
+     * center no one wrote, which [VersionChanges] tells apart.
      */
-    private fun scanYaml(lines: List<String>): Scan {
-        val start = lines.indexOfFirst { YAML_NODES.containsMatchIn(it) }
-        val nodes = mutableListOf<ScannedNode>()
-        // The items a line may belong to, by the indentation of their dash.
-        val items = ArrayDeque<Pair<Int, ScannedNode>>()
-
-        for (line in lines.drop(start + 1)) {
-            if (line.isBlank()) {
-                continue
-            }
-
-            val indent = line.length - line.trimStart().length
-
-            if (indent == 0) {
-                // The next key at the top: the nodes are over.
-                break
-            }
-
-            val item = YAML_ITEM.find(line)
-
-            if (item != null) {
-                while (items.isNotEmpty() && items.last().first >= indent) {
-                    items.removeLast()
-                }
-
-                val key = YAML_KEY.find(item.groupValues[2])
-                val name = if (key == null) unquote(item.groupValues[2]) else if (key.groupValues[2] == "text") unquote(key.groupValues[3]) else ""
-                val node = ScannedNode("node-${nodes.size}", items.lastOrNull()?.second?.id, name)
-                key?.takeIf { it.groupValues[2] != "text" }?.let { node.read(mapOf(it.groupValues[2] to unquote(it.groupValues[3]))) }
-                nodes += node
-                items.addLast(indent to node)
-                continue
-            }
-
-            // A key of the deepest item the line is indented under: its text, when it came after another key, or what it counts.
-            val key = YAML_KEY.find(line) ?: continue
-            val owner = items.lastOrNull { it.first < indent }?.second ?: continue
-
-            if (key.groupValues[2] == "text" && owner.name.isEmpty()) {
-                owner.name = unquote(key.groupValues[3])
-            } else {
-                owner.read(mapOf(key.groupValues[2] to unquote(key.groupValues[3])))
-            }
-        }
-
+    private fun scanYaml(lines: List<String>, title: String?): Scan {
+        val nodes = YamlNodes(lines).read()
         val top = nodes.filter { it.parentId == null }
 
         if (top.size == 1) {
             return Scan(top.single().name, nodes.count { it.parentId == top.single().id }, nodes.size - 1, nodes)
         }
 
-        // Several at the top, or none: a center of their own, named by the map's title.
-        val center = ScannedNode("center", null, "")
+        // Several at the top, or none: a center of their own, named by the map's title, as Orbit makes one up.
+        val center = ScannedNode("center", null, title.orEmpty(), madeUp = true)
         top.forEach { it.parentId = center.id }
         return Scan(null, top.size, nodes.size, listOf(center) + nodes)
+    }
+
+    /**
+     * A YAML map's nodes, read line by line from its `nodes:`: the items of
+     * that list and of each node's `children:`, by their dashes' indentation,
+     * and the values written in flow style, read whole, each with its note
+     * for Home's search. What a node's other keys hold (a list of tags, a
+     * picture's fields) is passed over, as are lists in the list, which Orbit
+     * takes for ideas without a name, and the lines after them. Each line is
+     * read once.
+     */
+    private class YamlNodes(private val lines: List<String>) {
+        private val nodes = mutableListOf<ScannedNode>()
+
+        /** The items a line may belong to, by the indentation of their dash. */
+        private val items = ArrayDeque<Pair<Int, ScannedNode>>()
+
+        /** The column of a key whose value holds no ideas: the lines indented further are its, and so are items at its column right under it. */
+        private var skipping: Int? = null
+
+        /** The next line to read. */
+        private var next = 0
+
+        fun read(): List<ScannedNode> {
+            val start = lines.indexOfFirst { YAML_NODES.containsMatchIn(it) }
+
+            if (start < 0) {
+                return nodes
+            }
+
+            next = start + 1
+            val listed = withoutComment(lines[start].substringAfter(':').trim())
+
+            // The list of nodes on its own line, `nodes: […]`, which may go on over the next ones.
+            if (listed.startsWith("[")) {
+                (flow(start, listed) as? Flow.Sequence)?.items?.forEach { idea(it, null) }
+            }
+
+            while (next < lines.size) {
+                val line = lines[next]
+                next += 1
+
+                if (line.isBlank()) {
+                    continue
+                }
+
+                val indent = line.length - line.trimStart().length
+                val dash = YAML_DASH.containsMatchIn(line.trimStart())
+                val passing = skipping
+
+                if (passing != null) {
+                    if (indent > passing || indent == passing && dash) {
+                        continue
+                    }
+
+                    skipping = null
+                }
+
+                if (line.trimStart().startsWith("#")) {
+                    continue
+                }
+
+                // The next key at the top: the nodes are over.
+                if (indent == 0 && !dash) {
+                    break
+                }
+
+                val item = YAML_ITEM.find(line)
+
+                if (item != null) {
+                    item(item, indent)
+                    continue
+                }
+
+                // A key of the deepest item the line is indented under.
+                val key = YAML_KEY.find(line) ?: continue
+                val owner = items.lastOrNull { it.first < indent }?.second ?: continue
+                key(owner, key.groupValues[2], key.groupValues[3], indent)
+            }
+
+            return nodes
+        }
+
+        /** An item of a list of nodes, indented `indent`: an idea under the item it's indented under, or at the top. */
+        private fun item(item: MatchResult, indent: Int) {
+            while (items.isNotEmpty() && items.last().first >= indent) {
+                items.removeLast()
+            }
+
+            val parent = items.lastOrNull()?.second
+            val content = item.groupValues[2]
+            val value = withoutComment(content)
+            val key = YAML_KEY.find(content)
+
+            val node = when {
+                // A whole idea in braces.
+                value.startsWith("{") -> idea(flow(next - 1, value), parent)
+                // A list in the list: Orbit takes it for an idea without a name, and what's in it for nothing.
+                value.startsWith("[") -> add(parent, "").also { flow(next - 1, value) }
+                key == null -> add(parent, unquote(value))
+                else -> add(parent, "").also { key(it, key.groupValues[2], key.groupValues[3], item.groups[2]!!.range.first) }
+            }
+
+            items.addLast(indent to node)
+        }
+
+        /** A key of `owner`'s, at `column`: its text, its children written in flow style, what it counts, or a value with no ideas in it. */
+        private fun key(owner: ScannedNode, key: String, written: String, column: Int) {
+            val value = withoutComment(written.trim())
+
+            when {
+                key == "text" && BLOCK_SCALAR.matches(value) -> block(column).let { text -> if (owner.name.isEmpty()) owner.name = text }
+                key == "text" -> if (owner.name.isEmpty()) owner.name = unquote(value)
+                key == NOTE && BLOCK_SCALAR.matches(value) -> owner.note = blockLines(column)
+                key == NOTE && value.isNotEmpty() && !value.startsWith("[") && !value.startsWith("{") -> owner.note = listOf(unquote(value))
+                key in YAML_CHILDREN && value.startsWith("[") -> (flow(next - 1, value) as? Flow.Sequence)?.items?.forEach { idea(it, owner) }
+                // Its children, as the items under it.
+                key in YAML_CHILDREN && value.isEmpty() -> Unit
+                // Another key's list or mapping, or a block of text.
+                value.isEmpty() || BLOCK_SCALAR.matches(value) -> skipping = column
+                value.startsWith("[") || value.startsWith("{") -> flow(next - 1, value)
+                else -> owner.read(mapOf(key to unquote(value)))
+            }
+        }
+
+        /** The idea a flow value is, under `parent`, with those under it: a mapping's `text` and `children`, a scalar's text, or a list's nothing. */
+        private fun idea(value: Flow?, parent: ScannedNode?): ScannedNode {
+            if (value !is Flow.Mapping) {
+                return add(parent, (value as? Flow.Scalar)?.text.orEmpty())
+            }
+
+            val node = add(parent, (value.entries["text"] as? Flow.Scalar)?.text.orEmpty())
+            node.read(value.entries.mapNotNull { (key, entry) -> (entry as? Flow.Scalar)?.let { key to it.text } }.toMap())
+            (value.entries[NOTE] as? Flow.Scalar)?.let { note -> node.note = listOf(note.text) }
+            YAML_CHILDREN.firstNotNullOfOrNull { value.entries[it] as? Flow.Sequence }?.items?.forEach { idea(it, node) }
+            return node
+        }
+
+        private fun add(parent: ScannedNode?, name: String): ScannedNode = ScannedNode("node-${nodes.size}", parent?.id, name).also { nodes += it }
+
+        /**
+         * A flow value that starts on line `at` with `first` and goes on over
+         * the lines after it until its brackets close, read whole; the lines it
+         * takes are passed.
+         */
+        private fun flow(at: Int, first: String): Flow? {
+            var open = brackets(first)
+            var last = at
+            val text = StringBuilder(first)
+
+            while (open > 0 && last + 1 < lines.size) {
+                last += 1
+                val line = lines[last].trim()
+
+                // A comment on a line of its own.
+                if (line.startsWith("#")) {
+                    continue
+                }
+
+                val part = withoutComment(line)
+                text.append(' ').append(part)
+                open += brackets(part)
+            }
+
+            next = maxOf(next, last + 1)
+            return FlowReader(text.toString()).value()
+        }
+
+        /** A block of text under a key at `column` (`text: |`): its lines, one after another, which are passed. */
+        private fun block(column: Int): String = blockLines(column).joinToString(" ")
+
+        /** A block of text's lines under a key at `column` (`note: |`), each trimmed, without blank ones, which are passed. */
+        private fun blockLines(column: Int): List<String> {
+            val block = mutableListOf<String>()
+
+            while (next < lines.size) {
+                val line = lines[next]
+
+                if (line.isNotBlank() && line.length - line.trimStart().length <= column) {
+                    break
+                }
+
+                if (line.isNotBlank()) {
+                    block += line.trim()
+                }
+
+                next += 1
+            }
+
+            return block
+        }
+    }
+
+    /**
+     * Reads a YAML flow value in one pass: lists, mappings, and scalars,
+     * quoted or plain, unquoted. What doesn't close ends with the text.
+     */
+    private class FlowReader(private val text: String) {
+        private var index = 0
+
+        fun value(): Flow? {
+            spaces()
+
+            if (index >= text.length) {
+                return null
+            }
+
+            return when (text[index]) {
+                '[' -> sequence()
+                '{' -> mapping()
+                ']', '}', ',' -> null
+                else -> scalar(key = false)
+            }
+        }
+
+        private fun sequence(): Flow.Sequence {
+            index += 1
+            val items = mutableListOf<Flow>()
+
+            while (true) {
+                spaces()
+
+                if (index >= text.length) {
+                    break
+                }
+
+                when (text[index]) {
+                    ']' -> {
+                        index += 1
+                        break
+                    }
+                    ',', '}' -> index += 1
+                    else -> items += value() ?: break
+                }
+            }
+
+            return Flow.Sequence(items)
+        }
+
+        private fun mapping(): Flow.Mapping {
+            index += 1
+            val entries = LinkedHashMap<String, Flow>()
+
+            while (true) {
+                spaces()
+
+                if (index >= text.length) {
+                    break
+                }
+
+                when (text[index]) {
+                    '}' -> {
+                        index += 1
+                        break
+                    }
+                    ',', ']' -> index += 1
+                    else -> {
+                        val key = key()
+                        spaces()
+
+                        val entry = if (index < text.length && text[index] == ':') {
+                            index += 1
+                            value() ?: Flow.Scalar("")
+                        } else {
+                            Flow.Scalar("")
+                        }
+
+                        entries[key] = entry
+                    }
+                }
+            }
+
+            return Flow.Mapping(entries)
+        }
+
+        /** A mapping's key: a scalar, as a list or mapping as a key holds nothing a map reads. */
+        private fun key(): String {
+            if (text[index] == '[' || text[index] == '{') {
+                value()
+                return ""
+            }
+
+            return scalar(key = true).text
+        }
+
+        /** A scalar from here: quoted, or plain up to a comma, a closing bracket or, for a `key`, its colon. */
+        private fun scalar(key: Boolean): Flow.Scalar {
+            val start = index
+            index = if (text[index] == '"' || text[index] == '\'') quoteEnd(text, index) else plainEnd(text, index, key)
+
+            // A plain value never stops before its first character: only a key does, at its colon.
+            if (index == start && !key) {
+                index += 1
+            }
+
+            return Flow.Scalar(unquote(text.substring(start, index)))
+        }
+
+        private fun spaces() {
+            while (index < text.length && text[index].isWhitespace()) {
+                index += 1
+            }
+        }
     }
 
     /** The status a node's checkbox sets, if it has one. Statuses in attributes are read with the rest of them. */
@@ -1029,22 +1400,174 @@ object MapText {
         return attributes
     }
 
-    /** An idea's name as it reads: without its attributes, checkbox, link targets or emphasis. */
+    /** An idea's name as it reads: without its attributes, checkbox, tags, link targets or emphasis. */
     private fun name(text: String): String =
-        text.replace(ATTRIBUTE_COMMENT, "")
-            .replace(CHECKBOX, "")
-            .replace(LINK) { it.groupValues[1] }
+        linkWords(withoutHashtags(withoutComments(text).replace(CHECKBOX, "")))
             .replace(WRAPPING_EMPHASIS, "")
             .replace("\\", "")
             .trim()
 
+    /**
+     * `text` without the hashtags at its end, which Orbit reads as the idea's
+     * tags rather than its name: each after a space, and with a letter in it
+     * (`#web`, `#sprint-3`), so `C#` and `Fix #42` stay as written. Each is
+     * found from the end, so a long line is read once for each.
+     */
+    private fun withoutHashtags(text: String): String {
+        var rest = text.trimEnd()
+
+        while (true) {
+            val hash = rest.lastIndexOf('#')
+            val tag = rest.substring(hash + 1)
+
+            if (hash <= 0 || !rest[hash - 1].isWhitespace() || !HASHTAG.matches(tag) || tag.none(Char::isLetter)) {
+                return rest
+            }
+
+            rest = rest.substring(0, hash).trimEnd()
+        }
+    }
+
     private fun clean(title: String): String =
-        title.replace(ATTRIBUTE_COMMENT, "")
-            .replace(CHECKBOX, "")
-            .replace(LINK) { it.groupValues[1] }
+        linkWords(withoutComments(title).replace(CHECKBOX, ""))
             .replace(EMPHASIS, "")
             .replace("\\", "")
             .trim()
+
+    /**
+     * Where the line's HTML comments are (`<!-- … -->`), each with the spaces
+     * right before it, first to last. Read in one pass: a `<!--` with no
+     * `-->` after it starts none, and nor can any after it, so a line of
+     * thousands of them is read once, rather than once from each.
+     */
+    internal fun commentsIn(text: String): Sequence<IntRange> = sequence {
+        var from = 0
+
+        while (true) {
+            val open = text.indexOf(COMMENT_OPEN, from)
+            val close = if (open < 0) -1 else text.indexOf(COMMENT_CLOSE, open + COMMENT_OPEN.length)
+
+            if (close < 0) {
+                break
+            }
+
+            var start = open
+
+            while (start > from && text[start - 1].isWhitespace()) {
+                start -= 1
+            }
+
+            yield(start until close + COMMENT_CLOSE.length)
+            from = close + COMMENT_CLOSE.length
+        }
+    }
+
+    /** The line without its HTML comments, nor the spaces right before each (see [commentsIn]). */
+    internal fun withoutComments(text: String): String {
+        val kept = StringBuilder()
+        var written = 0
+
+        for (comment in commentsIn(text)) {
+            kept.append(text, written, comment.first)
+            written = comment.last + 1
+        }
+
+        return kept.append(text, written, text.length).toString()
+    }
+
+    /**
+     * What the line's first `<!-- orbit … -->` comment holds: its attributes,
+     * ` status: done, priority: 1 `. Null when it has none. Read in one pass,
+     * as [commentsIn] reads them: a comment that isn't Orbit's is passed by.
+     */
+    internal fun orbitComment(text: String): String? {
+        var from = 0
+        var close = -1
+
+        while (true) {
+            val open = text.indexOf(COMMENT_OPEN, from)
+
+            if (open < 0) {
+                return null
+            }
+
+            if (close < open + COMMENT_OPEN.length) {
+                close = text.indexOf(COMMENT_CLOSE, open + COMMENT_OPEN.length)
+            }
+
+            if (close < 0) {
+                return null
+            }
+
+            var word = open + COMMENT_OPEN.length
+
+            while (word < close && text[word].isWhitespace()) {
+                word += 1
+            }
+
+            val after = word + ORBIT.length
+
+            // `orbit` as a word of its own: what comes after it, inside the comment, isn't a letter, a digit or `_`.
+            if (after <= close && text.startsWith(ORBIT, word) && !text[after].isLetterOrDigit() && text[after] != '_') {
+                return text.substring(after, close)
+            }
+
+            from = open + 1
+        }
+    }
+
+    /**
+     * The line with each link and picture written in markdown (`[words](address)`,
+     * `![words](address)`) as its words alone: from a `[` to the first `]`
+     * after it, with `(` right after that, to the first `)`. Read in one
+     * pass: a `[` with no `]` after it, or a `](` with no `)` after it,
+     * starts nothing, and nor can any after it, so a line of thousands of
+     * `[` is read once, rather than once from each (seconds for 20,000).
+     */
+    internal fun linkWords(text: String): String {
+        val words = StringBuilder()
+        var written = 0
+        var from = 0
+        var close = -1
+        var paren = -1
+
+        while (true) {
+            val open = text.indexOf('[', from)
+
+            if (open < 0) {
+                break
+            }
+
+            if (close < open) {
+                close = text.indexOf(']', open)
+            }
+
+            if (close < 0) {
+                break
+            }
+
+            if (close + 1 >= text.length || text[close + 1] != '(') {
+                from = open + 1
+                continue
+            }
+
+            if (paren < close + 2) {
+                paren = text.indexOf(')', close + 2)
+            }
+
+            if (paren < 0) {
+                break
+            }
+
+            // A picture's `!` goes with it, unless the link before it ends there.
+            val start = if (open > written && text[open - 1] == '!') open - 1 else open
+            words.append(text, written, start).append(text, open + 1, close)
+            written = paren + 1
+            from = written
+        }
+
+        return words.append(text, written, text.length).toString()
+    }
 
     /** Keeps a title from reading as markdown structure, the way Orbit's serializer does. */
     private fun escapeTitle(title: String): String =

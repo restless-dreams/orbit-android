@@ -4,6 +4,7 @@ import android.content.res.Configuration
 import android.view.KeyEvent
 import android.view.KeyboardShortcutGroup
 import android.view.KeyboardShortcutInfo
+import android.view.Menu
 import android.view.Window
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
@@ -383,13 +384,22 @@ private fun KeyCap(name: String) {
 /**
  * Escape closes the dialog or sheet this is placed in, as Back does: with
  * predictive back on, Android no longer treats Escape as Back there.
+ *
+ * A dialog or a sheet is a window of its own, and the keys go to it rather
+ * than to the activity's: from here, the keyboard shortcuts of the screens
+ * on display reach through it as they do with nothing over them (see
+ * `MainActivity.dispatchKeyEvent`), and Android's own list of shortcuts
+ * (Meta+/) lists them over it too. A window that keeps the keys to itself,
+ * such as a picture full screen or a private map's lock, leaves the screens'
+ * shortcuts out with `shortcuts` false.
  */
 @Composable
-fun EscapeCloses(onDismiss: () -> Unit) {
+fun EscapeCloses(shortcuts: Boolean, onDismiss: () -> Unit) {
     val view = LocalView.current
     val dismiss by rememberUpdatedState(onDismiss)
+    val registry = LocalShortcuts.current?.takeIf { shortcuts }
 
-    DisposableEffect(view) {
+    DisposableEffect(view, registry) {
         val window = generateSequence(view.parent) { it.parent }.filterIsInstance<DialogWindowProvider>().firstOrNull()?.window
         val original = window?.callback
 
@@ -399,21 +409,39 @@ fun EscapeCloses(onDismiss: () -> Unit) {
 
         window.callback = object : Window.Callback by original {
             override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-                if (event.keyCode != KeyEvent.KEYCODE_ESCAPE) {
+                if (event.keyCode == KeyEvent.KEYCODE_ESCAPE) {
+                    if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                        dismiss()
+                    }
+
+                    return true
+                }
+
+                if (registry == null) {
                     return original.dispatchKeyEvent(event)
                 }
 
-                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                    dismiss()
-                }
+                // As on the screen itself: shortcuts whose keys no text field uses first, wherever the focus is in the
+                // window, and the others once nothing in it used the key.
+                return registry.dispatch(event, anywhere = true) || original.dispatchKeyEvent(event) || registry.dispatch(event, anywhere = false)
+            }
 
-                return true
+            override fun onProvideKeyboardShortcuts(data: MutableList<KeyboardShortcutGroup>, menu: Menu?, deviceId: Int) {
+                original.onProvideKeyboardShortcuts(data, menu, deviceId)
+
+                if (registry != null) {
+                    data += registry.forSystem()
+                }
             }
         }
 
         onDispose { window.callback = original }
     }
 }
+
+/** [EscapeCloses] in a dialog or sheet the screens' keyboard shortcuts reach through. */
+@Composable
+fun EscapeCloses(onDismiss: () -> Unit) = EscapeCloses(shortcuts = true, onDismiss)
 
 /**
  * Focus for the button a dialog answers with: as the dialog opens from the

@@ -5,6 +5,7 @@ import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.MapState
 import com.hyuchia.orbit.page.Media
+import com.hyuchia.orbit.ui.MinimumMapWidth
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -87,6 +88,45 @@ class MapLayoutTest {
         assertEquals(SidePanelWidth + SourceExtraWidth + 1.dp, tabletOnItsSide.layout(source).beside)
         assertFalse(phone.layout(source).sourceBeside)
         assertEquals(0.dp, phone.layout(source).beside)
+    }
+
+    @Test
+    fun `beside a panel or its text, the map keeps a phone's width, on a window just wide enough for them`() {
+        val window = Screen(760.dp, 500.dp)
+
+        for (ui in listOf(editing, MapUi(panel = Panel.Outline), MapUi(source = SourceState("# Cities")))) {
+            val layout = window.layout(ui)
+
+            assertTrue(layout.panelBeside || layout.sourceBeside)
+            assertTrue("The map keeps ${window.width - layout.beside} beside what's open", window.width - layout.beside >= MinimumMapWidth)
+        }
+
+        // The text takes what the map leaves: narrower than its own width, as wide as a panel at least.
+        assertEquals(760.dp - 1.dp - MinimumMapWidth, window.layout(MapUi(source = SourceState("# Cities"))).sourceWidth)
+        assertEquals(SidePanelWidth, Screen(741.dp, 500.dp).layout(MapUi(source = SourceState("# Cities"))).sourceWidth)
+        // A window too narrow to leave the map its width beside a panel has the panel over the map instead.
+        assertFalse(Screen(740.dp, 500.dp).layout(editing).panelBeside)
+    }
+
+    @Test
+    fun `the toolbar keeps Style and layout only while the map beside an open panel has room for it`() {
+        val outline = MapUi(panel = Panel.Outline)
+
+        // With nothing open the window's width is the map's, and it has room; beside the outline it hasn't.
+        assertTrue(Screen(760.dp, 500.dp).layout(nothingOpen).styleInToolbar)
+        assertFalse(Screen(760.dp, 500.dp).layout(outline).styleInToolbar)
+        // On a tablet on its side, the map beside the outline still has room.
+        assertTrue(tabletOnItsSide.layout(outline).styleInToolbar)
+    }
+
+    @Test
+    fun `the top bar has room for Redo and the lock on a tablet, and not on a phone or a phone's width of map beside the list`() {
+        assertFalse(phone.layout(nothingOpen).roomyTopBar)
+        assertFalse(phoneOnItsSide.layout(nothingOpen).roomyTopBar)
+        assertTrue(tablet.layout(nothingOpen).roomyTopBar)
+        assertTrue(tabletOnItsSide.layout(nothingOpen).roomyTopBar)
+        // A tablet upright, the map beside the list.
+        assertFalse(Screen(416.dp, 1232.dp).layout(nothingOpen).roomyTopBar)
     }
 
     @Test

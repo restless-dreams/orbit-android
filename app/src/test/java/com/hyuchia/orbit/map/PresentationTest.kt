@@ -20,6 +20,17 @@ class PresentationTest {
     )
 
     @Test
+    fun aPathWithOneStepLeftOnTheMapPresentsEveryIdeaInReadingOrder() {
+        val ideas = listOf("trip", "tokyo", "someday")
+        // Kyoto came off the map since the path was made: Tokyo is all that's left of it.
+        assertEquals(ideas, presentationOrder(listOf("tokyo", "kyoto"), ideas))
+        assertEquals(ideas, presentationOrder(listOf("kyoto"), ideas))
+        assertEquals(ideas, presentationOrder(emptyList(), ideas))
+        // Two steps left are a path, in its own order.
+        assertEquals(listOf("someday", "tokyo"), presentationOrder(listOf("someday", "kyoto", "tokyo"), ideas))
+    }
+
+    @Test
     fun anIdeaPutsThePresenterBehindOnlyOnceItRunsOverItsRehearsedTime() {
         // The intro took 40 seconds of its 30.
         val onProblem = presentation(index = 1, stepStartedAt = 40_000)

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The journeys' own files to hand Orbit, in their cache. -->
+<paths>
+    <cache-path name="handed" path="handed/" />
+</paths>

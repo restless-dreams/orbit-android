@@ -63,14 +63,14 @@
     <string name="audio_recording_failed">The recording stopped. Another app may be using the microphone.</string>
     <string name="audio_longest_memo">That\'s as long as a voice memo can be, so it stopped there.</string>
     <string name="audio_map_room_reached">That\'s all the room this map has left, so the memo stopped there.</string>
-    <!-- %1$s is what the map's pictures, videos and sounds come to, such as 90 MB. -->
+    <!-- %1$s is what the map's pictures, videos and sounds come to, such as 950 MB or 1 GB. -->
     <string name="audio_map_full">This map\'s pictures, videos and sounds come to %1$s, all a map can carry when it\'s shared or backed up. Take one off to make room for a voice memo.</string>
     <!-- After a voice memo joins its idea, with Undo: %1$s is the idea. -->
     <string name="audio_memo_saved">Saved the voice memo in %1$s</string>
     <!-- Under the recorder's clock once a take is finished: listen to it, then keep it or record again. -->
     <string name="audio_ready_to_save">Ready to save</string>
 
-    <!-- Sounds a map can't take. Sizes read as data_megabytes does: 50 MB. -->
+    <!-- Sounds a map can't take. Sizes read as data_megabytes and data_gigabytes do: 250 MB, 1 GB. -->
     <!-- %1$s is the sound's size, %2$s the most a sound can be. -->
     <string name="data_sound_too_big">That sound is %1$s, and a map keeps sounds of up to %2$s, so it can still go to your other devices. Trim it, or add it as a web address.</string>
     <!-- %1$s is the most a sound can be. -->

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The notification channel reminders come on, in the phone's settings for Orbit. -->
+    <string name="reminders_channel">Reminders</string>
+    <string name="reminders_channel_description">When an idea’s date comes</string>
+    <!-- A private map's reminder, which says nothing of the map or its idea. -->
+    <string name="reminders_from_a_private_map">A reminder from a private map</string>
+    <!-- Any other reminder, on a lock screen that hides what notifications say. -->
+    <string name="reminders_a_reminder">A reminder</string>
+    <!-- Settings: reminders on this device, and a card while Orbit can't post them. -->
+    <string name="settings_reminders_heading">Reminders</string>
+    <string name="settings_reminders">Remind me of ideas’ dates</string>
+    <!-- %1$s is 9:00 on the phone's clock. -->
+    <string name="settings_reminders_description">On this device, at an idea’s time, or at %1$s on its day. A private map’s reminder says only that it’s from a private map.</string>
+    <string name="settings_reminders_notifications_off">Notifications are off for Orbit</string>
+    <string name="settings_reminders_notifications_off_description">Reminders can’t show until Orbit may post notifications.</string>
+</resources>

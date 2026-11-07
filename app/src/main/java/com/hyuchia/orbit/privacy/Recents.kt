@@ -5,7 +5,11 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.lifecycle.lifecycleScope
 import com.hyuchia.orbit.container
 import kotlinx.coroutines.launch
@@ -38,7 +42,8 @@ fun PrivateOnScreen(active: Boolean) {
  * window secure, which also keeps screenshots, screen recordings and the
  * phone's own screen casting from showing it: so it's marked only while
  * something private is on screen, and private maps that are locked show
- * nothing.
+ * nothing. Windows of Orbit's own over it, as for a picture full screen,
+ * are marked with it ([privateWindowPolicy]).
  */
 fun ComponentActivity.keepPrivateMapsOutOfRecents() {
     lifecycleScope.launch {
@@ -52,4 +57,23 @@ fun ComponentActivity.keepPrivateMapsOutOfRecents() {
             }
         }
     }
+}
+
+/**
+ * How a window of Orbit's own over its screen, such as a picture full
+ * screen, keeps out of Recents, screenshots and screen casting: on Android
+ * 12 and earlier, it's marked secure while something private is on screen,
+ * as Orbit's main window is ([keepPrivateMapsOutOfRecents]). Compose gives
+ * such a window the main window's mark only as it opens, and again only when
+ * its call is made again: one open since before something private showed,
+ * or made again while private maps were locked, would keep what's private
+ * unmarked once it shows. Android 13 and later keep the whole of Orbit, its
+ * windows included, out of Recents alone.
+ */
+@Composable
+fun privateWindowPolicy(): SecureFlagPolicy {
+    val privateMaps = LocalContext.current.container.privateMaps
+    val showing by remember(privateMaps) { privateMaps.showing }.collectAsState(privateMaps.showingNow)
+
+    return if (showing && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) SecureFlagPolicy.SecureOn else SecureFlagPolicy.Inherit
 }

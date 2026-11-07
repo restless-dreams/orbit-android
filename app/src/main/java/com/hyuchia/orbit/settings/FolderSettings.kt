@@ -40,8 +40,8 @@ import com.hyuchia.orbit.data.FolderNotes
 import com.hyuchia.orbit.data.FolderSyncState
 import com.hyuchia.orbit.data.MAP_MEDIA_LIMIT
 import com.hyuchia.orbit.data.MAP_TEXT_LIMIT
-import com.hyuchia.orbit.data.VIDEO_SIZE_LIMIT
-import com.hyuchia.orbit.data.megabytes
+import com.hyuchia.orbit.data.MEDIA_FILE_LIMIT
+import com.hyuchia.orbit.data.readableSize
 import com.hyuchia.orbit.home.timeAgo
 import com.hyuchia.orbit.privacy.PrivateOnScreen
 import com.hyuchia.orbit.privacy.conceals
@@ -152,9 +152,12 @@ internal fun FolderSettings() {
             noteEntries(maps, { hiddenMap(it) && it !in privateCovers }, ::coveredOrQuoted) { count -> resources.getQuantityString(R.plurals.private_maps_in_a_note, count, count) }
 
         // While private maps hide, the notes about them aren't there at all, rather than counted.
-        val shown = notes.shown(privacy.conceals(LocalAppSettings.current.hideLockedPrivateMaps), ::hiddenMap, ::hiddenFile, ::hiddenLarge)
+        val concealing = privacy.conceals(LocalAppSettings.current.hideLockedPrivateMaps)
+        val shown = notes.shown(concealing, ::hiddenMap, ::hiddenFile, ::hiddenLarge)
+        // The maps an older device in the folder keeps only part of, as the notes name maps.
+        val partly = sync.partly.mapValues { (_, maps) -> maps.filterNot { concealing && hiddenMap(it) } }.filterValues { it.isNotEmpty() }
         // Unlocked, the notes name private maps, their pictures and videos: Recents gets no picture of Settings then, as of the maps.
-        PrivateOnScreen(!privacy.locked && shown.namesPrivateMaps(notes.private, privateTitles, ::quoted))
+        PrivateOnScreen(!privacy.locked && (shown.namesPrivateMaps(notes.private, privateTitles, ::quoted) || partly.values.flatten().any { it in privateTitles }))
 
         if (shown.keptBoth.isNotEmpty()) {
             Note(pluralStringResource(R.plurals.settings_folder_kept_both, shown.keptBoth.size, titles(shown.keptBoth)))
@@ -176,8 +179,8 @@ internal fun FolderSettings() {
                     noteEntries(shown.tooBig, ::hiddenFile, { it }, separator = "; ") { count ->
                         resources.getQuantityString(R.plurals.private_files_in_a_note, count, count)
                     },
-                    megabytes(VIDEO_SIZE_LIMIT, words),
-                    megabytes(MAP_MEDIA_LIMIT, words),
+                    readableSize(MEDIA_FILE_LIMIT, words),
+                    readableSize(MAP_MEDIA_LIMIT, words),
                 ),
             )
         }
@@ -188,7 +191,7 @@ internal fun FolderSettings() {
                     R.plurals.settings_folder_too_large,
                     shown.large.size,
                     noteEntries(shown.large, ::hiddenLarge, ::quoted) { count -> resources.getQuantityString(R.plurals.private_files_in_a_note, count, count) },
-                    megabytes(MAP_TEXT_LIMIT, words),
+                    readableSize(MAP_TEXT_LIMIT, words),
                 ),
             )
         }
@@ -198,10 +201,20 @@ internal fun FolderSettings() {
         }
 
         if (!shown.isEmpty) {
-            TextButton(onClick = folderSync::dismissNotes, modifier = Modifier.padding(horizontal = 16.dp)) { Text(stringResource(R.string.settings_got_it)) }
+            // Only what shows is read: while private maps hide, the notes about them stay, and their maps wait in the trash.
+            TextButton(
+                onClick = { folderSync.dismissNotes(shown, hidden = { concealing && it.isPrivate && privacy.hides(it.id) }) },
+                modifier = Modifier.padding(horizontal = 16.dp),
+            ) {
+                Text(stringResource(R.string.settings_got_it))
+            }
         }
 
-        FolderDevices(sync, now)
+        FolderDevices(sync, now) { device ->
+            partly[device.id]?.let { maps ->
+                resources.getQuantityString(R.plurals.folder_devices_keeps_part, maps.size, titles(maps), readableSize(device.keepsFile, words), readableSize(device.keepsMapMedia, words))
+            }
+        }
 
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),

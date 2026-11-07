@@ -11,14 +11,17 @@ import androidx.lifecycle.viewModelScope
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.data.Checkpoint
+import com.hyuchia.orbit.data.MEDIA_DIRECTORY
 import com.hyuchia.orbit.data.MapRepository
 import com.hyuchia.orbit.data.MapSummary
+import com.hyuchia.orbit.data.MapText
 import com.hyuchia.orbit.data.MediaRefusedException
 import com.hyuchia.orbit.data.MediaSummary
 import com.hyuchia.orbit.data.SettingsRepository
 import com.hyuchia.orbit.data.Uncleaned
 import com.hyuchia.orbit.data.VersionReason
 import com.hyuchia.orbit.data.WriteResult
+import com.hyuchia.orbit.data.requireRoom
 import com.hyuchia.orbit.media.GalleryItem
 import com.hyuchia.orbit.media.MediaKind
 import com.hyuchia.orbit.media.SoundState
@@ -31,10 +34,12 @@ import com.hyuchia.orbit.page.CheckedMap
 import com.hyuchia.orbit.page.CopiedIdea
 import com.hyuchia.orbit.page.ImportedFile
 import com.hyuchia.orbit.page.MapCommand
+import com.hyuchia.orbit.page.MapFile
 import com.hyuchia.orbit.page.MapInsets
 import com.hyuchia.orbit.page.MapMessage
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.MapPage
+import com.hyuchia.orbit.page.MapPrinter
 import com.hyuchia.orbit.page.MapSettings
 import com.hyuchia.orbit.page.MapState
 import com.hyuchia.orbit.page.Media
@@ -47,14 +52,19 @@ import com.hyuchia.orbit.page.WebPage
 import com.hyuchia.orbit.page.mapBaseUrl
 import com.hyuchia.orbit.present.Audience
 import com.hyuchia.orbit.privacy.PrivateView
+import com.hyuchia.orbit.reminders.ideaAmong
+import com.hyuchia.orbit.sketch.SketchSession
 import com.hyuchia.orbit.study.NEW_CARDS_A_DAY
 import com.hyuchia.orbit.study.StudyControl
+import com.hyuchia.orbit.study.noteCards
+import com.hyuchia.orbit.ui.NoteCheck
+import com.hyuchia.orbit.ui.fileName
 import com.hyuchia.orbit.ui.isWebPicture
+import com.hyuchia.orbit.ui.noteBoxOn
 import com.hyuchia.orbit.ui.pictureAddress
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -83,6 +93,7 @@ import kotlinx.serialization.json.buildJsonObject
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
+import java.io.OutputStream
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.Base64
@@ -133,9 +144,6 @@ private const val LAST_WORD_MILLISECONDS = 2_000L
 /** A rehearsal shorter than this was stopped at once, and keeps nothing. */
 private const val REHEARSAL_MINIMUM_MILLISECONDS = 3_000L
 
-/** A text to save, and the catch-up it was made before: one made before the map changed elsewhere isn't written. */
-private class Save(val text: String, val generation: Int)
-
 /**
  * Map `id` on its screen: the page drawing it, what's said and done on it,
  * and its saving. It works with the maps, the app's settings and the rest of
@@ -170,10 +178,9 @@ class MapViewModel(
     private var deleted = false
     private val undoStack = ArrayDeque<String>()
     private val redoStack = ArrayDeque<String>()
-    private val saves = Channel<Save>(Channel.CONFLATED)
 
-    /** The saves being written one after another, until the screen goes. */
-    private var saving: Job? = null
+    /** The saves being written one after another, until the screen goes: its newest text, and texts set aside, none of them lost. */
+    private val saves = SaveQueue(viewModelScope, write = ::write, keepAside = ::keepAside)
 
     /** Goes up whenever the screen catches up with a change made elsewhere: saves made before it aren't written. */
     private var generation = 0
@@ -199,6 +206,13 @@ class MapViewModel(
     /** The map before the source editor opened, to undo it in one step. */
     private var sourceStart: String? = null
 
+    /**
+     * Boxes of notes' checklists checked or unchecked here, by idea and line,
+     * until the page's map shows them so: the details show them at once (see
+     * [MapUi.noteChecks]), and the save that shows one offers it back.
+     */
+    private val checking = LinkedHashMap<Pair<String, Int>, NoteCheck>()
+
     /** Why the next save would have kept a version before the source editor opened: its reason again if nothing is typed there. */
     private var reasonBeforeSource: VersionReason? = null
 
@@ -215,6 +229,7 @@ class MapViewModel(
             markdown = text
             save(text)
         },
+        keepAside = { text -> saves.setAside(text) },
     )
 
     /** The version history, while it's open. */
@@ -257,17 +272,20 @@ class MapViewModel(
     /**
      * Study mode as it goes: the page hides each card's ideas until they're
      * revealed, and the answers are kept in the map's details, beside the
-     * other devices' that the folder the maps are kept in brings.
+     * other devices' that the folder the maps are kept in brings. They're
+     * written on the app's scope, one card's change at a time, so an answer
+     * given as the map closes is still kept ([onCleared]).
      */
     private val studying = StudyControl(
         scope = viewModelScope,
         ui = state,
         send = { command -> page.send(command) },
         progress = { maps.summary(id)?.metadata?.study.orEmpty() },
-        keep = { cards -> remembering { maps.saveStudy(id, cards) } },
+        keep = { change -> remembering { maps.changeStudy(id, change) } },
         today = { LocalDate.now().toEpochDay() },
         elsewhere = { maps.summary(id)?.metadata?.studyElsewhere.orEmpty() },
         newADay = { newCards.value },
+        writing = app.applicationScope,
     )
 
     /** The presentation's path, as it's being made or since it was saved. */
@@ -284,10 +302,15 @@ class MapViewModel(
     /** Where an idea being dragged came from: under which idea, to tell it moved somewhere else. */
     private var dragFrom: String? = null
 
-    /** Ideas said in the talk going on or just over, and how many of them the map has taken in. */
-    private var spokenSent = 0
-
-    private var spokenSaved = 0
+    /** The ideas said in a talk, as the map takes them in: one change for each pause, one Undo for the talk. */
+    private val spokenIdeas = SpokenIdeas(
+        scope = viewModelScope,
+        join = ::addSaid,
+        lastChange = { undoStack.lastOrNull() },
+        undo = ::undo,
+        say = { event -> events.trySend(event) },
+        locked = { lockedNow() },
+    )
 
     /**
      * Whether this map is private while private maps are locked. Behind its
@@ -305,16 +328,54 @@ class MapViewModel(
     /** Whether this map is private and locked, given private maps' `view` and the maps' `summaries`: until they're read, it counts as locked. */
     private fun lockedNow(view: PrivateView, summaries: List<MapSummary>?): Boolean = summaries?.firstOrNull { it.id == id }?.let(view::hides) ?: (summaries == null)
 
+    /** Whether this map is private and locked this very moment, as [locked] says right after. */
+    private fun lockedNow(): Boolean = lockedNow(app.privateLock.view.value, maps.maps.value)
+
+    /**
+     * Whether ideas can be talked onto the map now: not behind its lock, nor
+     * while the recorder has the microphone, nor while a presentation or a
+     * study session has the map. A talk going on ends as soon as it can't,
+     * and nothing said after that joins the map.
+     */
+    val talkable: StateFlow<Boolean> = combine(locked, state) { locked, ui -> talkable(locked, ui) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, talkable(locked.value, state.value))
+
+    private fun talkable(locked: Boolean, ui: MapUi): Boolean = !locked && ui.recording == null && ui.presentation == null && ui.study == null
+
+    /** Whether ideas can be talked onto the map this very moment, as [talkable] says right after. */
+    private fun talkableNow(): Boolean = talkable(lockedNow(), state.value)
+
     /** What other apps drag onto the map, and ideas dragged out and back (see `MapDrops`). */
     /** Pictures, live photos' movies, videos, sounds and voice memos from the phone, joining the map's ideas. */
+    /** Big videos coming in, from the editor or a drop: offered smaller one offer at a time, for the screen to ask. */
+    val smallerOffers = SmallerOffers()
+
+    private val bigVideos = BigVideos({ app.videoMaker }, smallerOffers)
+
     private val mediaAdding = MediaAdding(
         scope = viewModelScope,
         ui = state,
         maps = maps,
         id = id,
+        bigVideos = bigVideos,
+        maker = { app.videoMaker },
+        words = app.words,
         update = { nodeId, key, value -> update(nodeId, key, value) },
+        addFiles = { nodeId, files -> addFilesToIdea(nodeId, files) },
         say = { event -> events.trySend(event) },
         untitled = ::untitled,
+    )
+
+    /** Sketching on ideas' planets (sketch/): the canvas over a planet, and the drawing kept as its picture. */
+    private val sketching = Sketching(
+        scope = viewModelScope,
+        ui = state,
+        maps = maps,
+        id = id,
+        page = { page },
+        update = { nodeId, key, value -> update(nodeId, key, value) },
+        say = { event -> events.trySend(event) },
+        file = { src -> mediaModel(src) as? File },
     )
 
     val drops = MapDrops(
@@ -322,6 +383,8 @@ class MapViewModel(
         mapId = id,
         maps = maps,
         importer = { app.importer },
+        bigVideos = bigVideos,
+        maker = { app.videoMaker },
         words = app.words,
         ui = ui,
         locked = locked,
@@ -372,10 +435,23 @@ class MapViewModel(
             }
         }
 
-        saving = viewModelScope.launch {
-            for (save in saves) {
-                // A write that's begun ends, and says what it wrote, even as the screen goes: its last edit is written over it.
-                withContext(NonCancellable) { write(save) }
+        // A talk is over as the map locks, or as the recorder, a presentation or a study session starts: nothing said
+        // after that joins the map, what was said before still does, and the screen ends the talk (see Talk.endWhenNot).
+        viewModelScope.launch {
+            talkable.collect { can ->
+                if (!can) {
+                    spokenIdeas.over()
+                }
+            }
+        }
+
+        // An idea a reminder opened the map at: shown, pointed at, once the map is read, as a search result is. A locked
+        // private map comes here once it's unlocked, as its view model is made only then.
+        viewModelScope.launch {
+            app.ideaToShow.filterNotNull().filter { it.mapId == id }.collect { wanted ->
+                val nodes = state.map { it.map?.nodes }.filterNotNull().first()
+                app.ideaToShow.compareAndSet(wanted, null)
+                ideaAmong(nodes, wanted)?.let { focus(it.id, point = true) }
             }
         }
 
@@ -387,6 +463,13 @@ class MapViewModel(
         viewModelScope.launch {
             maps.replaced.filter { it == id }.collect {
                 runCatching { maps.read(id) }.getOrNull()?.let { text -> sourceEditing.afterTyping { catchUp(text) } }
+            }
+        }
+
+        // Renamed from Home, the map's center has a new id: the path and a panel on it follow it, as they do a rename on the map.
+        viewModelScope.launch {
+            maps.ideasRenamed.filter { it.map == id }.collect { renamed ->
+                renamed.renames.forEach { (from, to) -> follow(from, to) }
             }
         }
 
@@ -414,6 +497,14 @@ class MapViewModel(
         viewModelScope.launch {
             appSettings.settings.map { it.newCardsADay }.distinctUntilChanged().collect { newCards.value = it }
         }
+
+        // Home counts only the cards the map has, as its page reads it whole, among the cards due.
+        noteCards(
+            scope = viewModelScope,
+            ideas = state.map { ui -> ui.map?.nodes?.takeIf { ui.readOnly == null } },
+            details = maps.maps.map { summaries -> summaries?.firstOrNull { it.id == id }?.metadata },
+            note = { cards -> remembering { maps.setStudyCards(id, cards) } },
+        )
     }
 
     /**
@@ -422,8 +513,7 @@ class MapViewModel(
      */
     private suspend fun write(save: Save) {
         if (save.generation != generation) {
-            maps.keepAside(id, save.text)
-            events.trySend(MapEvent.KeptInHistory)
+            keepAside(save.text)
             return
         }
 
@@ -465,6 +555,24 @@ class MapViewModel(
                 page.send(MapCommand.Lock(LOCK_DELETED))
             }
         }
+
+        // The history, while it's open, has the version the write kept, and the map as it is now.
+        versionHistory.refresh()
+    }
+
+    /**
+     * Keeps a text made on the map as it was before a change from elsewhere
+     * in its history, and says so: it never goes over the map as it is. A
+     * text the map is now holds nothing more, and isn't kept again.
+     */
+    private suspend fun keepAside(text: String) {
+        if (text == markdown) {
+            return
+        }
+
+        maps.keepAside(id, text)
+        events.trySend(MapEvent.KeptInHistory)
+        versionHistory.refresh()
     }
 
     /**
@@ -493,21 +601,27 @@ class MapViewModel(
         }
 
         generation += 1
+        // A save still waiting was made on the map before the change: it goes into the history, not over the change.
+        saves.caughtUp()
 
         remember(markdown)
         markdown = text
         written = text
         nextReason = VersionReason.Elsewhere
+        // Boxes checked on the map as it was go into its history with the saves made on it: the notes show as they are now.
+        checking.clear()
         // The page draws the map as it is now, over a version on show.
         versionHistory.stopShowing()
-        state.update { it.copy(canUndo = undoStack.isNotEmpty(), canRedo = redoStack.isNotEmpty(), history = it.history?.copy(showing = null)) }
+        state.update { it.copy(canUndo = undoStack.isNotEmpty(), canRedo = redoStack.isNotEmpty(), history = it.history?.copy(showing = null), noteChecks = emptyMap()) }
         page.send(MapCommand.Restore(text, revision = generation))
         sourceEditing.follow(text)
+        // The history, while it's open, has the versions the change kept, and says what the map is now.
+        versionHistory.refresh()
     }
 
     /** Saves text the map has now: written soon, once the saves before it are. */
     private fun save(text: String) {
-        saves.trySend(Save(text, generation))
+        saves.save(Save(text, generation))
     }
 
     /** The next try at saving changes the storage couldn't take (see [MapUi.unsaved]). */
@@ -583,7 +697,15 @@ class MapViewModel(
         }
     }
 
+    /**
+     * Draws the map from its file. A change made elsewhere that the screen
+     * catches up with meanwhile, as the file is read or as the screen waits
+     * to say what it covers, is newer than what was read: the map is drawn
+     * as that change left it, at the revision the screen is on then.
+     */
     private suspend fun load() {
+        val caughtUp = generation
+
         val text = try {
             maps.read(id)
         } catch (missing: FileNotFoundException) {
@@ -594,10 +716,6 @@ class MapViewModel(
             return
         }
 
-        generation += 1
-        markdown = text
-        written = text
-        nextReason = VersionReason.Opened
         val metadata = maps.summary(id)?.metadata
         val pathMaking = state.value.pathMaking
 
@@ -607,12 +725,22 @@ class MapViewModel(
 
         // Drawn before the screen says what it covers, the map would glide out from under the toolbar once it did.
         withTimeoutOrNull(INSETS_WAIT_MILLISECONDS) { insetsKnown.await() }
+
+        if (generation == caughtUp) {
+            markdown = text
+            written = text
+        }
+
+        generation += 1
+        // A save still waiting was made on the map as the page drew it before: it goes into the history, as the map's drawn anew.
+        saves.caughtUp()
+        nextReason = VersionReason.Opened
         // The map drawn anew is the map as it is now, over a version that was on show.
         versionHistory.stopShowing()
         state.update { it.copy(history = it.history?.copy(showing = null)) }
         page.send(
             MapCommand.Load(
-                markdown = text,
+                markdown = markdown,
                 theme = theme ?: return,
                 settings = settings ?: return,
                 insets = insets,
@@ -634,8 +762,10 @@ class MapViewModel(
         }
     }
 
-    /** After the page's process stopped: a new page, and the map drawn again. */
+    /** After the page's process stopped, or the page didn't load: a new page, and the map drawn again. */
     fun reload() {
+        // The planet sketched on went with the page.
+        sketching.drop()
         app.givePage(page)
         page = app.takePage()
         page.incognito = maps.summary(id)?.metadata?.isPrivate == true
@@ -643,7 +773,7 @@ class MapViewModel(
         pageGeneration.value += 1
         versionHistory.stopShowing()
         versionHistory.closeSummaries()
-        state.update { it.copy(stopped = false, ready = false, drawn = false, editing = false, panel = null, history = null) }
+        state.update { it.copy(pageProblem = null, ready = false, drawn = false, editing = false, panel = null, history = null) }
         viewModelScope.launch { load() }
     }
 
@@ -651,7 +781,9 @@ class MapViewModel(
         when (message) {
             MapMessage.Hello -> Unit
             is MapMessage.Ready -> {
-                state.update { it.copy(ready = true, map = message.state, error = null).reading(message.state) }
+                // A page that loads the map again has none of the boxes on their way to the one before it.
+                checking.clear()
+                state.update { it.copy(ready = true, map = message.state, error = null, noteChecks = emptyMap()).reading(message.state) }
                 studying.pageLoaded()
 
                 if (!state.value.drawn) {
@@ -669,12 +801,21 @@ class MapViewModel(
             }
             is MapMessage.Saved -> saved(message)
             // While an earlier version is on show, only whether the map can be changed is the map's: the rest is the version's.
-            is MapMessage.State -> state.update { ui ->
-                if (ui.showingVersion) ui.reading(message.state) else ui.copy(map = message.state).reading(message.state).withoutPanelOnGoneIdea()
+            is MapMessage.State -> {
+                state.update { ui ->
+                    if (ui.showingVersion) ui.reading(message.state) else ui.copy(map = message.state).reading(message.state).withoutPanelOnGoneIdea()
+                }
+
+                settleChecks(message.state)
             }
             is MapMessage.Focus -> {
                 state.update { ui -> ui.copy(map = ui.map?.copy(path = message.path, mode = message.mode)) }
-                rememberPlace(message.path.lastOrNull(), message.mode)
+
+                // Where the reader is on an earlier version on show isn't where the map as it is reopens.
+                if (!state.value.showingVersion) {
+                    rememberPlace(message.path.lastOrNull(), message.mode)
+                }
+
                 // Making a path, each new idea flown to joins it; flying back to one on it already, to go on from there, doesn't.
                 val reached = message.path.lastOrNull()
 
@@ -716,18 +857,26 @@ class MapViewModel(
             is MapMessage.Declined -> {
                 // A value the app sent that Orbit can't read: what's wrong is for the log, and the person hears it didn't happen.
                 Logs.warn("OrbitMap", "Orbit didn't make the ${message.change}: ${message.message}")
-                state.update { it.copy(error = ShownText.Resource(R.string.map_change_declined)) }
+
+                // A box that wasn't on its line any more: the details show the notes as the page has them.
+                if (message.change == "checkNote") {
+                    checking.clear()
+                }
+
+                state.update { it.copy(error = ShownText.Resource(R.string.map_change_declined), noteChecks = noteChecks()) }
             }
-            MapMessage.Stopped -> state.update { it.copy(ready = false, drawn = false, editing = false, panel = null, stopped = true) }
+            MapMessage.Stopped -> state.update { it.copy(ready = false, drawn = false, editing = false, panel = null, pageProblem = PageProblem.Stopped) }
+            MapMessage.DidNotLoad -> state.update { it.copy(ready = false, drawn = false, editing = false, panel = null, pageProblem = PageProblem.DidNotLoad) }
             is MapMessage.DropTarget -> drops.targeted(message.id)
             is MapMessage.DragOut -> drops.draggedOut(message.id)
+            is MapMessage.Spotlight -> sketching.spotlight(message)
             // Only an audience's screen says how its video goes.
             is MapMessage.Result, is MapMessage.MediaState -> Unit
         }
     }
 
-    /** Whether a press on the map can lead to an edit: not while a path is made, on a map that can't be changed, or on an earlier version. */
-    private fun takesEdits(): Boolean = !state.value.pathMaking && state.value.readOnly == null && !state.value.showingVersion
+    /** Whether a press on the map can lead to an edit now (see [MapUi.takesEdits]). */
+    private fun takesEdits(): Boolean = state.value.takesEdits
 
     private fun saved(message: MapMessage.Saved) {
         // The page never saves a map that can't be changed; this screen doesn't either.
@@ -738,18 +887,12 @@ class MapViewModel(
         // Made on the map as it was before a change from elsewhere reached the page: it goes into the history
         // (see write), and the screen stays on the map as it is now, which the page is drawing.
         if (isStale(message.revision, generation)) {
-            saves.trySend(Save(message.markdown, message.revision ?: generation))
+            saves.setAside(message.markdown)
             return
         }
 
-        // A talk's ideas go back with one undo: only the first keeps the map as it was before them.
-        val spoken = message.kind == "add" && spokenSaved < spokenSent
-
-        if (spoken) {
-            spokenSaved += 1
-        }
-
-        if (!(spoken && spokenSaved > 1)) {
+        // A talk's ideas go back with one undo: only its first save keeps the map as it was before them.
+        if (spokenIdeas.keepsUndo(message.kind)) {
             remember(markdown)
         }
 
@@ -760,6 +903,8 @@ class MapViewModel(
 
         message.renamed?.let { (from, to) -> follow(from, to) }
         val reached = message.kind == "update" && reachedGoal(state.value.nodes, message.state.nodes)
+        // What undo brings back now: the map before this change, while it's still the last change.
+        val before = undoStack.lastOrNull()
         markdown = message.markdown
         save(message.markdown)
 
@@ -785,7 +930,59 @@ class MapViewModel(
 
         // The source editor follows edits made on the map.
         sourceEditing.follow(message.markdown)
+
+        // A box checked here, now saved: said, with Undo, which takes it back while nothing has changed since.
+        settleChecks(message.state)?.let { check ->
+            val label = check.label.ifBlank { untitled() }
+            val said = if (check.checked) R.string.map_checked_item else R.string.map_unchecked_item
+
+            events.trySend(
+                MapEvent.Snackbar(
+                    ShownText.Resource(said, listOf(label)),
+                    undo = true,
+                    onUndo = {
+                        if (before != null && undoStack.lastOrNull() === before) {
+                            undo()
+                        }
+                    },
+                ),
+            )
+        }
     }
+
+    /**
+     * Lets go of the boxes checked here that `map` shows as they were
+     * checked, or no longer has, and shows the rest as they are on their way.
+     * Returns the last of those that `map` shows as they were checked.
+     */
+    private fun settleChecks(map: MapState): NoteCheck? {
+        if (checking.isEmpty()) {
+            return null
+        }
+
+        val notes = map.nodes.associate { it.id to it.note }
+        var shown: NoteCheck? = null
+        val boxes = checking.entries.iterator()
+
+        while (boxes.hasNext()) {
+            val (box, check) = boxes.next()
+            val now = notes[box.first]?.let { noteBoxOn(it, box.second) }
+
+            if (now == check.checked) {
+                shown = check
+                boxes.remove()
+            } else if (now == null) {
+                boxes.remove()
+            }
+        }
+
+        state.update { it.copy(noteChecks = noteChecks()) }
+        return shown
+    }
+
+    /** The boxes on their way to the page, by idea, then by line. */
+    private fun noteChecks(): Map<String, Map<Int, Boolean>> =
+        checking.entries.groupBy({ it.key.first }, { it.key.second to it.value.checked }).mapValues { (_, boxes) -> boxes.toMap() }
 
     /**
      * An idea dragged somewhere else on the map: it ticks over each place it
@@ -930,6 +1127,25 @@ class MapViewModel(
         }
     }
 
+    /**
+     * Checks or unchecks a box of a checklist in idea `nodeId`'s note, by its
+     * line: the page changes that box in the note it has, so the map's file
+     * changes on that line alone. The details show it at once; once it's
+     * saved, a message says so, with Undo.
+     */
+    fun checkNote(nodeId: String, check: NoteCheck) {
+        if (!takesEdits() || locked.value) {
+            return
+        }
+
+        versionHistory.showNow()
+        checking.remove(nodeId to check.line)
+        checking[nodeId to check.line] = check
+        state.update { it.copy(noteChecks = noteChecks()) }
+        page.send(MapCommand.CheckNote(nodeId, check.line, check.checked))
+        events.trySend(MapEvent.Tick)
+    }
+
     /** Adds to a goal's number, or takes off below 0: an edit like any other, saved and undone the same way. */
     fun addToGoal(nodeId: String, amount: BigDecimal) {
         versionHistory.showNow()
@@ -973,7 +1189,8 @@ class MapViewModel(
                 return@launch
             }
 
-            if (cut && !node.isRoot && state.value.readOnly == null && !state.value.showingVersion) {
+            // Cutting where the map takes nothing pasted (presented, made into a path, read-only…) only copies, as the root does.
+            if (cut && !node.isRoot && takesDrops(state.value, locked.value)) {
                 remove(nodeId, cut = true)
             } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
                 // From Android 13 on, Android shows what was copied itself.
@@ -989,35 +1206,62 @@ class MapViewModel(
      * Pastes what was copied into an idea: text becomes ideas under it (see
      * web/paste.ts), with one Undo, and a picture becomes its picture. An idea
      * copied from another map brings the pictures and videos it points to.
+     * A map takes a paste where it takes a drop ([takesDrops]): not while
+     * it's presented, made into a path or studied, nor when it can't change.
      */
     fun paste(parentId: String) {
-        if (state.value.readOnly != null || state.value.showingVersion || state.value.nodes[parentId] == null) {
+        if (!canPasteInto(parentId)) {
             return
         }
 
         when (val clip = app.clipboard.read()) {
             null -> events.trySend(MapEvent.Snackbar(ShownText.Resource(R.string.map_nothing_to_paste)))
             is Clip.Picture -> addPicture(parentId, clip.uri, app.clipboard.resolver, pasted = true)
-            is Clip.Ideas -> viewModelScope.launch {
-                try {
-                    // A locked private map's pictures, videos and sounds stay in it: what was copied from it pastes as text. Those that
-                    // come may come under names of their own, which the pasted text points at.
-                    val text = clip.sourceMap?.takeUnless { source -> hiddenPrivate(source) }?.let { source -> maps.copyMedia(source, id, clip.text) } ?: clip.text
-                    val pasted = page.request(PastedIdeas.serializer()) { job -> MapCommand.Paste(job, parentId, text) }
+            is Clip.Ideas -> pasteIdeas(parentId, clip)
+        }
+    }
 
-                    if (pasted.count == 0) {
-                        events.trySend(MapEvent.Snackbar(ShownText.Resource(R.string.map_nothing_to_paste)))
-                    } else {
-                        events.trySend(MapEvent.Snackbar(ShownText.Plural(R.plurals.map_pasted_ideas, pasted.count), undo = true))
-                    }
-                } catch (refused: MediaRefusedException) {
-                    events.trySend(MapEvent.Snackbar(ShownText.Plain(refused.message.orEmpty())))
-                } catch (failed: PageException) {
-                    events.trySend(MapEvent.Snackbar(ShownText.Plain(failed.message.orEmpty())))
+    /**
+     * Pastes ideas copied in Orbit, or text, under `parentId`, with one Undo
+     * (see [paste]). Ideas copied from another map bring the pictures,
+     * videos and sounds they point to: when those can't come, past the
+     * map's room or not copied, as on a full disk, nothing is pasted, and
+     * the message says so.
+     */
+    fun pasteIdeas(parentId: String, clip: Clip.Ideas) {
+        if (!canPasteInto(parentId)) {
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                // A locked private map's pictures, videos and sounds stay in it: what was copied from it pastes as text. Those that
+                // come may come under names of their own, which the pasted text points at.
+                val text = clip.sourceMap?.takeUnless { source -> hiddenPrivate(source) }?.let { source -> maps.copyMedia(source, id, clip.text) } ?: clip.text
+                val pasted = page.request(PastedIdeas.serializer()) { job -> MapCommand.Paste(job, parentId, text) }
+
+                if (pasted.count == 0) {
+                    events.trySend(MapEvent.Snackbar(ShownText.Resource(R.string.map_nothing_to_paste)))
+                } else {
+                    events.trySend(MapEvent.Snackbar(ShownText.Plural(R.plurals.map_pasted_ideas, pasted.count), undo = true))
                 }
+            } catch (refused: MediaRefusedException) {
+                events.trySend(MapEvent.Snackbar(ShownText.Plain(refused.message.orEmpty())))
+            } catch (failed: PageException) {
+                events.trySend(MapEvent.Snackbar(ShownText.Plain(failed.message.orEmpty())))
+            } catch (failed: IOException) {
+                Logs.warn("OrbitMap", "Couldn't copy the pasted ideas' pictures, videos and sounds", failed)
+                events.trySend(MapEvent.Snackbar(ShownText.Resource(R.string.map_paste_media_failed)))
             }
         }
     }
+
+    /**
+     * Whether something can be pasted into idea `parentId` now: the map takes
+     * it as it takes a drop ([takesDrops]: changeable, at its latest version,
+     * and not presented, studied or made into a path), and has the idea.
+     */
+    private fun canPasteInto(parentId: String): Boolean = takesDrops(state.value, locked.value) && state.value.nodes[parentId] != null
 
     fun duplicate(nodeId: String) {
         versionHistory.close()
@@ -1078,6 +1322,11 @@ class MapViewModel(
             return
         }
 
+        // A map that can only be looked at offers nothing that would change it: the page keeps none of it.
+        if (panel?.changesTheMap == true && state.value.readOnly != null) {
+            return
+        }
+
         // The editor opening on an idea starts its fields over; asked for the idea it's on, it stays as it is.
         val shown = when {
             panel !is Panel.Editor -> panel
@@ -1089,7 +1338,7 @@ class MapViewModel(
         }
 
         if (shown != state.value.panel) {
-            state.update { it.copy(mediaProblem = null) }
+            state.update { it.copy(mediaProblem = null, videoNote = null) }
         }
 
         // Leaving the version history: the map as it is now comes back.
@@ -1206,7 +1455,54 @@ class MapViewModel(
     /** Stops the sound being copied in: nothing of it stays. */
     fun cancelSound() = mediaAdding.cancelSound()
 
-    /** Opens the recorder for a voice memo on `nodeId`. A talk going on ends first: the microphone is the recorder's. */
+    // Files
+
+    /**
+     * Copies files from the phone into the map's folder and adds them to
+     * idea `nodeId`'s, with one Undo. The editor shows how far along each
+     * copy is.
+     */
+    fun addFiles(nodeId: String, uris: List<Uri>, resolver: ContentResolver) = mediaAdding.addFiles(nodeId, uris, resolver)
+
+    /** Stops the files being copied in: those copied so far join their idea. */
+    fun cancelFiles() = mediaAdding.cancelFiles()
+
+    /** Files shared to Orbit while this map is open: they join its idea in focus, or its root, unless it takes no changes now, which is said. */
+    fun addSharedFiles(uris: List<Uri>, resolver: ContentResolver) {
+        val target = state.value.sun?.id ?: state.value.map?.root?.id
+
+        if (target == null || !takesEdits() || locked.value) {
+            events.trySend(MapEvent.Snackbar(ShownText.Resource(R.string.drop_not_added_now)))
+            return
+        }
+
+        addFiles(target, uris, resolver)
+    }
+
+    /** Adds files copied into the map to idea `nodeId`'s: the page adds them to the ones it has now, so none is lost; a message offers Undo. */
+    private fun addFilesToIdea(nodeId: String, files: List<MapFile>) {
+        versionHistory.showNow()
+        page.send(MapCommand.AddFiles(nodeId, files))
+        val label = state.value.nodes[nodeId]?.label(untitled()) ?: untitled()
+        events.trySend(MapEvent.Snackbar(ShownText.Plural(R.plurals.files_added, files.size, listOf(label, files.size)), undo = true))
+    }
+
+    /** Takes `file` off idea `nodeId`, with Undo. Its copy stays in the map's folder while an earlier version points at it. */
+    fun removeFile(nodeId: String, file: MapFile) {
+        if (!takesEdits() || locked.value) {
+            return
+        }
+
+        versionHistory.showNow()
+        page.send(MapCommand.RemoveFile(nodeId, file.src))
+        events.trySend(MapEvent.Snackbar(ShownText.Resource(R.string.files_removed, listOf(fileName(file))), undo = true))
+    }
+
+    /**
+     * Opens the recorder for a voice memo on `nodeId`. A talk going on ends
+     * as it opens, before anything is recorded: the microphone is the
+     * recorder's (see [talkable]).
+     */
     fun recordMemo(nodeId: String) {
         versionHistory.close()
         stopEditing()
@@ -1223,6 +1519,42 @@ class MapViewModel(
      * sound had, with Undo. Returns why it couldn't, or null once it's on.
      */
     suspend fun saveRecording(nodeId: String, recording: File): ShownText? = mediaAdding.saveRecording(nodeId, recording)
+
+    // Sketching on a planet
+
+    /** The drawing while an idea's planet is sketched on. */
+    val sketchSession: StateFlow<SketchSession?> get() = sketching.session
+
+    /**
+     * Sketches on idea `nodeId`'s planet, from its menu or its editor: a new
+     * sketch, or the one it has to draw on further; a picture of another kind
+     * is asked about first. The field being typed in keeps what was typed,
+     * and a version on show goes, as for any change.
+     */
+    fun sketch(nodeId: String) {
+        versionHistory.close()
+        stopEditing()
+        sounds.pause()
+        sketching.sketch(nodeId)
+    }
+
+    /** The person said the sketch may take the place of the idea's picture. */
+    fun replaceAndSketch() = sketching.replaceAndSketch()
+
+    /** The room the screen's sketch toolbar takes around the planet, in dp. */
+    fun sketchRoom(insets: MapInsets) = sketching.room(insets)
+
+    /** Done drawing: the description comes up. */
+    fun finishSketch() = sketching.done()
+
+    /** Keeps the sketch as the idea's picture, described so. */
+    fun saveSketch(description: String) = sketching.save(description)
+
+    /** Back to drawing, from the description or the question whether to let strokes go. */
+    fun keepSketching() = sketching.keepDrawing()
+
+    /** Stops sketching, asking first when strokes were drawn, unless `letGo` says to let them go. */
+    fun cancelSketch(letGo: Boolean = false) = sketching.cancel(letGo)
 
     /** What the map's pictures, videos and sounds come to, in bytes: a new voice memo may take what's left of a map's room. */
     suspend fun mediaSize(): Long = withContext(Dispatchers.IO) { maps.mediaSize(id) }
@@ -1298,31 +1630,50 @@ class MapViewModel(
 
     // Talking ideas onto the map
 
-    /** A talk begins: what's said joins the orbit in focus, and one undo takes it all back. A sound playing stops: the phone listens. */
-    fun startTalking() {
+    /**
+     * A talk begins: what's said joins the orbit in focus, and one undo takes
+     * it all back. A sound playing stops: the phone listens. False, and
+     * nothing begins, where the map can't be talked onto now ([talkable]).
+     */
+    fun startTalking(): Boolean {
+        if (!talkableNow()) {
+            return false
+        }
+
         versionHistory.close()
         stopEditing()
         sounds.stop()
-        spokenSent = 0
-        spokenSaved = 0
+        spokenIdeas.start()
         state.update { it.copy(panel = null) }
+        return true
     }
 
-    /** Ideas just said, into the orbit of the idea in focus. */
-    fun addSpoken(ideas: List<String>) {
-        val parent = state.value.sun?.id ?: state.value.map?.root?.id ?: return
-
-        ideas.forEach { idea ->
-            spokenSent += 1
-            page.send(MapCommand.Add(parent, buildJsonObject { put("text", JsonPrimitive(idea)) }))
+    /**
+     * Ideas just said, into the orbit of the idea in focus: false when the
+     * map didn't take them. Behind its lock, or with the recorder open, it
+     * takes nothing said, however late a speech service says it, and nothing
+     * after the talk is over.
+     */
+    fun addSpoken(ideas: List<String>): Boolean {
+        if (!talkableNow()) {
+            return false
         }
+
+        val parent = state.value.sun?.id ?: state.value.map?.root?.id ?: return false
+        return spokenIdeas.add(parent, ideas)
     }
 
-    /** The talk is over: how many ideas it brought, with a way to take them all back. */
+    /** Adds what was said in a pause under `parent`, as one change: how many ideas joined, once their save is in. */
+    private suspend fun addSaid(parent: String, ideas: List<String>): Int = try {
+        page.request(PastedIdeas.serializer()) { job -> MapCommand.AddNodes(job, parent, ideas.map { idea -> buildJsonObject { put("text", JsonPrimitive(idea)) } }) }.count
+    } catch (failed: PageException) {
+        Logs.warn("OrbitMap", "The page couldn't add what was said")
+        0
+    }
+
+    /** The talk is over: once its ideas are saved, a message says how many it brought, with a way to take them all back. */
     fun stopTalking() {
-        if (spokenSent > 0) {
-            events.trySend(MapEvent.Snackbar(ShownText.Plural(R.plurals.map_added_ideas, spokenSent), undo = true))
-        }
+        spokenIdeas.over()
     }
 
     // The source editor
@@ -1337,7 +1688,8 @@ class MapViewModel(
             // Text edited by hand can change anything: the map as it was goes into the history first.
             reasonBeforeSource = nextReason
             nextReason = VersionReason.Text
-            state.update { it.copy(panel = null, source = SourceState(markdown)) }
+            state.update { it.copy(panel = null) }
+            sourceEditing.open(markdown)
             page.send(MapCommand.Source(markdown))
         }
     }
@@ -1390,8 +1742,7 @@ class MapViewModel(
         stopEditing()
         // A sound playing over the map stops: in a presentation, each idea's plays from its own button.
         sounds.stop()
-        val ideas = map.nodes.map { it.id }
-        val order = presentationPath.path.filter { it in ideas }.ifEmpty { ideas }
+        val order = presentationOrder(presentationPath.path, map.nodes.map { it.id })
         val start = if (fromStart || rehearse) 0 else order.indexOf(state.value.sun?.id).coerceAtLeast(0)
         rehearsed.clear()
         val planned = if (rehearse) null else maps.summary(id)?.metadata?.rehearsal
@@ -1605,8 +1956,14 @@ class MapViewModel(
     fun stopStudy() {
         sounds.stop()
         studying.stop()
-        // The session's answers go to the folder the maps are kept in soon, for the other devices there.
-        app.folderSync.request()
+        // The session's answers go to the folder the maps are kept in soon, for the other devices there: once they're
+        // written, the last one too.
+        val folder = app.folderSync
+
+        app.applicationScope.launch {
+            studying.written()
+            folder.request()
+        }
     }
 
     // The map as a whole
@@ -1627,7 +1984,20 @@ class MapViewModel(
         null
     }
 
-    suspend fun yaml(): String? = convert(currentMarkdown(), "yaml")
+    /** Whether the map's text is YAML, as Orbit tells it from markdown: its own text is its YAML then, and its markdown is Orbit's. */
+    suspend fun isYaml(): Boolean = withContext(Dispatchers.Default) { MapText.isYaml(currentMarkdown()) }
+
+    /** The map as orbit-md: its own text, or a YAML map's as Orbit writes it in markdown; null when it can't be written so. */
+    suspend fun markdownText(): String? {
+        val text = currentMarkdown()
+        return if (withContext(Dispatchers.Default) { MapText.isYaml(text) }) convert(text, "markdown") else text
+    }
+
+    /** The map as YAML: a YAML map's own text, or any other as Orbit writes it in YAML; null when it can't be written so. */
+    suspend fun yaml(): String? {
+        val text = currentMarkdown()
+        return if (withContext(Dispatchers.Default) { MapText.isYaml(text) }) text else convert(text, "yaml")
+    }
 
     /** The map as OPML, for outliners and other mind map apps. */
     suspend fun opml(): String? = convert(currentMarkdown(), "opml")
@@ -1635,14 +2005,20 @@ class MapViewModel(
     /** What goes with the map when it's shared: its own pictures, videos and audio, but those `leavingOut`. */
     suspend fun mediaSummary(leavingOut: Set<String> = emptySet()): MediaSummary = maps.mediaSummary(id, leavingOut)
 
+    /** Whether the map's zip is past what older versions of Orbit open (see [MapRepository.pastOlderZips]). */
+    suspend fun pastOlderZips(): Boolean = maps.pastOlderZips(id)
+
+    /** How many of the map's pictures stay out of a web page of it, past what a page carries (see [MapRepository.picturesOutOfPage]). */
+    suspend fun picturesOutOfPage(): Int = maps.picturesOutOfPage(id)
+
     /** The map's own files that can't go clean: see `MapRepository.uncleaned`. */
     suspend fun uncleaned(): Uncleaned = maps.uncleaned(id)
 
-    /** How many of the map's sounds a web page of it carries inside, with those of `asTheyAre`: see `MapRepository.soundsInPage`. */
-    suspend fun soundsInPage(asTheyAre: Set<String> = emptySet()): Int = maps.soundsInPage(id, asTheyAre)
+    /** The map's sounds a web page of it carries inside, with those of `asTheyAre`: see `MapRepository.soundsInPage`. */
+    suspend fun soundsInPage(asTheyAre: Set<String> = emptySet()): Set<String> = maps.soundsInPage(id, asTheyAre)
 
-    /** How many of the map's live photos' motions a web page of it carries inside, with those of `asTheyAre`: see `MapRepository.motionsInPage`. */
-    suspend fun motionsInPage(asTheyAre: Set<String> = emptySet()): Int = maps.motionsInPage(id, asTheyAre)
+    /** The map's live photos' motions a web page of it carries inside, with those of `asTheyAre`: see `MapRepository.motionsInPage`. */
+    suspend fun motionsInPage(asTheyAre: Set<String> = emptySet()): Set<String> = maps.motionsInPage(id, asTheyAre)
 
     /**
      * What Coil loads for a picture or thumbnail: a web address (an http one
@@ -1661,29 +2037,74 @@ class MapViewModel(
         return file.takeIf { it.path.startsWith(folder.path + File.separator) }
     }
 
-    /** The map's zip, with those of its files that can't go clean that are in `asTheyAre` going as they are. */
-    suspend fun writeZip(output: java.io.OutputStream, asTheyAre: Set<String> = emptySet()) = maps.writeZip(id, output, asTheyAre)
+    /**
+     * The file an idea's `files` entry points at (`media/file-…`), when it's
+     * in the map's media folder here: only there, wherever its address
+     * leads, so no entry can hand another app the map's text or details.
+     */
+    fun ideaFile(src: String): File? {
+        if (src.contains("://") || src.startsWith("data:")) {
+            return null
+        }
+
+        val media = File(maps.folder(id), MEDIA_DIRECTORY).canonicalFile
+        val file = File(maps.folder(id), src.removePrefix("./")).canonicalFile
+        return file.takeIf { it.parentFile == media }
+    }
+
+    /** Says something over the map. */
+    fun say(text: ShownText) {
+        events.trySend(MapEvent.Snackbar(text))
+    }
+
+    /** The map's zip, with those of its files that can't go clean that are in `asTheyAre` going as they are; `room` hears the most it may come to first. */
+    suspend fun writeZip(output: OutputStream, asTheyAre: Set<String> = emptySet(), room: (Long) -> Unit = {}) = maps.writeZip(id, output, asTheyAre, room)
 
     /** The map's folder, where its pictures are. */
     fun folder(): File = maps.folder(id)
 
-    /** The map as one web page that flies in any browser, offline (see [WebPage]), with the files of `asTheyAre` as they are. */
-    suspend fun webPage(context: Context, asTheyAre: Set<String> = emptySet()): String? {
-        val theme = theme ?: return null
+    /**
+     * Writes the map as one web page that flies in any browser, offline (see
+     * [WebPage]), to `output`, a piece at a time, with the files of
+     * `asTheyAre` as they are; false, writing nothing, before the map's page
+     * has given its colors. `room` hears the most it may come to first.
+     */
+    suspend fun writeWebPage(context: Context, output: OutputStream, asTheyAre: Set<String> = emptySet(), room: (Long) -> Unit = {}): Boolean {
+        val theme = theme ?: return false
         val ideas = state.value.nodes.keys
         val presentPath = presentationPath.path.filter { it in ideas }.takeIf { it.size > 1 }.orEmpty()
-        return WebPage.build(context, pageTitle(context), currentMarkdown(), theme, maps.folder(id), path = presentPath, asTheyAre = asTheyAre)
+        WebPage.write(context, output, pageTitle(context), currentMarkdown(), theme, maps.folder(id), path = presentPath, asTheyAre = asTheyAre, room = room)
+        return true
     }
 
     /**
-     * The map's web page laid out for paper only, for printing (MapPrinter),
-     * with the pictures of `asTheyAre` as they are: `theme` is the app's
-     * colors in light. Null when it couldn't be made.
+     * The map's web page laid out for paper only, for printing, in a file of
+     * its own in the cache ([MapPrinter.pageFile]), with the pictures of
+     * `asTheyAre` as they are: `theme` is the app's colors in light. Null when
+     * it couldn't be made.
      */
-    suspend fun printPage(context: Context, theme: AppTheme, request: PrintRequest, asTheyAre: Set<String> = emptySet()): String? = try {
-        WebPage.build(context, pageTitle(context), currentMarkdown(), theme, maps.folder(id), print = request, asTheyAre = asTheyAre)
-    } catch (failed: IOException) {
-        null
+    suspend fun printPage(context: Context, theme: AppTheme, request: PrintRequest, asTheyAre: Set<String> = emptySet()): File? = withContext(Dispatchers.IO) {
+        var page: File? = null
+        var made = false
+
+        try {
+            page = MapPrinter.pageFile(context)
+            val folder = page.parentFile ?: context.cacheDir
+
+            page.outputStream().use { output ->
+                WebPage.write(context, output, pageTitle(context), currentMarkdown(), theme, maps.folder(id), print = request, asTheyAre = asTheyAre, room = { requireRoom(folder, it) })
+            }
+
+            made = true
+        } catch (failed: IOException) {
+            Logs.warn("OrbitMap", "Couldn't lay the map out for paper", failed)
+        } finally {
+            if (!made) {
+                page?.delete()
+            }
+        }
+
+        page.takeIf { made }
     }
 
     /** Says the map couldn't be laid out for printing. */
@@ -1715,6 +2136,8 @@ class MapViewModel(
 
     override fun onCleared() {
         maps.showing(id, false)
+        // The answers still to be written are, on the app's scope: the last one given is kept as the map closes.
+        studying.close()
         sounds.release()
         // A presentation is over once its map goes: a TV or browsers still watching go back to waiting.
         control.stop()
@@ -1747,9 +2170,20 @@ class MapViewModel(
 
             app.givePage(closing)
             // A save being written lands first: the last edit is written over it, from what it left.
-            saving?.join()
+            saves.job.join()
+
+            // Texts set aside and not kept yet go into the map's history, as they would have with the screen there.
+            if (!deleted) {
+                for (text in saves.takeAsides().filter { it != markdown }) {
+                    maps.keepAside(id, text)
+                }
+            }
+
             val unsaved = markdown
             val base = written
+            // Kept first as a save would have kept it: the map as it was opened, before a big change, or before the text was edited by hand.
+            val reason = nextReason
+            val checkpoint = if (reason != null) Checkpoint.Always else Checkpoint.Interval
 
             // The last edit is saved even as the screen goes, and pictures taken off the map go with it.
             if (!deleted && typable && unsaved.isNotEmpty()) {
@@ -1759,7 +2193,7 @@ class MapViewModel(
 
                     // Storage that's full is tried again a while, as long as Orbit runs, for room to free up.
                     while (unsaved != base && tries <= CLOSED_SAVE_TRIES) {
-                        result = maps.write(id, unsaved, base = base)
+                        result = maps.write(id, unsaved, base = base, checkpoint = checkpoint, reason = reason ?: VersionReason.Editing)
 
                         if (result != WriteResult.NotWritten) {
                             break
@@ -1798,7 +2232,7 @@ private fun MapUi.reading(page: MapState): MapUi {
         else -> null
     }
 
-    return copy(readOnly = readOnly, readProblem = page.problem, panel = if (readOnly != null && panel is Panel.Menu) null else panel)
+    return copy(readOnly = readOnly, readProblem = page.problem, panel = if (readOnly != null && panel?.changesTheMap == true) null else panel)
 }
 
 /**

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Desenhar no planeta de uma ideia: a tela de desenho, as canetas, a borracha e o que o mapa diz de um desenho. Veja TRANSLATING.md. -->
+<resources>
+    <string name="sketch_sketch">Desenhar</string>
+    <string name="sketch_keep_sketching">Continuar desenhando</string>
+
+    <string name="sketch_canvas">Desenho em %1$s</string>
+    <!-- Pode ser 0: uma tela de desenho vazia. -->
+    <plurals name="sketch_strokes">
+        <item quantity="one">Traços: %d</item>
+        <item quantity="many">Traços: %d</item>
+        <item quantity="other">Traços: %d</item>
+    </plurals>
+    <string name="sketch_close">Fechar o desenho</string>
+
+    <string name="sketch_pen">Caneta</string>
+    <string name="sketch_pen_named">Caneta: %1$s, %2$s</string>
+    <string name="sketch_eraser">Borracha</string>
+    <string name="sketch_clear">Limpar o desenho</string>
+    <string name="sketch_fine">Fina</string>
+    <string name="sketch_medium">Média</string>
+    <string name="sketch_bold">Grossa</string>
+
+    <string name="sketch_describe_title">Descreva seu desenho</string>
+    <string name="sketch_describe_label">Descreva-o para leitores de tela</string>
+    <string name="sketch_keep_drawing">Continuar desenhando</string>
+
+    <string name="sketch_replace_title">Substituir a imagem por um desenho?</string>
+    <string name="sketch_replace_text">O desenho fica no lugar da imagem de %1$s. Desfazer traz a imagem de volta.</string>
+
+    <string name="sketch_discard_title">Descartar o desenho?</string>
+    <string name="sketch_discard_text">O que você desenhou se perde, e a ideia fica como estava.</string>
+    <string name="sketch_discard">Descartar</string>
+
+    <string name="sketch_replaced_the_picture">O desenho substituiu a imagem</string>
+    <string name="sketch_taken_off">A ideia não tem mais o desenho</string>
+    <string name="sketch_lost">O desenho foi fechado: a ideia dele não existe mais</string>
+    <string name="sketch_not_kept">Não foi possível salvar o desenho</string>
+
+    <string name="sketch_shortcuts">Ao desenhar</string>
+</resources>

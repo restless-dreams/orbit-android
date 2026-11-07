@@ -7,6 +7,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 
 /**
+ * The ideas a presentation goes through: `path`'s still among `ideas` while
+ * two or more of its steps are left, else every idea in reading order, as
+ * `ideas` has them. A path with fewer is none, as finishing one says.
+ */
+internal fun presentationOrder(path: List<String>, ideas: List<String>): List<String> {
+    val onTheMap = ideas.toSet()
+    return path.filter { it in onTheMap }.takeIf { it.size > 1 } ?: ideas
+}
+
+/**
  * The presentation's path, while it's chosen on the map and since it was
  * kept: the ideas to present, in order. Each new idea flown to joins it, and
  * its steps can be added again, taken out, moved and started over. The path

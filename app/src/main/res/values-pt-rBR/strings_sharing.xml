@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- O que vai com um mapa quando ele é compartilhado, enviado ou mostrado: suas próprias imagens, vídeos e áudios, contados -->
+    <plurals name="sharing_pictures">
+        <item quantity="one">%1$d imagem</item>
+        <item quantity="many">%1$d imagens</item>
+        <item quantity="other">%1$d imagens</item>
+    </plurals>
+    <plurals name="sharing_live_photos">
+        <item quantity="one">%1$d foto ao vivo</item>
+        <item quantity="many">%1$d fotos ao vivo</item>
+        <item quantity="other">%1$d fotos ao vivo</item>
+    </plurals>
+    <plurals name="sharing_videos">
+        <item quantity="one">%1$d vídeo</item>
+        <item quantity="many">%1$d vídeos</item>
+        <item quantity="other">%1$d vídeos</item>
+    </plurals>
+    <plurals name="sharing_audio">
+        <item quantity="one">%1$d áudio</item>
+        <item quantity="many">%1$d áudios</item>
+        <item quantity="other">%1$d áudios</item>
+    </plurals>
+    <plurals name="sharing_files">
+        <item quantity="one">%1$d arquivo</item>
+        <item quantity="many">%1$d arquivos</item>
+        <item quantity="other">%1$d arquivos</item>
+    </plurals>
+    <plurals name="sharing_motions">
+        <item quantity="one">o movimento de %1$d foto ao vivo</item>
+        <item quantity="many">os movimentos de %1$d fotos ao vivo</item>
+        <item quantity="other">os movimentos de %1$d fotos ao vivo</item>
+    </plurals>
+    <string name="sharing_list_two">%1$s e %2$s</string>
+    <string name="sharing_list_three">%1$s, %2$s e %3$s</string>
+
+    <!-- Exportar e compartilhar, sob cada forma de saída -->
+    <string name="sharing_with">Com %1$s · %2$s</string>
+    <string name="sharing_inside">Com %1$s dentro</string>
+    <string name="sharing_with_pictures">Com %1$s</string>
+    <plurals name="sharing_stays_here">
+        <item quantity="one">%1$s fica neste dispositivo</item>
+        <item quantity="many">%1$s ficam neste dispositivo</item>
+        <item quantity="other">%1$s ficam neste dispositivo</item>
+    </plurals>
+    <string name="sharing_without_where">As imagens, os vídeos e os áudios vão sem o local e a data em que foram tirados ou gravados.</string>
+    <string name="sharing_others_without_where">As outras imagens, vídeos e áudios vão sem o local e a data em que foram tirados ou gravados.</string>
+
+    <!-- Os arquivos do mapa que o Orbit não consegue limpar -->
+    <plurals name="sharing_uncleaned_stay_taken">
+        <item quantity="one">%1$s fica neste dispositivo: o Orbit não consegue remover o local onde foi tirada.</item>
+        <item quantity="many">%1$s ficam neste dispositivo: o Orbit não consegue remover o local onde foram tiradas.</item>
+        <item quantity="other">%1$s ficam neste dispositivo: o Orbit não consegue remover o local onde foram tiradas.</item>
+    </plurals>
+    <plurals name="sharing_uncleaned_stay_recorded">
+        <item quantity="one">%1$s fica neste dispositivo: o Orbit não consegue remover o local onde foi gravado.</item>
+        <item quantity="many">%1$s ficam neste dispositivo: o Orbit não consegue remover o local onde foram gravados.</item>
+        <item quantity="other">%1$s ficam neste dispositivo: o Orbit não consegue remover o local onde foram gravados.</item>
+    </plurals>
+    <plurals name="sharing_uncleaned_stay_taken_or_recorded">
+        <item quantity="one">%1$s fica neste dispositivo: o Orbit não consegue remover o local onde foi tirado ou gravado.</item>
+        <item quantity="many">%1$s ficam neste dispositivo: o Orbit não consegue remover o local onde foram tirados ou gravados.</item>
+        <item quantity="other">%1$s ficam neste dispositivo: o Orbit não consegue remover o local onde foram tirados ou gravados.</item>
+    </plurals>
+    <plurals name="sharing_uncleaned_stay_hidden">
+        <item quantity="one">%1$s fica neste dispositivo: o Orbit não consegue remover o que pode estar oculto nele.</item>
+        <item quantity="many">%1$s ficam neste dispositivo: o Orbit não consegue remover o que pode estar oculto neles.</item>
+        <item quantity="other">%1$s ficam neste dispositivo: o Orbit não consegue remover o que pode estar oculto neles.</item>
+    </plurals>
+    <plurals name="sharing_uncleaned_go_taken">
+        <item quantity="one">%1$s vai como está, com o local onde foi tirada.</item>
+        <item quantity="many">%1$s vão como estão, com o local onde foram tiradas.</item>
+        <item quantity="other">%1$s vão como estão, com o local onde foram tiradas.</item>
+    </plurals>
+    <plurals name="sharing_uncleaned_go_recorded">
+        <item quantity="one">%1$s vai como está, com o local onde foi gravado.</item>
+        <item quantity="many">%1$s vão como estão, com o local onde foram gravados.</item>
+        <item quantity="other">%1$s vão como estão, com o local onde foram gravados.</item>
+    </plurals>
+    <plurals name="sharing_uncleaned_go_taken_or_recorded">
+        <item quantity="one">%1$s vai como está, com o local onde foi tirado ou gravado.</item>
+        <item quantity="many">%1$s vão como estão, com o local onde foram tirados ou gravados.</item>
+        <item quantity="other">%1$s vão como estão, com o local onde foram tirados ou gravados.</item>
+    </plurals>
+    <plurals name="sharing_uncleaned_go_hidden">
+        <item quantity="one">%1$s vai como está, com o que estiver oculto nele.</item>
+        <item quantity="many">%1$s vão como estão, com o que estiver oculto neles.</item>
+        <item quantity="other">%1$s vão como estão, com o que estiver oculto neles.</item>
+    </plurals>
+
+    <!-- A pergunta, quando alguns arquivos do mapa não podem ir limpos -->
+    <plurals name="sharing_as_they_are_title">
+        <item quantity="one">Compartilhar %1$s como está?</item>
+        <item quantity="many">Compartilhar %1$s como estão?</item>
+        <item quantity="other">Compartilhar %1$s como estão?</item>
+    </plurals>
+    <!-- O diálogo só abre com arquivos para perguntar sobre eles, então a contagem nunca é 0, e o "one" não precisa do número. -->
+    <plurals name="sharing_as_they_are_taken" tools:ignore="ImpliedQuantity">
+        <item quantity="one">O Orbit não conseguiu remover onde e quando ela foi tirada nem em qual dispositivo, então essas informações iriam junto.</item>
+        <item quantity="many">O Orbit não conseguiu remover onde e quando elas foram tiradas nem em quais dispositivos, então essas informações iriam junto.</item>
+        <item quantity="other">O Orbit não conseguiu remover onde e quando elas foram tiradas nem em quais dispositivos, então essas informações iriam junto.</item>
+    </plurals>
+    <plurals name="sharing_as_they_are_recorded" tools:ignore="ImpliedQuantity">
+        <item quantity="one">O Orbit não conseguiu remover onde e quando ele foi gravado nem em qual dispositivo, então essas informações iriam junto.</item>
+        <item quantity="many">O Orbit não conseguiu remover onde e quando eles foram gravados nem em quais dispositivos, então essas informações iriam junto.</item>
+        <item quantity="other">O Orbit não conseguiu remover onde e quando eles foram gravados nem em quais dispositivos, então essas informações iriam junto.</item>
+    </plurals>
+    <plurals name="sharing_as_they_are_taken_or_recorded" tools:ignore="ImpliedQuantity">
+        <item quantity="one">O Orbit não conseguiu remover onde e quando ele foi tirado ou gravado nem em qual dispositivo, então essas informações iriam junto.</item>
+        <item quantity="many">O Orbit não conseguiu remover onde e quando eles foram tirados ou gravados nem em quais dispositivos, então essas informações iriam junto.</item>
+        <item quantity="other">O Orbit não conseguiu remover onde e quando eles foram tirados ou gravados nem em quais dispositivos, então essas informações iriam junto.</item>
+    </plurals>
+    <plurals name="sharing_as_they_are_hidden" tools:ignore="ImpliedQuantity">
+        <item quantity="one">O Orbit não conseguiu remover o que ele pode dizer além do que mostra, como quem o fez, quando e onde, então essas informações iriam junto.</item>
+        <item quantity="many">O Orbit não conseguiu remover o que eles podem dizer além do que mostram, como quem os fez, quando e onde, então essas informações iriam junto.</item>
+        <item quantity="other">O Orbit não conseguiu remover o que eles podem dizer além do que mostram, como quem os fez, quando e onde, então essas informações iriam junto.</item>
+    </plurals>
+    <plurals name="sharing_leave_them_out" tools:ignore="ImpliedQuantity">
+        <item quantity="one">Deixar de fora</item>
+        <item quantity="many">Deixar de fora</item>
+        <item quantity="other">Deixar de fora</item>
+    </plurals>
+    <plurals name="sharing_share_them_as_they_are" tools:ignore="ImpliedQuantity">
+        <item quantity="one">Compartilhar como está</item>
+        <item quantity="many">Compartilhar como estão</item>
+        <item quantity="other">Compartilhar como estão</item>
+    </plurals>
+
+    <!-- Compartilhar a partir do cartão de um mapa na tela inicial -->
+    <string name="sharing_share_map">Compartilhar “%1$s”</string>
+    <string name="sharing_map_with">O mapa, com %1$s</string>
+    <string name="sharing_map_alone">O mapa</string>
+    <string name="sharing_map_with_description">Um arquivo zip que abre no Orbit · %1$s</string>
+    <string name="sharing_just_the_text">Só o texto</string>
+    <string name="sharing_zip_past_older_orbits">Versões anteriores do Orbit não abrem um arquivo zip tão grande: atualize o Orbit onde ele for aberto</string>
+    <string name="sharing_markdown_file">Um arquivo markdown</string>
+    <string name="sharing_yaml_file">Um arquivo YAML</string>
+
+    <!-- Enviar um mapa para um dispositivo e mostrá-lo em navegadores -->
+    <string name="sharing_send_copy">Envia uma cópia do mapa.</string>
+    <string name="sharing_send_copy_with">Envia uma cópia do mapa, com %1$s.</string>
+    <string name="sharing_copies_not_in_step">Para manter os mapas sincronizados entre seus dispositivos, guarde-os em uma pasta sincronizada.</string>
+    <string name="sharing_browsers_get">Quem entrar recebe o mapa, com %1$s.</string>
+    <string name="sharing_computer_gets">O navegador recebe o mapa, com %1$s.</string>
+
+    <!-- Onde os mapas ficam -->
+    <string name="sharing_maps_stay_here_title">Seus mapas ficam neste dispositivo</string>
+    <string name="sharing_maps_stay_here_body">O Orbit não tem conta nem nuvem. Para ter seus mapas também nos seus outros dispositivos, guarde-os em uma pasta que um app de sincronização ou um serviço de nuvem mantenha sincronizada.</string>
+    <string name="sharing_choose_a_folder">Escolher uma pasta</string>
+    <string name="sharing_where_on_this_device">Neste dispositivo</string>
+    <string name="sharing_where_on_this_device_description">O Orbit não tem conta nem nuvem. O backup do Android, se estiver ativado, guarda os mapas e as configurações, e as imagens, os áudios e os vídeos enquanto couberem, mas não o histórico; os mapas privados, só se o backup for criptografado, como acontece com um bloqueio de tela; caso contrário, uma restauração os deixa de fora. Exportar todos os mapas guarda cada mapa inteiro, e os privados continuam privados.</string>
+    <plurals name="sharing_backup_left_out">
+        <item quantity="one">O último backup do Android não teve espaço para %1$d mapa. Exportar todos os mapas inclui esse mapa.</item>
+        <item quantity="many">O último backup do Android não teve espaço para %1$d mapas. Exportar todos os mapas inclui esses mapas.</item>
+        <item quantity="other">O último backup do Android não teve espaço para %1$d mapas. Exportar todos os mapas inclui esses mapas.</item>
+    </plurals>
+    <string name="sharing_where_in_folder">Neste dispositivo e em “%1$s”</string>
+    <string name="sharing_where_in_folder_description">A pasta mantém os mapas sincronizados, e um app de sincronização ou serviço de nuvem pode levá-los para seus outros dispositivos.</string>
+</resources>

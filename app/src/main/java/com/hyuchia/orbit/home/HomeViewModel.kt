@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hyuchia.orbit.AppContainer
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.data.AppSettings
 import com.hyuchia.orbit.data.MapEditResult
 import com.hyuchia.orbit.data.MapSummary
@@ -57,6 +58,40 @@ internal fun MapSummary.hasTag(tag: String): Boolean = outline.tags.any { MapTag
 /** The tag whose maps Home shows, as most maps spell it; null when no map has it any more (renamed elsewhere, say), so every map shows. */
 internal fun shownTag(tags: List<TagCount>, picked: String?): String? =
     picked?.let { tag -> tags.firstOrNull { MapTags.key(it.name) == MapTags.key(tag) }?.name }
+
+/**
+ * The tag whose maps Home shows once `from` was renamed `to` in every map,
+ * or taken out of them (`to` null), while `shown` was: the maps shown follow
+ * it to its new name, or every map shows. When some kept the old tag
+ * (`stayed`), Orbit couldn't change them, and they stay shown, as Home says.
+ */
+internal fun shownAfterRename(shown: String?, from: String, to: String?, stayed: Boolean): String? =
+    if (!stayed && shown?.let(MapTags::key) == MapTags.key(from)) to else shown
+
+/**
+ * What Home says of the maps it shows that kept a tag renamed or taken out
+ * in every map, `kept`, each with why: one is named, unless it's private,
+ * and several are counted. The maps can only be read here (`readOnly`, as a
+ * newer Orbit keeps them) says so alone. Null when every map changed.
+ */
+internal fun keptTagMessage(kept: List<Pair<MapSummary, MapEditResult>>, words: Words, readOnly: Boolean): String? {
+    if (kept.isEmpty()) {
+        return null
+    }
+
+    val why = kept.map { it.second }
+    val named = kept.singleOrNull()?.first?.takeUnless { it.metadata.isPrivate }?.title
+    val count = kept.size
+
+    return when {
+        why.all { it == MapEditResult.Newer || it == MapEditResult.Unreadable } ->
+            named?.let { words.string(R.string.home_tag_stays_on_map_only_shown, it) } ?: words.plural(R.plurals.home_tag_left_on_maps, count, count)
+        readOnly && MapEditResult.Refused in why -> words.string(R.string.data_newer_version_keeps_maps)
+        MapEditResult.NotWritten in why ->
+            named?.let { words.string(R.string.home_tag_stays_on_map_not_saved, it) } ?: words.plural(R.plurals.home_tag_stays_on_maps_not_saved, count, count)
+        else -> named?.let { words.string(R.string.home_tag_stays_on_map_not_changed, it) } ?: words.plural(R.plurals.home_tag_stays_on_maps_not_changed, count, count)
+    }
+}
 
 data class HomeState(
     val loading: Boolean = true,
@@ -152,25 +187,19 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { said(container.edits.setTags(id, tags)) }
     }
 
-    /** Renames a tag in every map; the maps shown stay the same. */
+    /** Renames a tag in every map; the maps shown stay the same, unless some kept it (see [shownAfterRename]). */
     fun renameTag(from: String, to: String) {
         viewModelScope.launch {
-            said(container.edits.renameTag(from, to))
-
-            if (container.shownTag.value?.let(MapTags::key) == MapTags.key(from)) {
-                container.shownTag.value = to
-            }
+            val stayed = said(container.edits.renameTag(from, to))
+            container.shownTag.value = shownAfterRename(container.shownTag.value, from, to, stayed)
         }
     }
 
-    /** Takes a tag out of every map. */
+    /** Takes a tag out of every map, and shows every map unless some kept it (see [shownAfterRename]). */
     fun removeTag(tag: String) {
         viewModelScope.launch {
-            said(container.edits.renameTag(tag, null))
-
-            if (container.shownTag.value?.let(MapTags::key) == MapTags.key(tag)) {
-                container.shownTag.value = null
-            }
+            val stayed = said(container.edits.renameTag(tag, null))
+            container.shownTag.value = shownAfterRename(container.shownTag.value, tag, null, stayed)
         }
     }
 
@@ -207,11 +236,16 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
         why?.let { problemMessages.send(it) }
     }
 
-    /** Says when a tag stayed on maps Orbit can only show. */
-    private suspend fun said(renamed: TagRename) {
-        if (renamed.left > 0) {
-            problemMessages.send(container.words.plural(R.plurals.home_tag_left_on_maps, renamed.left, renamed.left))
-        }
+    /**
+     * Says which of the maps Home shows kept a tag renamed or taken out in
+     * every map, and why; returns whether any did. A locked private map that
+     * kept it goes unsaid, as its tags do on Home.
+     */
+    private suspend fun said(renamed: TagRename): Boolean {
+        val privacy = container.privateMaps.view.value
+        val kept = renamed.kept.mapNotNull { (id, why) -> maps.summary(id)?.takeUnless(privacy::hides)?.let { it to why } }
+        keptTagMessage(kept, container.words, readOnly = !maps.writable.value)?.let { problemMessages.send(it) }
+        return kept.isNotEmpty()
     }
 
     fun setPinned(id: String, pinned: Boolean) {

@@ -5,12 +5,15 @@ import com.hyuchia.orbit.data.FolderSync
 import com.hyuchia.orbit.data.Importer
 import com.hyuchia.orbit.data.TrashedMap
 import com.hyuchia.orbit.media.SoundPlayback
+import com.hyuchia.orbit.media.VideoMaker
 import com.hyuchia.orbit.page.MapPage
 import com.hyuchia.orbit.page.MapPictures
 import com.hyuchia.orbit.privacy.PrivateLock
+import com.hyuchia.orbit.reminders.IdeaToShow
 import com.hyuchia.orbit.ui.TimeWords
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
  * What a map's view model needs from the rest of the app, besides the maps
@@ -53,4 +56,10 @@ interface MapApp {
 
     /** Where a map deleted from its own screen goes, for Home to offer it back with Undo. */
     val deletedMaps: SendChannel<TrashedMap>
+
+    /** An idea a reminder opened its map at, for the map's screen to show once it's read: it takes it, as only it does. */
+    val ideaToShow: MutableStateFlow<IdeaToShow?>
+
+    /** Makes big videos smaller as they come in, where the phone can; a test's makes none. */
+    val videoMaker: VideoMaker get() = VideoMaker.NONE
 }

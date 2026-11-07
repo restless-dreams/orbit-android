@@ -2,8 +2,11 @@ package com.hyuchia.orbit.map
 
 import android.view.KeyEvent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.res.stringResource
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.sketch.SketchKeys
 import com.hyuchia.orbit.ui.Keys
 import com.hyuchia.orbit.ui.Shortcut
 import com.hyuchia.orbit.ui.ShortcutGroup
@@ -30,10 +33,12 @@ internal object MapKeys {
  * answers itself, which the list shows alongside. `back` is what Back does
  * on the map: a panel closes, the map goes up a level, or the map closes.
  * `lockNow` locks private maps at once, for a private map; none for another.
+ * A map that can only be looked at has none that change it, nor lists them.
  */
 @Composable
 internal fun mapShortcuts(model: MapViewModel, ui: MapUi, present: () -> Unit, back: () -> Unit, lockNow: (() -> Unit)? = null): List<ShortcutGroup> {
     val idea = ui.sun.takeIf { ui.focused }
+    val changeable = ui.readOnly == null
     val map = listOfNotNull(
         Shortcut(stringResource(R.string.common_undo), listOf(MapKeys.Undo)) { model.undo() },
         Shortcut(stringResource(R.string.common_redo), listOf(MapKeys.Redo, Keys(KeyEvent.KEYCODE_Y, ctrl = true))) { model.redo() },
@@ -49,41 +54,67 @@ internal fun mapShortcuts(model: MapViewModel, ui: MapUi, present: () -> Unit, b
             }
         },
         Shortcut(stringResource(R.string.common_outline), listOf(MapKeys.Outline), anywhere = true) { model.show(Panel.Outline) },
-        idea?.let { node -> Shortcut(stringResource(R.string.map_shortcut_edit_the_idea_in_focus), listOf(MapKeys.Edit), anywhere = true) { model.show(Panel.Editor(node.id)) } },
+        idea?.takeIf { changeable }?.let { node -> Shortcut(stringResource(R.string.map_shortcut_edit_the_idea_in_focus), listOf(MapKeys.Edit), anywhere = true) { model.show(Panel.Editor(node.id)) } },
         Shortcut(stringResource(R.string.common_present), listOf(MapKeys.Present, Keys(KeyEvent.KEYCODE_ENTER, ctrl = true))) { present() },
         Shortcut(stringResource(R.string.study_study), listOf(MapKeys.Study)) { model.startStudy() },
         lockNow?.let { lock -> Shortcut(stringResource(R.string.private_lock_private_maps_now), listOf(MapKeys.LockNow), anywhere = true) { lock() } },
         // With a panel open, Escape closes it wherever the focus is, before a field in it could take the key.
         Shortcut(stringResource(R.string.map_shortcut_back_up_a_level), listOf(Keys(KeyEvent.KEYCODE_ESCAPE)), anywhere = ui.panel != null) { back() },
     )
-    return listOf(
-        ShortcutGroup(stringResource(R.string.map_shortcuts_this_map), map),
-        ShortcutGroup(
-            stringResource(R.string.map_shortcuts_on_the_map),
-            listOf(
-                Shortcut(stringResource(R.string.map_shortcut_move_between_ideas), listOf(Keys(KeyEvent.KEYCODE_DPAD_LEFT), Keys(KeyEvent.KEYCODE_DPAD_RIGHT))),
-                Shortcut(stringResource(R.string.map_shortcut_into_the_orbit), listOf(Keys(KeyEvent.KEYCODE_DPAD_DOWN), Keys(KeyEvent.KEYCODE_DPAD_UP))),
-                Shortcut(stringResource(R.string.map_shortcut_fly_into_the_idea), listOf(Keys(KeyEvent.KEYCODE_ENTER), Keys(KeyEvent.KEYCODE_SPACE))),
-                Shortcut(stringResource(R.string.map_shortcut_add_an_idea_under_it), listOf(Keys(KeyEvent.KEYCODE_TAB))),
-                Shortcut(stringResource(R.string.map_shortcut_add_an_idea_beside_it), listOf(Keys(KeyEvent.KEYCODE_ENTER, shift = true))),
-                Shortcut(stringResource(R.string.map_shortcut_rename_it), listOf(Keys(KeyEvent.KEYCODE_F2))),
-                Shortcut(stringResource(R.string.map_shortcut_delete_it), listOf(Keys(KeyEvent.KEYCODE_FORWARD_DEL))),
-                Shortcut(stringResource(R.string.map_shortcut_copy_it), listOf(Keys(KeyEvent.KEYCODE_C, ctrl = true))),
-                Shortcut(stringResource(R.string.map_shortcut_cut_it), listOf(Keys(KeyEvent.KEYCODE_X, ctrl = true))),
-                Shortcut(stringResource(R.string.map_shortcut_paste_into_it), listOf(Keys(KeyEvent.KEYCODE_V, ctrl = true))),
-                Shortcut(stringResource(R.string.map_shortcut_its_menu), listOf(Keys(KeyEvent.KEYCODE_MENU), Keys(KeyEvent.KEYCODE_F10, shift = true))),
-                Shortcut(stringResource(R.string.map_shortcut_zoom_in), listOf(Keys(KeyEvent.KEYCODE_PLUS))),
-                Shortcut(stringResource(R.string.map_shortcut_zoom_out), listOf(Keys(KeyEvent.KEYCODE_MINUS))),
-                Shortcut(stringResource(R.string.map_shortcut_fit_the_view), listOf(Keys(KeyEvent.KEYCODE_0))),
-            ),
+    // The keys the map's page answers itself: getting around, and on a map that can change, changing it.
+    val onTheMap = listOfNotNull(
+        Shortcut(stringResource(R.string.map_shortcut_move_between_ideas), listOf(Keys(KeyEvent.KEYCODE_DPAD_LEFT), Keys(KeyEvent.KEYCODE_DPAD_RIGHT))),
+        Shortcut(stringResource(R.string.map_shortcut_into_the_orbit), listOf(Keys(KeyEvent.KEYCODE_DPAD_DOWN), Keys(KeyEvent.KEYCODE_DPAD_UP))),
+        Shortcut(stringResource(R.string.map_shortcut_fly_into_the_idea), listOf(Keys(KeyEvent.KEYCODE_ENTER), Keys(KeyEvent.KEYCODE_SPACE))),
+        Shortcut(stringResource(R.string.map_shortcut_add_an_idea_under_it), listOf(Keys(KeyEvent.KEYCODE_TAB))).takeIf { changeable },
+        Shortcut(stringResource(R.string.map_shortcut_add_an_idea_beside_it), listOf(Keys(KeyEvent.KEYCODE_ENTER, shift = true))).takeIf { changeable },
+        Shortcut(stringResource(R.string.map_shortcut_rename_it), listOf(Keys(KeyEvent.KEYCODE_F2))).takeIf { changeable },
+        Shortcut(stringResource(R.string.map_shortcut_delete_it), listOf(Keys(KeyEvent.KEYCODE_FORWARD_DEL))).takeIf { changeable },
+        Shortcut(stringResource(R.string.map_shortcut_copy_it), listOf(Keys(KeyEvent.KEYCODE_C, ctrl = true))),
+        Shortcut(stringResource(R.string.map_shortcut_cut_it), listOf(Keys(KeyEvent.KEYCODE_X, ctrl = true))).takeIf { changeable },
+        Shortcut(stringResource(R.string.map_shortcut_paste_into_it), listOf(Keys(KeyEvent.KEYCODE_V, ctrl = true))).takeIf { changeable },
+        Shortcut(stringResource(R.string.map_shortcut_its_menu), listOf(Keys(KeyEvent.KEYCODE_MENU), Keys(KeyEvent.KEYCODE_F10, shift = true))).takeIf { changeable },
+        Shortcut(stringResource(R.string.map_shortcut_zoom_in), listOf(Keys(KeyEvent.KEYCODE_PLUS))),
+        Shortcut(stringResource(R.string.map_shortcut_zoom_out), listOf(Keys(KeyEvent.KEYCODE_MINUS))),
+        Shortcut(stringResource(R.string.map_shortcut_fit_the_view), listOf(Keys(KeyEvent.KEYCODE_0))),
+    )
+
+    val typing = ShortcutGroup(
+        stringResource(R.string.map_shortcuts_typing_an_idea),
+        listOf(
+            Shortcut(stringResource(R.string.map_shortcut_add_it_and_type_the_next), listOf(Keys(KeyEvent.KEYCODE_ENTER))),
+            Shortcut(stringResource(R.string.map_shortcut_add_it_and_go_under_it), listOf(Keys(KeyEvent.KEYCODE_TAB))),
+            Shortcut(stringResource(R.string.map_shortcut_add_it_and_go_back_up), listOf(Keys(KeyEvent.KEYCODE_TAB, shift = true))),
+            Shortcut(stringResource(R.string.map_shortcut_stop_typing), listOf(Keys(KeyEvent.KEYCODE_ESCAPE))),
         ),
+    )
+
+    return listOfNotNull(
+        ShortcutGroup(stringResource(R.string.map_shortcuts_this_map), map),
+        ShortcutGroup(stringResource(R.string.map_shortcuts_on_the_map), onTheMap),
+        typing.takeIf { changeable },
+    )
+}
+
+/**
+ * While a planet is sketched on, the sketch's own keys: its tools, Done, and
+ * Escape, which steps out as Back does (`back`).
+ */
+@Composable
+internal fun sketchShortcuts(model: MapViewModel, back: () -> Unit): List<ShortcutGroup> {
+    val session by model.sketchSession.collectAsState()
+    val drawing = session ?: return emptyList()
+
+    return listOf(
         ShortcutGroup(
-            stringResource(R.string.map_shortcuts_typing_an_idea),
+            stringResource(R.string.sketch_shortcuts),
             listOf(
-                Shortcut(stringResource(R.string.map_shortcut_add_it_and_type_the_next), listOf(Keys(KeyEvent.KEYCODE_ENTER))),
-                Shortcut(stringResource(R.string.map_shortcut_add_it_and_go_under_it), listOf(Keys(KeyEvent.KEYCODE_TAB))),
-                Shortcut(stringResource(R.string.map_shortcut_add_it_and_go_back_up), listOf(Keys(KeyEvent.KEYCODE_TAB, shift = true))),
-                Shortcut(stringResource(R.string.map_shortcut_stop_typing), listOf(Keys(KeyEvent.KEYCODE_ESCAPE))),
+                Shortcut(stringResource(R.string.sketch_pen), listOf(SketchKeys.Pen)) { drawing.erasing = false },
+                Shortcut(stringResource(R.string.sketch_eraser), listOf(SketchKeys.Eraser)) { drawing.erasing = true },
+                Shortcut(stringResource(R.string.common_undo), listOf(SketchKeys.Undo)) { drawing.undo() },
+                Shortcut(stringResource(R.string.common_redo), listOf(SketchKeys.Redo, Keys(KeyEvent.KEYCODE_Y, ctrl = true))) { drawing.redo() },
+                Shortcut(stringResource(R.string.common_done), listOf(SketchKeys.Done)) { model.finishSketch() },
+                Shortcut(stringResource(R.string.sketch_close), listOf(SketchKeys.Close), anywhere = true) { back() },
             ),
         ),
     )

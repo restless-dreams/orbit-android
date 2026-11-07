@@ -151,6 +151,47 @@ class PresentationControlTest {
     }
 
     @Test
+    fun pausedAndPlayedAgainAPresentationGoesOnAtThePaceChosen() = runTest {
+        val control = control
+        // Five seconds an idea, chosen in Settings: the play button passes it on as it is.
+        control.begin(5)
+        control.setPlaying(true, 5)
+        advanceTimeBy(2_000)
+        control.setPlaying(false, 5)
+        advanceTimeBy(60_000)
+        assertEquals(1, presentation.index)
+
+        control.setPlaying(true, 5)
+        advanceTimeBy(4_900)
+        assertEquals(1, presentation.index)
+        advanceTimeBy(200)
+        assertEquals(2, presentation.index)
+    }
+
+    @Test
+    fun withNoPaceChosenAPresentationPlayedByItselfGoesOnEveryEightSecondsPausedOrNot() = runTest {
+        val control = control
+        // "Only when I tap": nothing steps by itself until play is pressed.
+        control.begin(0)
+        control.step(-1)
+        advanceTimeBy(60_000)
+        assertEquals(0, presentation.index)
+
+        control.setPlaying(true, 0)
+        advanceTimeBy(7_900)
+        assertEquals(0, presentation.index)
+        advanceTimeBy(200)
+        assertEquals(1, presentation.index)
+
+        control.setPlaying(false, 0)
+        advanceTimeBy(60_000)
+        assertEquals(1, presentation.index)
+        control.setPlaying(true, 0)
+        advanceTimeBy(8_100)
+        assertEquals(2, presentation.index)
+    }
+
+    @Test
     fun aStepByHandKeepsThePaceThePresentationPlaysAt() = runTest {
         val control = control
         control.step(-1)

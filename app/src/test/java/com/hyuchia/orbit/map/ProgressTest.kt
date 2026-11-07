@@ -26,6 +26,39 @@ class ProgressTest {
 
     private fun MapProgress.ringed(nodes: List<MapNode>): List<String> = nodes.filter { ringByItself(it) }.map { it.id }
 
+    @Test
+    fun aStatusWithSpacesAroundItReadsTheSameEverywhere() {
+        val padded = toDo("beds", "garden", " done ")
+
+        // Done in the progress, the editor's and the menu's choice, and the details' words and dot, as on the map.
+        assertTrue(padded.isDone)
+        assertTrue(padded.hasStatus("done"))
+        assertTrue(padded.hasStatus("DONE"))
+        assertFalse(padded.hasStatus("todo"))
+        assertEquals("done", padded.shownStatus)
+        assertEquals(statusColor("done"), statusColor(" done "))
+
+        // Nothing but spaces is no status: the editor's None, no to-do, and nothing in the details.
+        val blank = toDo("seeds", "garden", "   ")
+        assertEquals(null, blank.shownStatus)
+        assertFalse(blank.isToDo)
+        assertEquals(null, statusColor("   "))
+    }
+
+    @Test
+    fun aStatusDotIsColoredAsTheMapColorsIt() {
+        // Orbit's own words for each tone, as its statusTone has them.
+        assertEquals(StatusTone.Active, statusTone(" WIP "))
+        assertEquals(StatusTone.Active, statusTone("in-progress"))
+        assertEquals(StatusTone.Done, statusTone("closed"))
+        assertEquals(StatusTone.Blocked, statusTone("failed"))
+        assertEquals(StatusTone.ToDo, statusTone("backlog"))
+        assertEquals(null, statusTone("primary key"))
+        assertEquals(statusColor("active"), statusColor("wip"))
+        assertEquals(statusColor("done"), statusColor("closed"))
+        assertEquals(statusColor("todo"), statusColor("open"))
+    }
+
     /** The map `web/rings.test.ts` draws: rings by themselves, and what keeps its look. */
     private val weekend = listOf(
         idea("weekend", null),

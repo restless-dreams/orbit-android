@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Configurações, sob a pasta dos mapas: os outros dispositivos que guardam os mapas nela -->
+    <string name="folder_devices_title">Dispositivos que usam esta pasta</string>
+    <string name="folder_devices_this_device">%1$s · este dispositivo</string>
+    <string name="folder_devices_version">Orbit %1$s</string>
+    <string name="folder_devices_synced_today">Orbit %1$s · sincronizado hoje</string>
+    <string name="folder_devices_synced">Orbit %1$s · sincronizado %2$s</string>
+    <string name="folder_devices_synced_on">Orbit %1$s · sincronizado em %2$s</string>
+    <string name="folder_devices_newer">Tem uma versão mais recente do Orbit que este dispositivo</string>
+    <string name="folder_devices_older">Tem uma versão mais antiga do Orbit que este dispositivo</string>
+    <string name="folder_devices_cannot_open">Não consegue abrir os arquivos %1$s desta pasta</string>
+    <string name="folder_devices_this_cannot_open">Este dispositivo não consegue abrir os arquivos %1$s que ele adiciona</string>
+    <string name="folder_devices_shows_only">Abre no modo somente leitura os mapas salvos por uma versão mais recente do Orbit</string>
+    <string name="folder_devices_saves_newer">Salva mapas que este dispositivo só consegue mostrar</string>
+    <plurals name="folder_devices_keeps_part">
+        <item quantity="one">Guarda só parte de %1$s: os arquivos com mais de %2$s, e o que passar de %3$s por mapa, ficam na pasta de lá. Atualize o Orbit lá para guardar o mapa inteiro</item>
+        <item quantity="many">Guarda só parte de %1$s: os arquivos com mais de %2$s, e o que passar de %3$s por mapa, ficam na pasta de lá. Atualize o Orbit lá para guardar os mapas inteiros</item>
+        <item quantity="other">Guarda só parte de %1$s: os arquivos com mais de %2$s, e o que passar de %3$s por mapa, ficam na pasta de lá. Atualize o Orbit lá para guardar os mapas inteiros</item>
+    </plurals>
+    <string name="folder_devices_note">Os dispositivos aparecem aqui quando sincronizam com esta versão do Orbit ou uma mais recente.</string>
+    <string name="folder_devices_only_this_one">Outros dispositivos que guardam os mapas nesta pasta aparecem aqui quando sincronizam com esta versão do Orbit ou uma mais recente.</string>
+
+    <!-- A tela inicial, uma vez, quando outro dispositivo da pasta importa para este -->
+    <string name="folder_notice_newer_title">“%1$s” tem uma versão mais recente do Orbit</string>
+    <string name="folder_notice_newer_files">Ele adiciona à sua pasta arquivos %1$s que este Orbit ainda não consegue abrir. Atualize o Orbit aqui para abrir tudo.</string>
+    <string name="folder_notice_newer_format">Ele salva mapas que este Orbit só consegue mostrar. Atualize o Orbit aqui para alterá-los aqui também.</string>
+    <string name="folder_notice_older_title">“%1$s” tem uma versão mais antiga do Orbit</string>
+    <string name="folder_notice_older_files">Ele não consegue abrir os arquivos %1$s da sua pasta, então mostra seus mapas sem eles. Atualize o Orbit lá para ver tudo.</string>
+    <string name="folder_notice_older_format">Ele abre no modo somente leitura os mapas que este dispositivo salva. Atualize o Orbit lá para alterá-los lá também.</string>
+</resources>

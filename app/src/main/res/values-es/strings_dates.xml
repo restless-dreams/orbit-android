@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="map_section_date">Fecha</string>
+    <string name="map_date_add">Agregar una fecha</string>
+    <string name="map_date_add_time">Agregar una hora</string>
+    <string name="map_date_remove">Quitar la fecha</string>
+    <string name="map_date_change">Cambiar la fecha</string>
+    <string name="map_date_change_time">Cambiar la hora</string>
+    <string name="map_date_time_title">Hora</string>
+    <string name="map_date_no_time">Sin hora</string>
+    <string name="map_date_time_label">Hora: %1$s</string>
+    <string name="map_date_label">Fecha: %1$s</string>
+    <string name="map_date_overdue_label">Vencida: %1$s</string>
+    <string name="map_date_overdue">Vencida</string>
+    <string name="map_date_reminds_at">Orbit te lo recuerda a las %1$s de ese día</string>
+    <string name="map_date_reminds_then">Orbit te lo recuerda a esa hora</string>
+    <string name="map_date_reminders_off">Los recordatorios están desactivados en Configuración</string>
+    <string name="map_date_notifications_off">Las notificaciones de Orbit están desactivadas, así que no puede recordártelo</string>
+    <string name="reminders_ask_title">¿Te lo recuerdo cuando llegue?</string>
+    <string name="reminders_ask_text">Orbit puede recordarte en este dispositivo cuando llegue la fecha de una idea. Para eso, permite sus notificaciones.</string>
+    <string name="reminders_ask_allow">Permitir</string>
+    <string name="reminders_ask_not_now">Ahora no</string>
+</resources>

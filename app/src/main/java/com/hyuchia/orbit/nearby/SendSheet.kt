@@ -73,7 +73,11 @@ import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.container
 import com.hyuchia.orbit.data.MediaSummary
+import com.hyuchia.orbit.data.OutputFailed
 import com.hyuchia.orbit.data.Uncleaned
+import com.hyuchia.orbit.data.readableSize
+import com.hyuchia.orbit.data.requireRoom
+import com.hyuchia.orbit.data.watched
 import com.hyuchia.orbit.present.QrCode
 import com.hyuchia.orbit.rememberWords
 import com.hyuchia.orbit.theme.LocalAppSettings
@@ -128,21 +132,34 @@ fun SendSheet(mapId: String, title: String, onDismiss: () -> Unit) {
     val uncleaned by produceState(Uncleaned(), mapId) { value = container.maps.uncleaned(mapId) }
     val media by produceState(MediaSummary(), mapId, uncleaned, chosen) { value = container.maps.mediaSummary(mapId, leavingOut = uncleaned.names - chosen) }
     val keptInFolder = LocalAppSettings.current.syncFolder != null
+    val pastOlderZips by produceState(false, mapId) { value = container.maps.pastOlderZips(mapId) }
 
     /** Sends the map to `device`, with those of its files that can't go clean in `names` as they are. */
     fun sendTo(device: NearbyDevice, names: Set<String>) {
         val address = device.address
 
         scope.launch {
-            // The map goes from a file, so even a big one is never in memory whole.
+            // The map goes from a file, so even a big one is never in memory whole: made only once there's room for all of it.
             val bundle = try {
                 withContext(Dispatchers.IO) {
                     val folder = File(context.cacheDir, "sending")
                     folder.mkdirs()
                     // Left by a send that never finished, when Orbit was stopped halfway.
                     folder.listFiles().orEmpty().filter { it.lastModified() < System.currentTimeMillis() - STALE_MILLISECONDS }.forEach { it.delete() }
-                    File.createTempFile("map", ".zip", folder).also { file -> file.outputStream().use { container.maps.writeZip(mapId, it, names) } }
+                    val file = File.createTempFile("map", ".zip", folder)
+
+                    try {
+                        file.outputStream().watched().use { container.maps.writeZip(mapId, it, names) { size -> requireRoom(folder, size) } }
+                    } catch (failed: IOException) {
+                        file.delete()
+                        throw failed
+                    }
+
+                    file
                 }
+            } catch (full: OutputFailed) {
+                states[address] = SendState.Failed(R.string.nearby_send_no_room_here)
+                return@launch
             } catch (failed: IOException) {
                 states[address] = SendState.Failed(R.string.nearby_send_could_not_get_the_map_ready)
                 return@launch
@@ -300,6 +317,11 @@ fun SendSheet(mapId: String, title: String, onDismiss: () -> Unit) {
                                 Column {
                                     Text(stringResource(R.string.nearby_share_as_a_file_description))
                                     MediaWords.with(media, words)?.let { WhatGoes(it, Icons.Outlined.AttachFile, goes = true, Modifier.padding(top = 4.dp)) }
+
+                                    // A zip past what older versions of Orbit open says to update Orbit wherever it's opened.
+                                    if (pastOlderZips) {
+                                        WhatGoes(stringResource(R.string.sharing_zip_past_older_orbits), Icons.Outlined.SystemUpdate, goes = false, Modifier.padding(top = 4.dp))
+                                    }
                                 }
                             }
                         },
@@ -313,7 +335,7 @@ fun SendSheet(mapId: String, title: String, onDismiss: () -> Unit) {
                                     // The zip waits in the phone's storage for the app it goes to, and the phone may be out of room.
                                     // A private map that locks while it's written opens nothing.
                                     try {
-                                        shareMapExport(context, mapId, exportName(context, title, "zip"), "application/zip", title) { container.maps.writeZip(mapId, it, names) }
+                                        shareMapExport(context, mapId, exportName(context, title, "zip"), "application/zip", title) { container.maps.writeZip(mapId, it, names, room = this) }
                                     } catch (failed: IOException) {
                                         sharingFailed = true
                                     }
@@ -389,6 +411,7 @@ private fun describe(state: SendState?): AnnotatedString? = when (state) {
     SendState.Declined -> AnnotatedString(stringResource(R.string.nearby_not_taken))
     SendState.Cancelled -> AnnotatedString(stringResource(R.string.nearby_not_sent))
     is SendState.Failed -> AnnotatedString(stringResource(state.reason))
+    is SendState.TooBigThere -> AnnotatedString(stringResource(R.string.nearby_send_update_for_size, readableSize(state.size, rememberWords())))
 }
 
 /**

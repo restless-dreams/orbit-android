@@ -34,6 +34,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import androidx.navigationevent.findViewTreeNavigationEventDispatcherOwner
+import com.hyuchia.orbit.privacy.privateWindowPolicy
 import com.hyuchia.orbit.theme.OrbitTheme
 import com.hyuchia.orbit.ui.EscapeCloses
 import kotlinx.coroutines.CancellationException
@@ -111,6 +112,8 @@ fun FullScreenWindow(
         properties = DialogProperties(
             dismissOnBackPress = false,
             dismissOnClickOutside = false,
+            // A private map's pictures stay out of Recents and screenshots as the map does, whenever they come up.
+            securePolicy = privateWindowPolicy(),
             usePlatformDefaultWidth = false,
             decorFitsSystemWindows = false,
         ),
@@ -156,7 +159,8 @@ fun FullScreenWindow(
 
             LaunchedEffect(Unit) { state.hidden.animateTo(0f, tween(SHOW_MILLISECONDS)) }
 
-            EscapeCloses {
+            // The window takes the keys: the shortcuts of the screens under it don't reach through it.
+            EscapeCloses(shortcuts = false) {
                 if (onEscape != null) {
                     onEscape(state)
                 } else {

@@ -23,6 +23,12 @@
         <item quantity="many">Se agregaron %1$d ideas a %2$s</item>
         <item quantity="other">Se agregaron %1$d ideas a %2$s</item>
     </plurals>
+    <string name="capture_added_idea_to_locked_map">Se agregó tu idea</string>
+    <plurals name="capture_added_ideas_to_locked_map">
+        <item quantity="one">Se agregó %d idea</item>
+        <item quantity="many">Se agregaron %d ideas</item>
+        <item quantity="other">Se agregaron %d ideas</item>
+    </plurals>
     <string name="capture_problem">Orbit no pudo agregar nada a %1$s. Tus ideas siguen aquí.</string>
     <string name="capture_problem_with_reason">Orbit no pudo agregar nada a %1$s. %2$s. Tus ideas siguen aquí.</string>
     <string name="capture_problem_refused">Orbit no pudo agregar nada a %1$s porque el mapa no se puede cambiar en este dispositivo. Tus ideas siguen aquí.</string>

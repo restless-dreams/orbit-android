@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="reminders_channel">Recordatorios</string>
+    <string name="reminders_channel_description">Cuando llega la fecha de una idea</string>
+    <string name="reminders_from_a_private_map">Un recordatorio de un mapa privado</string>
+    <string name="reminders_a_reminder">Un recordatorio</string>
+    <string name="settings_reminders_heading">Recordatorios</string>
+    <string name="settings_reminders">Recordarme las fechas de las ideas</string>
+    <string name="settings_reminders_description">En este dispositivo, a la hora de la idea, o a las %1$s de su día. El recordatorio de un mapa privado solo dice que es de un mapa privado.</string>
+    <string name="settings_reminders_notifications_off">Las notificaciones de Orbit están desactivadas</string>
+    <string name="settings_reminders_notifications_off_description">Los recordatorios no pueden aparecer hasta que Orbit pueda mostrar notificaciones.</string>
+</resources>

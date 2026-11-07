@@ -71,6 +71,9 @@ class PrivateMaps(
      */
     val showing: Flow<Boolean> = screens.map { it > 0 }.distinctUntilChanged()
 
+    /** Whether something private is on screen right now (see [showing]). */
+    val showingNow: Boolean get() = screens.value > 0
+
     /** A screen started showing something private; [hidden] when it stops. */
     internal fun shown() {
         screens.update { it + 1 }

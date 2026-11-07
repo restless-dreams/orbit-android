@@ -2,6 +2,8 @@ package com.hyuchia.orbit
 
 import android.net.Uri
 import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -15,9 +17,11 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.WindowAdaptiveInfo
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.layout.PaneScaffoldDirective
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
+import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirectiveWithTwoPanesOnMediumWidth
 import androidx.compose.material3.adaptive.navigation.BackNavigationBehavior
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
 import androidx.compose.material3.adaptive.navigation3.rememberListDetailSceneStrategy
@@ -46,6 +50,7 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
+import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
 import androidx.window.core.layout.WindowSizeClass
 import com.hyuchia.orbit.data.ImportResult
@@ -64,6 +69,7 @@ import com.hyuchia.orbit.privacy.WhenPrivateMapsLock
 import com.hyuchia.orbit.privacy.conceals
 import com.hyuchia.orbit.privacy.mentionedAlreadyHere
 import com.hyuchia.orbit.privacy.mentionedFilledIn
+import com.hyuchia.orbit.reminders.IdeaToShow
 import com.hyuchia.orbit.settings.AboutScreen
 import com.hyuchia.orbit.settings.LicensesScreen
 import com.hyuchia.orbit.settings.PrivacyScreen
@@ -71,6 +77,7 @@ import com.hyuchia.orbit.settings.SettingsScreen
 import com.hyuchia.orbit.settings.TrashScreen
 import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.ui.EscapeCloses
+import com.hyuchia.orbit.ui.MinimumMapWidth
 import com.hyuchia.orbit.ui.ShortScreen
 import com.hyuchia.orbit.ui.WideScreen
 import com.hyuchia.orbit.ui.orbitViewModel
@@ -191,17 +198,56 @@ data class OtherVersions(val waiting: List<OtherVersion> = emptyList(), val answ
 
 /** What shortcuts and other apps ask Orbit to do. */
 sealed interface AppRequest {
-    /** A map to open: `ownMark` when the intent came from Orbit's own shortcut or widget ([OpenMark]). */
-    data class OpenMap(val id: String, val ownMark: Boolean = true) : AppRequest
+    /**
+     * A map to open: `ownMark` when the intent came from Orbit's own shortcut,
+     * widget or reminder ([OpenMark]), and a reminder's `idea` to show there.
+     */
+    data class OpenMap(val id: String, val ownMark: Boolean = true, val idea: IdeaToShow? = null) : AppRequest
 
     data object NewMap : AppRequest
     data class ImportFile(val uri: Uri) : AppRequest
     data class ImportText(val text: String, val subject: String?) : AppRequest
+
+    /** Files of any kind shared to Orbit, to join an idea: the one in focus on the map that's open, or a new map's. */
+    data class AttachFiles(val uris: List<Uri>) : AppRequest
 }
 
 /** Whether a window has room for the list beside a map one way up or the other, as a tablet's does and a phone's doesn't. */
 internal fun roomForTwoPanes(window: DpSize): Boolean =
     maxOf(window.width, window.height) >= WideScreen && minOf(window.width, window.height) >= ShortScreen
+
+/**
+ * How Home's list and the map share `window`: side by side on a tablet,
+ * whichever way up it is, and one at a time on a phone, in a window too short
+ * for both (a phone on its side), and while the map wants the room
+ * (`mapWantsRoom`).
+ *
+ * Android's own directive has two panes from an expanded width, a tablet's on
+ * its side: upright, a tablet is only medium width, and the list would step
+ * aside there for good. On a tablet, two panes start at a medium width, as
+ * long as the map keeps a phone's width beside the list ([MinimumMapWidth]):
+ * a small tablet upright shows the map on its own.
+ */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+internal fun listAndMapDirective(adaptiveInfo: WindowAdaptiveInfo, window: DpSize, mapWantsRoom: Boolean): PaneScaffoldDirective {
+    val upright = calculatePaneScaffoldDirectiveWithTwoPanesOnMediumWidth(adaptiveInfo)
+    val roomBesideList = window.width - upright.defaultPanePreferredWidth - upright.horizontalPartitionSpacerSize >= MinimumMapWidth
+    val calculated = if (roomForTwoPanes(window) && roomBesideList) upright else calculatePaneScaffoldDirective(adaptiveInfo)
+    // A window too short for the list beside a map, such as a phone on its side, shows one pane at a time.
+    val short = !adaptiveInfo.windowSizeClass.isHeightAtLeastBreakpoint(WindowSizeClass.HEIGHT_DP_MEDIUM_LOWER_BOUND)
+
+    return PaneScaffoldDirective(
+        maxHorizontalPartitions = if (short || mapWantsRoom) 1 else calculated.maxHorizontalPartitions,
+        horizontalPartitionSpacerSize = calculated.horizontalPartitionSpacerSize,
+        maxVerticalPartitions = calculated.maxVerticalPartitions,
+        verticalPartitionSpacerSize = calculated.verticalPartitionSpacerSize,
+        defaultPanePreferredWidth = calculated.defaultPanePreferredWidth,
+        defaultPanePreferredHeight = calculated.defaultPanePreferredHeight,
+        excludedBounds = calculated.excludedBounds,
+        // Focus moving into a pane as it opens lands on the search field, and the keyboard comes up unasked.
+        shouldAutoFocusCurrentDestination = false,
+    )
+}
 
 /**
  * How Home's list and the map share a window with room for both (`directive`).
@@ -211,7 +257,11 @@ internal fun roomForTwoPanes(window: DpSize): Boolean =
  * resizes it. In a scene of its own when upright, it moved from one scene to
  * the other in the middle of every turn's transition, and Compose measured
  * its focused search field while it moved, and threw. A map on its own still
- * gets a scene of its own, so it grows out of Home and shrinks back.
+ * gets a scene of its own, so it grows out of Home and shrinks back, unless
+ * it's on its own only for wanting the whole window (`listFits`, for a
+ * sketch or a panel beside it): it stays in this scene then, its pane
+ * growing over the list's and shrinking back. Moved to a scene of its own
+ * and back, its page was drawn blank, and the window white, for a moment.
  *
  * Back goes back until the panes change, the scaffold's own way, which
  * leaves it to the map beside the list ([listBesideMap]): closing the map
@@ -225,15 +275,31 @@ internal fun roomForTwoPanes(window: DpSize): Boolean =
  */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
-internal fun <T : Any> rememberListDetailScenes(homeOnTop: Boolean, roomForTwo: Boolean, directive: PaneScaffoldDirective): ListDetailSceneStrategy<T> =
+internal fun <T : Any> rememberListDetailScenes(homeOnTop: Boolean, roomForTwo: Boolean, listFits: Boolean, directive: PaneScaffoldDirective): ListDetailSceneStrategy<T> =
     rememberListDetailSceneStrategy(
-        shouldHandleSinglePaneLayout = roomForTwo && homeOnTop,
+        shouldHandleSinglePaneLayout = roomForTwo && (homeOnTop || listFits),
         backNavigationBehavior = BackNavigationBehavior.PopUntilScaffoldValueChange,
         directive = directive,
     )
 
 /** Whether the list shows beside the map the window has room for (`directive`): on a tablet, unless the map wants the room. */
 internal fun listBesideMap(directive: PaneScaffoldDirective): Boolean = directive.maxHorizontalPartitions >= 2
+
+/**
+ * Whether a change of scene keeps the same screen in front, as when a map on
+ * a tablet takes the whole window from the list beside it, for a sketch or a
+ * panel, and when it gives the list its room back: no step forward or back.
+ */
+internal fun showsSameScreen(initial: Scene<*>, target: Scene<*>): Boolean =
+    initial.entries.lastOrNull()?.contentKey == target.entries.lastOrNull()?.contentKey
+
+/**
+ * The same screen in a new scene shows there at once. Its content moves
+ * there as the scene changes, so fading the new scene in, a moment after the
+ * old one began fading out, showed the window's bare background between them
+ * for a fraction of a second, white across the whole window.
+ */
+private fun inPlace(): ContentTransform = ContentTransform(EnterTransition.None, ExitTransition.None)
 
 /** Screens step forward by growing out of the one before, and back by shrinking into it. */
 private fun forward(): ContentTransform =
@@ -260,24 +326,11 @@ fun OrbitApp(requests: Flow<AppRequest>) {
     // A map with a panel beside it, its text or a presentation open takes the whole window: the list steps aside.
     var mapWantsRoom by remember { mutableStateOf(false) }
     val adaptiveInfo = currentWindowAdaptiveInfo()
-    val roomForTwo = roomForTwoPanes(LocalWindowInfo.current.containerDpSize)
-
-    val directive = remember(adaptiveInfo, mapWantsRoom) {
-        // A window too short for the list beside a map, such as a phone on its side, shows one pane at a time.
-        val short = !adaptiveInfo.windowSizeClass.isHeightAtLeastBreakpoint(WindowSizeClass.HEIGHT_DP_MEDIUM_LOWER_BOUND)
-        val calculated = calculatePaneScaffoldDirective(adaptiveInfo)
-        PaneScaffoldDirective(
-            maxHorizontalPartitions = if (short || mapWantsRoom) 1 else calculated.maxHorizontalPartitions,
-            horizontalPartitionSpacerSize = calculated.horizontalPartitionSpacerSize,
-            maxVerticalPartitions = calculated.maxVerticalPartitions,
-            verticalPartitionSpacerSize = calculated.verticalPartitionSpacerSize,
-            defaultPanePreferredWidth = calculated.defaultPanePreferredWidth,
-            defaultPanePreferredHeight = calculated.defaultPanePreferredHeight,
-            excludedBounds = calculated.excludedBounds,
-            // Focus moving into a pane as it opens lands on the search field, and the keyboard comes up unasked.
-            shouldAutoFocusCurrentDestination = false,
-        )
-    }
+    val window = LocalWindowInfo.current.containerDpSize
+    val roomForTwo = roomForTwoPanes(window)
+    val directive = remember(adaptiveInfo, window, mapWantsRoom) { listAndMapDirective(adaptiveInfo, window, mapWantsRoom) }
+    // Whether the list has room beside a map that doesn't want the whole window.
+    val listFits = remember(adaptiveInfo, window) { listBesideMap(listAndMapDirective(adaptiveInfo, window, mapWantsRoom = false)) }
 
     // A presentation or a study session a map's card asked of the map open beside the list, until that map starts it.
     var mapStart by remember { mutableStateOf<MapStart?>(null) }
@@ -370,6 +423,7 @@ fun OrbitApp(requests: Flow<AppRequest>) {
         requests.collect { request ->
             when (request) {
                 is AppRequest.OpenMap -> if (container.maps.exists(request.id) && (request.ownMark || !hiddenPrivate(request.id))) {
+                    container.ideaToShow.value = request.idea
                     openMap(request.id)
                 }
                 AppRequest.NewMap -> if (backStack.lastOrNull() != NewMapKey) {
@@ -377,6 +431,16 @@ fun OrbitApp(requests: Flow<AppRequest>) {
                 }
                 is AppRequest.ImportFile -> scope.launch { imported(container.importer.importFile(request.uri, context.contentResolver)) }
                 is AppRequest.ImportText -> scope.launch { imported(container.importer.importShared(request.text, request.subject)) }
+                is AppRequest.AttachFiles -> {
+                    // The map that's open takes them, into its idea in focus, unless it's locked: a new map holds them then.
+                    val open = (backStack.lastOrNull() as? MapKey)?.id?.takeIf { container.maps.exists(it) && !container.privateMaps.hidesNow(it) }
+
+                    if (open != null) {
+                        container.sharedFiles.tryEmit(SharedFiles(open, request.uris))
+                    } else {
+                        scope.launch { imported(container.importer.newMapWithFiles(request.uris, context.contentResolver)) }
+                    }
+                }
             }
         }
     }
@@ -388,10 +452,10 @@ fun OrbitApp(requests: Flow<AppRequest>) {
             rememberSaveableStateHolderNavEntryDecorator(),
             rememberViewModelStoreNavEntryDecorator(),
         ),
-        sceneStrategies = listOf(rememberListDetailScenes(homeOnTop = backStack.lastOrNull() == HomeKey, roomForTwo = roomForTwo, directive = directive)),
-        transitionSpec = { forward() },
-        popTransitionSpec = { backward() },
-        predictivePopTransitionSpec = { backward() },
+        sceneStrategies = listOf(rememberListDetailScenes(homeOnTop = backStack.lastOrNull() == HomeKey, roomForTwo = roomForTwo, listFits = listFits, directive = directive)),
+        transitionSpec = { if (showsSameScreen(initialState, targetState)) inPlace() else forward() },
+        popTransitionSpec = { if (showsSameScreen(initialState, targetState)) inPlace() else backward() },
+        predictivePopTransitionSpec = { if (showsSameScreen(initialState, targetState)) inPlace() else backward() },
         entryProvider = entryProvider {
             entry<HomeKey>(metadata = ListDetailSceneStrategy.listPane(detailPlaceholder = { MapPlaceholder() })) {
                 HomeScreen(
@@ -548,7 +612,10 @@ fun OrbitApp(requests: Flow<AppRequest>) {
 
             otherVersions = otherVersions.after(question)
 
-            if (answer != Arrival.Decline) {
+            if (answer == Arrival.Decline) {
+                // What the zip unpacked to goes now: a map's can come to a gigabyte.
+                container.maps.discard(arrival.bundle)
+            } else {
                 scope.launch {
                     try {
                         val replacing = if (answer == Arrival.KeepBoth) null else arrival.existing

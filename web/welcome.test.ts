@@ -10,6 +10,7 @@ const media = join(assets, 'welcome');
 const languages = [
   { name: 'English', folder: assets },
   { name: 'Spanish', folder: join(assets, 'es') },
+  { name: 'Portuguese', folder: join(assets, 'pt') },
 ];
 
 const welcome = (folder: string) => {

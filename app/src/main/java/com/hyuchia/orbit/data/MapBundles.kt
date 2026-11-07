@@ -44,8 +44,19 @@ internal const val EXPORT_FORMAT = 1
 /** The most files a zip of one map may hold: its text, its details and its pictures. */
 private const val BUNDLE_ENTRIES = 4_000
 
-/** The most a zip of one map may unpack to, its files together: it's read into memory. */
-internal const val BUNDLE_SIZE = 96L * 1024 * 1024
+/**
+ * The most a zip of one map may unpack to, its files together: all a map's
+ * pictures, videos and sounds may come to ([MAP_MEDIA_LIMIT]), with its
+ * text and the rest. It's unpacked to files as it's read, never into
+ * memory, and only while there's room for it ([readBundle]).
+ */
+internal const val BUNDLE_SIZE = MAP_MEDIA_LIMIT + 64L * 1024 * 1024
+
+/** The most a zip of one map may unpack to in Orbit 0.4.0, and every release before it: they refuse a bigger one. */
+internal const val BUNDLE_SIZE_UP_TO_0_4_0 = 96L * 1024 * 1024
+
+/** The most a zip's entry takes besides its file: its headers, its name twice, and what a cleaned picture may gain. */
+private const val ZIP_ENTRY_ROOM = 4L * 1024
 
 /** The most files a zip of every map may hold. */
 private const val ARCHIVE_ENTRIES = 200_000
@@ -80,9 +91,10 @@ class MapBundle(
     val title: String,
 
     /**
-     * Its pictures and videos, by name: files they were unpacked to as the zip was read, never
-     * memory, since a map's can come to nearly a hundred megabytes. [MapRepository.receive] moves
-     * them into the map, and files a bundle that's never taken in leaves are cleared later.
+     * Its pictures, videos and sounds, by name: files they were unpacked to as the zip was read,
+     * never memory, since a map's can come to a gigabyte. [MapRepository.receive] moves them into
+     * the map, and [MapBundles.discard] lets go of them when it's not taken in; files a bundle
+     * that's never answered leaves are cleared later.
      */
     val pictures: Map<String, File>,
 
@@ -180,19 +192,25 @@ internal class MapBundles(
      * [OutgoingMedia] makes them, without what their files say beyond them;
      * one Orbit can't read through stays out, unless it's one of `asTheyAre`,
      * which the person sharing chose to share as they are ([Uncleaned]).
+     * Each file is written as it's read, never whole in memory. `room` hears
+     * the most the zip may come to before any of it is written, and throws
+     * when its storage hasn't room for it ([requireRoom]).
      */
-    suspend fun writeZip(id: String, output: OutputStream, asTheyAre: Set<String> = emptySet()) = withContext(Dispatchers.IO) {
+    suspend fun writeZip(id: String, output: OutputStream, asTheyAre: Set<String> = emptySet(), room: (Long) -> Unit = {}) = withContext(Dispatchers.IO) {
         val folder = folder(id)
         val metadata = readMetadata(folder)
         val info = BundleInfo(uuid = identity(id), focus = metadata.focus, view = metadata.view, path = metadata.path, bundle = BUNDLE_FORMAT, compatible = 1, app = BuildConfig.VERSION_NAME)
         val text = File(folder, MAP_FILE).readBytes()
+        val media = mediaFiles(folder, decodeText(text))
+        // Each file as big as it is (a cleaned one is no bigger, but for a picture's orientation), its entry's headers, and the rest.
+        room(text.size + media.sumOf { it.length() + ZIP_ENTRY_ROOM } + 2 * ZIP_ENTRY_ROOM)
 
         ZipOutputStream(output).use { zip ->
             zip.putNextEntry(ZipEntry(MAP_FILE))
             zip.write(text)
             zip.closeEntry()
 
-            mediaFiles(folder, decodeText(text)).forEach { file ->
+            media.forEach { file ->
                 val outgoing = OutgoingMedia.of(file, asTheyAre) ?: return@forEach
                 zip.putNextEntry(ZipEntry("$MEDIA_DIRECTORY/${file.name}"))
                 outgoing.writeTo(zip)
@@ -249,9 +267,51 @@ internal class MapBundles(
      * `map.md`, or else its only other markdown file. Without `withPictures`
      * the pictures are only counted, to show what's coming before it's taken
      * in. A zip that unpacks to more than a map holds, or whose files point
-     * outside it, is refused with an [IOException].
+     * outside it, is refused with an [IOException]. Its pictures, videos and
+     * sounds are unpacked to files as they're read, a piece at a time, while
+     * `room` says there's room for them and some to spare ([ROOM_LEFT_FREE]);
+     * once there isn't, it's refused. Whatever stops it leaves none of them.
      */
-    suspend fun readBundle(input: InputStream, withPictures: Boolean = true): MapBundle? = withContext(Dispatchers.IO) {
+    suspend fun readBundle(input: InputStream, withPictures: Boolean = true, room: () -> Long = ::roomToUnpack): MapBundle? = withContext(Dispatchers.IO) {
+        val unpacked = File(unpacking, UUID.randomUUID().toString())
+        var bundle: MapBundle? = null
+
+        val checkRoom = {
+            if (room() < ROOM_LEFT_FREE) {
+                throw NoRoomForZipException(words.string(R.string.data_no_room_left_for_zip_map))
+            }
+        }
+
+        try {
+            // A storage already full takes none of it, a map's text alone included.
+            checkRoom()
+            bundle = unpackBundle(input, withPictures, unpacked, checkRoom)
+            bundle
+        } finally {
+            // A zip refused, cut short or without a map leaves nothing unpacked behind.
+            if (bundle == null) {
+                unpacked.deleteRecursively()
+            }
+        }
+    }
+
+    /** The room left where zips are unpacked: the folder is made first, since one that isn't there has none. */
+    private fun roomToUnpack(): Long {
+        unpacking.mkdirs()
+        return unpacking.usableSpace
+    }
+
+    /**
+     * Lets go of a bundle that isn't taken in, as when its map was declined:
+     * the files it was unpacked to go now, rather than at the next start.
+     */
+    fun discard(bundle: MapBundle) {
+        bundle.pictures.values.forEach { it.delete() }
+        bundle.pictures.values.mapNotNullTo(HashSet()) { it.parentFile }.forEach { it.delete() }
+    }
+
+    /** Reads a zip as [readBundle] does, unpacking its files into `unpacked` while `checkRoom` doesn't throw. */
+    private fun unpackBundle(input: InputStream, withPictures: Boolean, unpacked: File, checkRoom: () -> Unit): MapBundle? {
         val pictures = mutableMapOf<String, File>()
         val pictureNames = mutableSetOf<String>()
         val pictureSizes = mutableMapOf<String, Long>()
@@ -259,7 +319,6 @@ internal class MapBundles(
         var info = BundleInfo()
         var leftOut = 0
         val budget = ZipBudget(BUNDLE_ENTRIES, BUNDLE_SIZE, words)
-        val unpacked = File(unpacking, UUID.randomUUID().toString())
 
         ZipInputStream(input).use { zip ->
             while (true) {
@@ -271,14 +330,15 @@ internal class MapBundles(
                     entry.isDirectory || name.startsWith(".") -> zip.skipEntry(budget)
                     entry.name == BUNDLE_INFO -> info = bundleInfoOf(zip.readLimited(budget, ZIP_TEXT_LIMIT).decodeToString())
                     entry.name.endsWith(".md") -> texts[entry.name] = decodeText(zip.readLimited(budget, ZIP_TEXT_LIMIT))
-                    entry.name.contains("$MEDIA_DIRECTORY/") && isMediaName(name) -> {
+                    // Its ideas' files are of any kind: one with a safe name comes in, and stays once the map's text names it ([fileNamesIn]).
+                    entry.name.contains("$MEDIA_DIRECTORY/") && MediaNames.NAME.matches(name) -> {
                         pictureNames += name
 
                         if (withPictures) {
                             val file = fileInside(unpacked, name, words)
                             unpacked.mkdirs()
 
-                            FileOutputStream(file).use { output -> zip.copyLimited(output, budget) }
+                            FileOutputStream(file).use { output -> zip.copyLimited(output, budget, checkRoom = checkRoom) }
                             pictures[name] = file
                             pictureSizes[name] = file.length()
                         } else {
@@ -300,17 +360,38 @@ internal class MapBundles(
 
         // A zip a newer Orbit says this one would misread is refused, before any of it is taken in.
         if ((info.compatible ?: 1) > BUNDLE_FORMAT) {
-            unpacked.deleteRecursively()
             throw RefusedZipException(words.string(R.string.data_zip_from_newer_orbit))
         }
 
         val markdown = texts[MAP_FILE] ?: texts.entries.firstOrNull { it.key.endsWith("/$MAP_FILE") }?.value ?: texts.values.singleOrNull()
 
-        markdown?.let {
-            val media = MediaSummary.of(pictureSizes, audio = soundNamesIn(it).toSet())
+        // A file of a kind this version doesn't know that the map's ideas don't hold stays out, and the import says so.
+        val files = markdown?.let(::fileNamesIn).orEmpty()
+
+        for (name in pictureNames.filterNot { isCarriedName(it, files) }) {
+            pictures.remove(name)?.delete()
+            pictureSizes.remove(name)
+            leftOut += 1
+        }
+
+        return markdown?.let {
+            val media = MediaSummary.of(pictureSizes, audio = soundNamesIn(it).toSet(), ideaFiles = files.toSet())
             MapBundle(it, MapText.outline(it, words).title, pictures, info.uuid, info.focus, info.view, info.path, media, leftOut)
         }
     }
+
+    /**
+     * Why a zip of `size` bytes, a map's, can't be unpacked here, or null
+     * when there's room for it: its pictures, videos and sounds come to about
+     * as much unpacked as in the zip, since they're compressed already. Said
+     * before any of it is read; [readBundle] still looks as it unpacks.
+     */
+    fun noRoomForBundle(size: Long, room: Long = roomToUnpack()): String? =
+        if (room > 0 && room < size + ROOM_LEFT_FREE) {
+            words.string(R.string.data_no_room_for_zip_map, readableSize(size, words), readableSize(maxOf(room - ROOM_LEFT_FREE, 0L), words))
+        } else {
+            null
+        }
 
     /**
      * Whether a zip holds maps a folder each, as [exportAll] writes them
@@ -554,10 +635,14 @@ internal class MapBundles(
                     val id = newFolder(MapText.outline(markdown, words).title)
 
                     val folder = settle(id) { staging ->
+                        // Details this version can't read at all are kept aside as they're written afresh, as any map's are ([writeMetadata]).
+                        File(map, METADATA_FILE).takeIf { it.isFile }?.let { moveFile(it, File(staging, METADATA_FILE)) }
                         // Its file in a folder belongs to the device it was kept on. Private, when it is, from its first file on.
                         writeMetadata(staging, metadata.copy(uuid = metadata.uuid?.takeIf { here == null } ?: UUID.randomUUID().toString(), sync = null))
                         writeAtomically(File(staging, MAP_FILE), markdown)
                         moveFiles(File(map, MEDIA_DIRECTORY), File(staging, MEDIA_DIRECTORY))
+                        // And those an earlier version kept aside come along as they were.
+                        moveFiles(map, staging) { UNREADABLE_METADATA.matches(it.name) }
                     }
 
                     moveFiles(File(map, HISTORY_DIRECTORY), File(historyDirectory, id))
@@ -574,8 +659,8 @@ internal class MapBundles(
 
     /**
      * Unpacks a zip of maps into `into`: a numbered folder for each map, in
-     * the order they come, with only what a map has (its text, details,
-     * pictures and versions). Returns the folders.
+     * the order they come, with only what a map has (its text, details and
+     * those kept aside unread, pictures and versions). Returns the folders.
      */
     private fun unpackMaps(input: InputStream, into: File): Pair<List<File>, Int> {
         val folders = linkedMapOf<String, File>()
@@ -601,8 +686,9 @@ internal class MapBundles(
                 }
 
                 val wanted = !entry.isDirectory && parts.size in 2..3 && isMapFolder(parts[0]) && when {
-                    parts.size == 2 -> parts[1] == MAP_FILE || parts[1] == METADATA_FILE
-                    parts[1] == MEDIA_DIRECTORY -> isMediaName(parts[2])
+                    parts.size == 2 -> parts[1] == MAP_FILE || parts[1] == METADATA_FILE || UNREADABLE_METADATA.matches(parts[1])
+                    // Its ideas' files are of any kind: one with a safe name comes in, and stays once its map's text names it.
+                    parts[1] == MEDIA_DIRECTORY -> MediaNames.NAME.matches(parts[2])
                     parts[1] == HISTORY_DIRECTORY -> VERSION_NAME.matches(parts[2]) || parts[2] == REASONS_FILE
                     else -> false
                 }
@@ -617,18 +703,32 @@ internal class MapBundles(
                     continue
                 }
 
-                if (into.usableSpace < SPARE_ROOM) {
-                    throw RefusedZipException(words.string(R.string.data_no_room_for_zip_maps))
-                }
-
                 val folder = folders.getOrPut(parts[0]) { File(into, folders.size.toString()) }
                 val file = fileInside(folder, parts.drop(1).joinToString("/"), words)
                 file.parentFile?.mkdirs()
 
                 FileOutputStream(file).use { output ->
-                    zip.copyLimited(output, budget, if (parts[1] == MEDIA_DIRECTORY) ZIP_ENTRY_LIMIT else ZIP_TEXT_LIMIT)
+                    // Each file a piece at a time, while the device has room for it and some to spare.
+                    zip.copyLimited(output, budget, if (parts[1] == MEDIA_DIRECTORY) ZIP_ENTRY_LIMIT else ZIP_TEXT_LIMIT) {
+                        if (into.usableSpace < SPARE_ROOM) {
+                            throw NoRoomForZipException(words.string(R.string.data_no_room_for_zip_maps))
+                        }
+                    }
+
                     output.flush()
                     output.fd.sync()
+                }
+            }
+        }
+
+        // A file of a kind this version doesn't know stays out, unless its map's ideas hold it, or Orbit named it as one of theirs.
+        for (folder in folders.values) {
+            val files = File(folder, MAP_FILE).takeIf { it.isFile }?.let { runCatching { fileNamesIn(it.readTextSafely()) }.getOrNull() }.orEmpty()
+
+            for (file in File(folder, MEDIA_DIRECTORY).listFiles().orEmpty()) {
+                if (!isCarriedName(file.name, files) && !isIdeaFileName(file.name)) {
+                    file.delete()
+                    leftOut += 1
                 }
             }
         }
@@ -638,11 +738,13 @@ internal class MapBundles(
 
     /**
      * Brings into map `id` what a copy of it from a zip (`from`) has and it
-     * hasn't: its pictures, videos and sounds, and its versions with why
-     * they were kept. Nothing the map has changes: the same name is the same
-     * file. Returns how many files came in.
+     * hasn't: its pictures, videos and sounds, its versions with why they
+     * were kept, and details kept aside unread. Nothing the map has changes:
+     * the same name is the same file. Returns how many pictures, videos,
+     * sounds and versions came in.
      */
     private fun fillIn(id: String, from: File): Int {
+        moveFiles(from, folder(id)) { UNREADABLE_METADATA.matches(it.name) && !File(folder(id), it.name).exists() }
         val media = File(folder(id), MEDIA_DIRECTORY)
         val history = File(historyDirectory, id)
         val incomingHistory = File(from, HISTORY_DIRECTORY)
@@ -653,10 +755,13 @@ internal class MapBundles(
             .filterNot { File(history, it.name).exists() }
 
         missingMedia.forEach { file -> moveFile(file, File(media, file.name)) }
+        mediaArrived(id, missingMedia.mapTo(HashSet()) { it.name })
+        missingVersions.forEach { file -> moveFile(file, File(history, file.name)) }
+        // Why each was kept, as it was written: what a newer version wrote of it stays, read here or not.
+        val entries = missingVersions.mapNotNull { file -> reasons[file.name]?.let { file.name to it } }.toMap()
 
-        missingVersions.forEach { file ->
-            moveFile(file, File(history, file.name))
-            (reasons[file.name] as? JsonObject)?.let(VersionReason::read)?.let { histories.recordReason(history, file.name, it) }
+        if (entries.isNotEmpty()) {
+            histories.recordReasons(history, entries)
         }
 
         return missingMedia.size + missingVersions.size
@@ -671,23 +776,9 @@ internal class MapBundles(
         }
     }
 
-    /** Moves the files in `from` into `to`, copying the ones that can't simply be renamed. */
-    private fun moveFiles(from: File, to: File) {
-        val files = from.listFiles { file -> file.isFile }.orEmpty()
-
-        if (files.isEmpty()) {
-            return
-        }
-
-        to.mkdirs()
-
-        for (file in files) {
-            val target = File(to, file.name)
-
-            if (!file.renameTo(target)) {
-                writeAtomically(target, file.readBytes())
-            }
-        }
+    /** Moves the files in `from` that `which` takes into `to`, copying, a little at a time, the ones that can't simply be renamed. */
+    private fun moveFiles(from: File, to: File, which: (File) -> Boolean = { true }) {
+        from.listFiles { file -> file.isFile && which(file) }.orEmpty().forEach { file -> moveFile(file, File(to, file.name)) }
     }
 
     /** Moves a bundle's pictures and videos into a map's folder, copying one only when it can't move. */

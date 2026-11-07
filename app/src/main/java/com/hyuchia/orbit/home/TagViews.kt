@@ -1,6 +1,7 @@
 package com.hyuchia.orbit.home
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -26,6 +27,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetValue
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetState
@@ -47,6 +49,7 @@ import com.hyuchia.orbit.data.MapTags
 import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.ListRow
+import com.hyuchia.orbit.ui.OrbitSnackbarHost
 import com.hyuchia.orbit.ui.TitleDialog
 import com.hyuchia.orbit.ui.rememberDefaultButton
 
@@ -82,10 +85,14 @@ fun TagFilter(tags: List<TagCount>, shown: String?, onShow: (String?) -> Unit, o
     }
 }
 
-/** Every tag, with how many maps have it, to rename or take out of every map. */
+/**
+ * Every tag, with how many maps have it, to rename or take out of every map.
+ * What Home says meanwhile, `messages`, shows over the sheet's foot: which
+ * maps a tag stayed on, say.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ManageTagsSheet(tags: List<TagCount>, onRename: (String, String) -> Unit, onRemove: (String) -> Unit, onDismiss: () -> Unit) {
+fun ManageTagsSheet(tags: List<TagCount>, messages: SnackbarHostState, onRename: (String, String) -> Unit, onRemove: (String) -> Unit, onDismiss: () -> Unit) {
     var renaming by remember { mutableStateOf<TagCount?>(null) }
     var removing by remember { mutableStateOf<TagCount?>(null) }
 
@@ -95,39 +102,9 @@ fun ManageTagsSheet(tags: List<TagCount>, onRename: (String, String) -> Unit, on
     ) {
         EscapeCloses(onDismiss)
 
-        Column(
-            Modifier
-                .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(bottom = 16.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 24.dp, end = 12.dp, bottom = 8.dp)) {
-                Text(stringResource(R.string.home_edit_tags), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_done)) }
-            }
-
-            tags.forEach { tag ->
-                ListRow(
-                    headline = { Text(tag.name) },
-                    supporting = { Text(pluralStringResource(R.plurals.home_map_count, tag.count, tag.count)) },
-                    trailing = {
-                        // Each button names its tag: TalkBack hears "Rename “Work”", not the same words on every row.
-                        val rename = stringResource(R.string.home_rename_named_tag, tag.name)
-                        val remove = stringResource(R.string.home_remove_named_tag, tag.name)
-
-                        Row {
-                            Hint(rename) {
-                                IconButton(onClick = { renaming = tag }) { Icon(Icons.Outlined.Edit, contentDescription = rename) }
-                            }
-
-                            Hint(remove) {
-                                IconButton(onClick = { removing = tag }) { Icon(Icons.Outlined.Delete, contentDescription = remove) }
-                            }
-                        }
-                    },
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                )
-            }
+        Box {
+            TagRows(tags, onDismiss, onRename = { renaming = it }, onRemove = { removing = it })
+            OrbitSnackbarHost(messages, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
         }
     }
 
@@ -167,5 +144,44 @@ fun ManageTagsSheet(tags: List<TagCount>, onRename: (String, String) -> Unit, on
             // Enter keeps the tag on its maps.
             dismissButton = { TextButton(onClick = { removing = null }, modifier = Modifier.focusRequester(rememberDefaultButton())) { Text(stringResource(R.string.common_cancel)) } },
         )
+    }
+}
+
+/** The sheet's heading and a row for each tag, with its buttons to rename it and take it out. */
+@Composable
+private fun TagRows(tags: List<TagCount>, onDismiss: () -> Unit, onRename: (TagCount) -> Unit, onRemove: (TagCount) -> Unit) {
+    Column(
+        Modifier
+            .navigationBarsPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = 16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 24.dp, end = 12.dp, bottom = 8.dp)) {
+            Text(stringResource(R.string.home_edit_tags), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_done)) }
+        }
+
+        tags.forEach { tag ->
+            ListRow(
+                headline = { Text(tag.name) },
+                supporting = { Text(pluralStringResource(R.plurals.home_map_count, tag.count, tag.count)) },
+                trailing = {
+                    // Each button names its tag: TalkBack hears "Rename “Work”", not the same words on every row.
+                    val rename = stringResource(R.string.home_rename_named_tag, tag.name)
+                    val remove = stringResource(R.string.home_remove_named_tag, tag.name)
+
+                    Row {
+                        Hint(rename) {
+                            IconButton(onClick = { onRename(tag) }) { Icon(Icons.Outlined.Edit, contentDescription = rename) }
+                        }
+
+                        Hint(remove) {
+                            IconButton(onClick = { onRemove(tag) }) { Icon(Icons.Outlined.Delete, contentDescription = remove) }
+                        }
+                    }
+                },
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+        }
     }
 }

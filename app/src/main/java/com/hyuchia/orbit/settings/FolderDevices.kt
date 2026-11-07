@@ -29,11 +29,12 @@ import java.time.temporal.ChronoUnit
 /**
  * The devices that keep their maps in the folder, as their records there
  * say (see [FolderDevice]): which Orbit each has, when it last synced, and
- * what one with another version can't open. Only devices with this version
- * or a later one keep records, and it says so.
+ * what one with another version can't open, or keeps only part of (`partly`
+ * says which maps, for a device, as a note names them). Only devices with
+ * this version or a later one keep records, and it says so.
  */
 @Composable
-internal fun FolderDevices(sync: FolderSyncState, now: Long) {
+internal fun FolderDevices(sync: FolderSyncState, now: Long, partly: (FolderDevice) -> String? = { null }) {
     val me = sync.device ?: return
 
     if (sync.devices.isEmpty()) {
@@ -54,7 +55,7 @@ internal fun FolderDevices(sync: FolderSyncState, now: Long) {
     DeviceRow(me, headline = stringResource(R.string.folder_devices_this_device, me.name), lines = listOf(stringResource(R.string.folder_devices_version, me.appVersion)))
 
     sync.devices.forEach { device ->
-        DeviceRow(device, headline = device.name, lines = listOf(synced(LocalResources.current, device, now)), notes = notes(notices[device.id]))
+        DeviceRow(device, headline = device.name, lines = listOf(synced(LocalResources.current, device, now)), notes = notes(notices[device.id]), meanings = listOfNotNull(partly(device)))
     }
 
     DeviceNote(stringResource(R.string.folder_devices_note))
@@ -80,14 +81,16 @@ private fun notes(notice: FolderNotice?): List<String> {
     }
 }
 
+/** A device's row: its `lines`, then `notes` on how its version differs, and what that means here, `meanings` among it. */
 @Composable
-private fun DeviceRow(device: FolderDevice, headline: String, lines: List<String>, notes: List<String> = emptyList()) {
+private fun DeviceRow(device: FolderDevice, headline: String, lines: List<String>, notes: List<String> = emptyList(), meanings: List<String> = emptyList()) {
     ListItem(
         supportingContent = {
             Column {
                 lines.forEach { Text(it) }
                 // The first note says how the versions differ; what it means stands out.
                 notes.forEachIndexed { index, note -> Text(note, color = if (index == 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.tertiary) }
+                meanings.forEach { Text(it, color = MaterialTheme.colorScheme.tertiary) }
             }
         },
         leadingContent = { Icon(deviceIcon(device.kind), contentDescription = null) },

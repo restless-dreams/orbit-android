@@ -57,10 +57,13 @@
 
     <!-- In a way's row, when its file couldn't be made, shared, saved or copied. -->
     <string name="export_could_not_make">Orbit couldn’t make this file. Try again in a moment.</string>
-    <string name="export_no_room_to_share">Orbit couldn’t make this file to share. Is this device’s storage full?</string>
+    <string name="export_no_room">Orbit couldn’t make this file. Is this device’s storage full?</string>
     <string name="export_could_not_save">Orbit couldn’t save this file there. Try another place.</string>
     <string name="export_too_much_to_copy">This is too much to copy at once. Share or save it instead.</string>
     <!-- In the YAML and OPML rows of a map Orbit only shows, which it won't write anew. -->
     <string name="export_newer_map_not_written">A newer version of Orbit made this map, so this one can’t write it this way. Update Orbit, or export it as markdown.</string>
     <string name="export_unreadable_map_not_written">Orbit couldn’t read all of this map, so it can’t write it this way. Fix the text, or export it as markdown.</string>
+    <!-- The same, in the markdown and OPML rows of a map written in YAML, which can always be exported as its own YAML. -->
+    <string name="export_newer_yaml_map_not_written">A newer version of Orbit made this map, so this one can’t write it this way. Update Orbit, or export it as YAML.</string>
+    <string name="export_unreadable_yaml_map_not_written">Orbit couldn’t read all of this map, so it can’t write it this way. Fix the text, or export it as YAML.</string>
 </resources>

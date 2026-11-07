@@ -30,8 +30,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.outlined.AddPhotoAlternate
+import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Draw
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.FormatBold
@@ -71,9 +73,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -94,13 +100,17 @@ import com.hyuchia.orbit.R
 import com.hyuchia.orbit.media.LiveMark
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.Media
+import com.hyuchia.orbit.rememberWords
+import com.hyuchia.orbit.sketch.isSketchName
 import com.hyuchia.orbit.theme.parseCssColor
 import com.hyuchia.orbit.ui.ColorChoices
 import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.MarkdownNote
+import com.hyuchia.orbit.ui.MediaWords
 import com.hyuchia.orbit.ui.ToggleRow
 import com.hyuchia.orbit.ui.offeredCustomColors
+import com.hyuchia.orbit.ui.withNoteBox
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
@@ -131,13 +141,37 @@ val NodeKinds = listOf(
  * Everything an idea can be, edited live: each change shows on the map
  * behind as it's made. The fields start over each time the editor is
  * `opened` on an idea (see [Panel.Editor]), but not when the idea's new
- * text gives it a new id.
+ * text gives it a new id. Back from a sketch begun in it (`afterSketch`), a
+ * keyboard's focus is where it was, on the button that began the sketch.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet: Boolean, onPickIcon: (String) -> Unit, onPickColor: (String) -> Unit) {
+fun NodeEditor(
+    model: MapViewModel,
+    ui: MapUi,
+    node: MapNode,
+    opened: Int,
+    sheet: Boolean,
+    onPickIcon: (String) -> Unit,
+    onPickColor: (String) -> Unit,
+    onPickDate: (DatePick) -> Unit,
+    afterSketch: Boolean = false,
+) {
     val context = LocalContext.current
     var linking by remember { mutableStateOf(false) }
+    val sketchButton = remember { FocusRequester() }
+    val inputMode = LocalInputModeManager.current
+
+    LaunchedEffect(afterSketch) {
+        if (afterSketch && inputMode.inputMode == InputMode.Keyboard) {
+            // The button comes into view as it takes the focus, wherever the editor is scrolled to now.
+            try {
+                sketchButton.requestFocus()
+            } catch (notShown: IllegalStateException) {
+                // The idea has no picture section now, as when its sketch was taken off: the focus stays with the editor.
+            }
+        }
+    }
 
     val pickPicture = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
@@ -158,9 +192,18 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
         }
     }
 
+    // Any files, of any kind, several at once: Android's document picker.
+    val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        model.addFiles(node.id, uris, context.contentResolver)
+    }
+
+    val opening = rememberFileOpening(model)
+
     fun set(key: String, value: JsonElement?) = model.update(node.id, key, value)
     val scroll = rememberScrollState()
     val scope = rememberCoroutineScope()
+    // What's typed in the goal's fields and not saved yet: a change of the idea's kind saves it first (see FieldDrafts).
+    val goalDrafts = remember(opened) { FieldDrafts() }
 
     // The sheet stops halfway and leaves the map clear, so each change shows on it as it's made.
     PanelFrame(title = stringResource(if (node.isRoot) R.string.map_editor_title_center else R.string.map_editor_title_idea), sheet = sheet, onDismiss = { model.show(null) }, partial = true, scrim = false) {
@@ -207,7 +250,7 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
             // A goal's numbers are what it's about: they come first.
             if (node.isGoal) {
                 Section(stringResource(R.string.map_section_goal)) {
-                    GoalSection(model, node, ui.progress.under(node))
+                    GoalSection(node, ui.progress.under(node), goalDrafts) { changes -> model.setGoal(node.id, changes) }
                 }
             }
 
@@ -225,10 +268,10 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
 
             Section(stringResource(R.string.common_status)) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Choice(stringResource(R.string.map_status_none), node.status == null) { set("status", null) }
+                    Choice(stringResource(R.string.map_status_none), node.shownStatus == null) { set("status", null) }
 
                     Statuses.forEach { (word, label, icon) ->
-                        Choice(stringResource(label), node.status.equals(word, ignoreCase = true), icon = { Icon(icon, contentDescription = null, Modifier.size(18.dp)) }) {
+                        Choice(stringResource(label), node.hasStatus(word), icon = { Icon(icon, contentDescription = null, Modifier.size(18.dp)) }) {
                             set("status", JsonPrimitive(word))
                         }
                     }
@@ -239,6 +282,10 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
                 PriorityChoice(node.priority) { level -> set("priority", level?.let(::JsonPrimitive)) }
             }
 
+            Section(stringResource(R.string.map_section_date)) {
+                DateEditor(node, onPick = { part -> onPickDate(DatePick(node.id, part)) }, onClear = { set("due", null) })
+            }
+
             Section(stringResource(R.string.map_section_kind)) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     NodeKinds.forEach { kind ->
@@ -247,6 +294,8 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
 
                         Choice(stringResource(kind.label), node.type.equals(kind.type, ignoreCase = true) || (kind.type == null && node.type == null), icon) {
                             val type = kind.type?.let(::JsonPrimitive)
+                            // A goal's number typed a moment ago is saved before the change, never after it, over it.
+                            goalDrafts.saveNow()
 
                             if (node.isGoal && kind.type != GOAL_TYPE) {
                                 // An idea that stops being a goal takes its numbers with it, in the same step to undo.
@@ -323,7 +372,8 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
                             AsyncImage(
                                 model = model.mediaModel(image.src),
                                 contentDescription = image.alt,
-                                contentScale = ContentScale.Crop,
+                                // A sketch is round, as its planet: all of it shows.
+                                contentScale = if (isSketchName(image.src)) ContentScale.Fit else ContentScale.Crop,
                                 onError = { failed = true },
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -355,7 +405,13 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
                         onCommit = { caption -> set("image", mediaChange("caption", caption.ifBlank { null })) },
                     )
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // A sketch is drawn on further; another picture can make way for one.
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { model.sketch(node.id) }, modifier = Modifier.focusRequester(sketchButton)) {
+                            Icon(Icons.Outlined.Draw, contentDescription = null, Modifier.size(18.dp))
+                            Text("  ${stringResource(if (isSketchName(image.src)) R.string.sketch_keep_sketching else R.string.sketch_sketch)}")
+                        }
+
                         OutlinedButton(onClick = { pickPicture.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
                             Text(stringResource(R.string.map_replace))
                         }
@@ -365,9 +421,17 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
 
                     MediaProblemText(ui, node, video = false)
                 } else {
-                    FilledTonalButton(onClick = { pickPicture.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
-                        Icon(Icons.Outlined.AddPhotoAlternate, contentDescription = null, Modifier.size(18.dp))
-                        Text("  ${stringResource(R.string.map_add_a_photo)}")
+                    // A picture from the phone, or one drawn on the planet itself.
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(onClick = { pickPicture.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                            Icon(Icons.Outlined.AddPhotoAlternate, contentDescription = null, Modifier.size(18.dp))
+                            Text("  ${stringResource(R.string.map_add_a_photo)}")
+                        }
+
+                        FilledTonalButton(onClick = { model.sketch(node.id) }, modifier = Modifier.focusRequester(sketchButton)) {
+                            Icon(Icons.Outlined.Draw, contentDescription = null, Modifier.size(18.dp))
+                            Text("  ${stringResource(R.string.sketch_sketch)}")
+                        }
                     }
 
                     MediaProblemText(ui, node, video = false)
@@ -422,6 +486,8 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
                         onCommit = { caption -> set("video", mediaChange("caption", caption.ifBlank { null })) },
                     )
 
+                    VideoNoteText(ui, node)
+
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = chooseVideo) { Text(stringResource(R.string.map_replace)) }
                         TextButton(onClick = { set("video", null) }) { Text(stringResource(R.string.common_remove)) }
@@ -433,6 +499,10 @@ fun NodeEditor(model: MapViewModel, ui: MapUi, node: MapNode, opened: Int, sheet
 
             Section(stringResource(R.string.audio_section)) {
                 SoundSection(model, ui, node, opened, ::set)
+            }
+
+            Section(stringResource(R.string.files_title)) {
+                EditorFiles(model, ui, node, opening, heading = false, onAdd = { pickFiles.launch(arrayOf("*/*")) })
             }
 
             Section(stringResource(R.string.common_web_page)) {
@@ -497,6 +567,21 @@ private fun media(value: Media): JsonElement = buildJsonObject {
 
 private fun allTags(ui: MapUi): List<String> = ui.map?.nodes.orEmpty().flatMap { it.tags }.distinct().sorted()
 
+/** What came of the big video just chosen for this idea: made smaller, from how big to how big, or kept as it is on a phone that can't. */
+@Composable
+private fun VideoNoteText(ui: MapUi, node: MapNode) {
+    val note = ui.videoNote?.takeIf { it.nodeId == node.id } ?: return
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+    ) {
+        Icon(Icons.Outlined.Compress, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp).size(18.dp))
+        Text(note.message.text(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
 /** Why the last picture or video chosen for this idea didn't join it. */
 @Composable
 private fun MediaProblemText(ui: MapUi, node: MapNode, video: Boolean) {
@@ -511,27 +596,46 @@ private fun MediaProblemText(ui: MapUi, node: MapNode, video: Boolean) {
 
 /**
  * The idea's video, to play, or how far along one from the phone is as it's
- * copied in, with a way to stop it. Nothing when there's neither.
+ * copied in, or made smaller, from how big to about how big, with a way to
+ * stop it. Nothing when there's neither.
  */
 @Composable
 private fun VideoPreview(model: MapViewModel, video: Media?, copying: VideoCopy?, onPlay: () -> Unit, onCancel: () -> Unit) {
     if (copying != null) {
         Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest, modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 20.dp)) {
+                val smaller = copying.smaller
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val locale = LocalConfiguration.current.locales[0]
                     val copied = copying.progress
-                    Text(
-                        if (copied != null) {
-                            // Whole percents, rounded down, as the copy goes.
-                            stringResource(R.string.map_copying_the_video_percent, NumberFormat.getPercentInstance(locale).format((copied * 100).toInt() / 100.0))
-                        } else {
-                            stringResource(R.string.map_copying_the_video)
-                        },
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = onCancel) { Text(stringResource(R.string.common_cancel)) }
+                    // Whole percents, rounded down, as the copy or the making goes.
+                    val percent = copied?.let { NumberFormat.getPercentInstance(locale).format((it * 100).toInt() / 100.0) }
+
+                    Column(Modifier.weight(1f).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }) {
+                        Text(
+                            when {
+                                smaller != null && percent != null -> stringResource(R.string.map_making_the_video_smaller_percent, percent)
+                                smaller != null -> stringResource(R.string.map_making_the_video_smaller)
+                                percent != null -> stringResource(R.string.map_copying_the_video_percent, percent)
+                                else -> stringResource(R.string.map_copying_the_video)
+                            },
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+
+                        if (smaller != null) {
+                            val words = rememberWords()
+
+                            Text(
+                                stringResource(R.string.map_smaller_from_to, MediaWords.size(smaller.from, words), MediaWords.size(smaller.about, words)),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+
+                    // Making it smaller takes a while: it's stopped, as a copy is cancelled, and nothing of it stays.
+                    TextButton(onClick = onCancel) { Text(stringResource(if (smaller != null) R.string.map_stop_making_smaller else R.string.common_cancel)) }
                 }
 
                 val progress = copying.progress
@@ -599,11 +703,41 @@ private fun PriorityChoice(selected: Int?, onPick: (Int?) -> Unit) {
 private const val NO_PRIORITY_WIDTH = 2f
 
 /**
+ * Fields whose drafts a change saves first ([saveNow]). Each field saves
+ * what's typed in it a moment after typing stops, and as it leaves; a
+ * change that would make that mean something else, such as a goal counting
+ * another way or an idea becoming another kind, saves it first, as it was
+ * typed. The fields that leave with the change then have nothing left to
+ * save, which would land after the change and undo it.
+ */
+class FieldDrafts {
+    private val savers = LinkedHashMap<String, () -> Unit>()
+
+    /** Field `key` saves its draft with `save`, until it [unregister]s. */
+    fun register(key: String, save: () -> Unit) {
+        savers[key] = save
+    }
+
+    fun unregister(key: String, save: () -> Unit) {
+        if (savers[key] === save) {
+            savers.remove(key)
+        }
+    }
+
+    /** Saves what's typed in each field and not saved yet, now. */
+    fun saveNow() {
+        savers.values.toList().forEach { it() }
+    }
+}
+
+/**
  * A text field that saves a moment after typing stops, when the keyboard's
  * action is pressed, and when it leaves the screen. `key` starts it over
  * with the value, and typing waiting to be saved then goes where it was
  * typed. A value changed from outside the field (an undo, a change made
- * elsewhere) shows in it, unless something typed waits to be saved.
+ * elsewhere) shows in it, unless something typed waits to be saved. Among
+ * `drafts`, a change that would make what's typed mean something else
+ * saves it first.
  */
 @Composable
 fun EditorField(
@@ -617,6 +751,7 @@ fun EditorField(
     minLines: Int = 1,
     keyboardType: KeyboardType = KeyboardType.Text,
     capitalization: KeyboardCapitalization = if (keyboardType == KeyboardType.Text) KeyboardCapitalization.Sentences else KeyboardCapitalization.None,
+    drafts: FieldDrafts? = null,
 ) {
     var text by remember(key) { mutableStateOf(value) }
     var committed by remember(key) { mutableStateOf(value) }
@@ -641,8 +776,14 @@ fun EditorField(
         }
     }
 
-    DisposableEffect(key) {
-        onDispose { save() }
+    DisposableEffect(key, drafts) {
+        val saver = ::save
+        drafts?.register(key, saver)
+
+        onDispose {
+            drafts?.unregister(key, saver)
+            save()
+        }
     }
 
     OutlinedTextField(
@@ -786,7 +927,10 @@ private fun NoteEditor(node: MapNode, opened: Int, onNote: (String) -> Unit) {
                 if (field.text.isBlank()) {
                     Text(stringResource(R.string.map_nothing_written_yet), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    MarkdownNote(field.text, plain = node.noteFormat == "plain", onNodeLink = {})
+                    // A box checked here is a change to the note being written, saved with it.
+                    MarkdownNote(field.text, plain = node.noteFormat == "plain", onNodeLink = {}, onCheck = { check ->
+                        withNoteBox(field.text, check.line, check.checked)?.let { checked -> field = field.copy(text = checked) }
+                    })
                 }
             }
         }

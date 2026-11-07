@@ -63,6 +63,18 @@ private const val SEALING_INFO = "orbit offer v$OFFER_VERSION key"
 private const val MAP_INFO = "orbit offer v$OFFER_VERSION map"
 private const val CHECK_INFO = "orbit offer v$OFFER_VERSION check"
 private const val COMMITMENT_INFO = "orbit offer v$OFFER_VERSION commitment"
+private const val STATE_INFO = "orbit offer v$OFFER_VERSION state"
+
+/**
+ * How the receiver's half of the check code starts on a device whose
+ * answers about where an offer is carry proofs ([OfferSession.stateProof]),
+ * the rest of the half random. The half goes into the code both people
+ * compare, so no one in between can take the mark off, or put it on,
+ * without the two devices showing different codes, as TLS 1.3 marks its
+ * server's random against downgrades. Orbit 0.3.0 and 0.4.0 send a half
+ * all random, which starts like this once in 2^64.
+ */
+private val PROVES_STATES = "orbit-sp".encodeToByteArray()
 
 private val random = SecureRandom()
 
@@ -71,6 +83,13 @@ class UnreadableOfferException(message: String, cause: Throwable? = null) : IOEx
 
 /** `count` random bytes. */
 internal fun randomBytes(count: Int): ByteArray = ByteArray(count).also(random::nextBytes)
+
+/** This device's half of an offer's check code, as the device taking the map makes it: marked as proving its answers, the rest random. */
+internal fun receiverNonce(): ByteArray = PROVES_STATES + randomBytes(CHECK_NONCE_BYTES - PROVES_STATES.size)
+
+/** Whether the device that made `receiverNonce`, its half of the check code, proves its answers about the offer. */
+internal fun provesStates(receiverNonce: ByteArray): Boolean =
+    receiverNonce.size == CHECK_NONCE_BYTES && receiverNonce.copyOf(PROVES_STATES.size).contentEquals(PROVES_STATES)
 
 internal fun base64Url(bytes: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
 
@@ -203,12 +222,17 @@ class DeviceKey internal constructor(val key: ECPublicKey, internal val encoded:
  * receiver's, and reveals it after, so no one answering in either device's
  * place can steer the code to match the other's. The map is sealed only
  * once the person sending has seen both devices show it.
+ *
+ * What the receiver answers about where the offer is (opened, declined…)
+ * carries an HMAC with a key of its own ([stateProof]), so a sender whose
+ * codes matched believes only the receiver about it.
  */
 class OfferSession private constructor(receiverKey: DeviceKey, val senderKey: DeviceKey, sharedSecret: ByteArray) {
     private val sealingKey: SecretKeySpec
     private val mapKey: SecretKeySpec
     private val checkKey: ByteArray
     private val commitmentKey: ByteArray
+    private val stateKey: ByteArray
 
     init {
         val pseudorandomKey = hkdfExtract(receiverKey.encoded + senderKey.encoded, sharedSecret)
@@ -216,6 +240,7 @@ class OfferSession private constructor(receiverKey: DeviceKey, val senderKey: De
         mapKey = SecretKeySpec(hkdfExpand(pseudorandomKey, MAP_INFO.toByteArray(), KEY_BYTES), "AES")
         checkKey = hkdfExpand(pseudorandomKey, CHECK_INFO.toByteArray(), KEY_BYTES)
         commitmentKey = hkdfExpand(pseudorandomKey, COMMITMENT_INFO.toByteArray(), KEY_BYTES)
+        stateKey = hkdfExpand(pseudorandomKey, STATE_INFO.toByteArray(), KEY_BYTES)
         pseudorandomKey.fill(0)
         sharedSecret.fill(0)
     }
@@ -275,6 +300,12 @@ class OfferSession private constructor(receiverKey: DeviceKey, val senderKey: De
         val number = ByteBuffer.wrap(digest, 0, Long.SIZE_BYTES).long.toULong() % 10_000u
         return number.toString().padStart(4, '0')
     }
+
+    /** The receiver's proof that offer `id` is in `state`, as `GET /offer/<id>` names it: only the two devices can make it. */
+    fun stateProof(id: String, state: String): ByteArray = hmac(stateKey, "$id\n$state".toByteArray())
+
+    /** Whether `proof` is the receiver's, for offer `id` in `state`. */
+    fun isProof(id: String, state: String, proof: ByteArray): Boolean = MessageDigest.isEqual(proof, stateProof(id, state))
 
     private inner class OpenedOffer(private val key: SecretKeySpec, private val input: InputStream, private val limit: Long) : InputStream() {
         private val cipher = Cipher.getInstance(TRANSFORMATION)

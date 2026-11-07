@@ -129,6 +129,8 @@ const startExploring = (): void => {
     theme: themeOption(data.theme, style),
     nodeTypes: nodeTypes(),
     nodeTypeFor: nodeTypeFor(() => automaticRings(parsed)),
+    // The page carries the map's pictures and sounds, never its ideas' files: it lists them, and says they stayed with the map.
+    openFiles: false,
   });
   const order = data.path?.length ? data.path : readingOrder(parsed.root);
   const count = document.querySelector<HTMLElement>('.page__count')!;

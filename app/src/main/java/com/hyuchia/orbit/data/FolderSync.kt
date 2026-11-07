@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -47,7 +48,11 @@ interface SyncFolder {
     /** The markdown files in the folder. Throws when it can't be read. */
     fun files(): List<FolderFile>
 
-    /** A file's text. Throws [StillArriving] for one that looks like it's still being written. */
+    /**
+     * A file's text. Throws [StillArriving] for one that looks like it's
+     * still being written, and [TooLargeForAMap] for one that holds more than
+     * a map may, whatever size it was listed at.
+     */
     fun read(name: String): String
 
     /** A file as it is now: its time and size, which say whether it changed since it was listed; null when it's gone. */
@@ -67,8 +72,18 @@ interface SyncFolder {
     /** Copies a picture or video from the folder's `media/` into `into`; false when it isn't there. */
     fun readMedia(name: String, into: OutputStream): Boolean
 
-    /** Puts a picture or video into the folder's `media/`, over one by that name if it has one, a piece at a time, and returns it as it is now. */
+    /**
+     * Puts a picture or video into the folder's `media/`, over one by that
+     * name if it has one, a piece at a time, and returns it as it is now:
+     * under the name the folder's app gave it, which may be another (as when
+     * a file by that name arrived since `media/` was listed). Throws
+     * [NoRoomForMedia] when the folder is on this device and hasn't room for
+     * a new one, before any of it is written.
+     */
     fun writeMedia(name: String, from: File): FolderFile
+
+    /** Deletes a picture or video from the folder's `media/`. */
+    fun deleteMedia(name: String): Unit = throw IOException("This folder deletes no pictures or videos")
 
     /** The records devices keep of themselves in the folder's `.orbit/devices/` (see [FolderDevice]); none when it has none. */
     fun deviceRecords(): List<FolderFile> = emptyList()
@@ -178,7 +193,10 @@ internal const val MOST_REMOVALS = 3
  * while it's used. A map deleted here (`deleted`) takes its file with it,
  * unless the file changed since; one deleted while the maps were kept in
  * another folder waits until they're kept there again. Files that couldn't
- * be read, and maps whose text couldn't be, are left for a later sync.
+ * be read, and maps whose text couldn't be, are left for a later sync. A
+ * file that holds the text this device was writing to it, and hasn't seen
+ * there whole yet ([SyncRecord.writing]), is this device's own: as it was
+ * when they last matched, not a change from elsewhere.
  */
 internal fun planSync(
     folder: String,
@@ -205,7 +223,7 @@ internal fun planSync(
             continue
         }
 
-        if (file != null && (file.hash ?: record.hash) == record.hash) {
+        if (file != null && record.unchangedElsewhere(file.hash ?: record.hash)) {
             claimed += file.name
             steps += SyncStep.DeleteFile(record)
         } else {
@@ -241,7 +259,7 @@ internal fun planSync(
 
         val step = when {
             map.hash == remote -> if (file.text != null || adopted) SyncStep.Link(map.id, file) else null
-            remote == record.hash -> SyncStep.Write(map.id, file.name)
+            record.unchangedElsewhere(remote) -> SyncStep.Write(map.id, file.name)
             map.hash == record.hash -> SyncStep.Take(map.id, file, map.hash)
             else -> SyncStep.KeepBoth(map.id, file)
         }
@@ -257,7 +275,7 @@ internal fun planSync(
     val swapped = files.isEmpty() || (readableLinked.size > 1 && missing.size == readableLinked.size)
 
     for ((map, record) in missing) {
-        val renamed = unclaimed.firstOrNull { it.hash == record.hash }
+        val renamed = unclaimed.firstOrNull { file -> file.hash?.let(record::unchangedElsewhere) == true }
         val since = record.missingSince
         // A record another install of Orbit left, as a phone restored from a backup has, waits longer: its folder may still be filling.
         val foreign = install != null && record.install != null && record.install != install
@@ -268,7 +286,7 @@ internal fun planSync(
                 unclaimed -= renamed
                 steps += SyncStep.Link(map.id, renamed)
 
-                if (map.hash != record.hash) {
+                if (map.hash != renamed.hash) {
                     steps += SyncStep.Write(map.id, renamed.name)
                 }
             }
@@ -302,6 +320,15 @@ internal fun planSync(
     return steps
 }
 
+/**
+ * Whether a file whose text is `hash` is as this device last left it, so
+ * nothing changed it elsewhere since: the text both sides had when they last
+ * matched, or the text this device was writing to it and hasn't seen there
+ * whole yet ([SyncRecord.writing]), as a write whose reading back failed
+ * leaves it.
+ */
+private fun SyncRecord.unchangedElsewhere(hash: String): Boolean = hash == this.hash || hash == writing
+
 /** How keeping maps in a folder is going, for Settings. */
 data class FolderSyncState(
     /** The folder's address, or null when the maps aren't kept in a folder. */
@@ -333,6 +360,16 @@ data class FolderSyncState(
     /** The extensions of the files in the folder's media, read only when two devices carry different kinds. */
     val mediaTypes: Set<String> = emptySet(),
 
+    /** The extensions of the ideas' files among them, as Orbit names them (`file-…`): every device that keeps ideas' files opens them. */
+    val fileTypes: Set<String> = emptySet(),
+
+    /**
+     * The maps in the folder that another device there keeps only part of,
+     * by its id, as their titles: an older Orbit keeps what's past its room
+     * only in the folder ([FolderRoster.partlyKept]).
+     */
+    val partly: Map<String, List<String>> = emptyMap(),
+
     /**
      * Maps whose files left the folder all in one sync, more than
      * [MOST_REMOVALS]: they wait for a yes on Home before they follow
@@ -342,7 +379,7 @@ data class FolderSyncState(
     val held: List<String> = emptyList(),
 ) {
     /** What this device should hear about the others. */
-    val notices: List<FolderNotice> get() = device?.let { FolderRoster.notices(it, devices, mediaTypes) }.orEmpty()
+    val notices: List<FolderNotice> get() = device?.let { FolderRoster.notices(it, devices, mediaTypes, fileTypes) }.orEmpty()
 }
 
 /** What syncs did on their own that the user should hear about: kept until dismissed, across restarts. */
@@ -388,6 +425,21 @@ data class FolderNotes(
         newer = (newer + other.newer).distinct(),
         private = (private + other.private).distinct(),
     )
+
+    /** These notes without the entries `read` has, as one shown and read leaves them: which of the rest are about private maps too. */
+    operator fun minus(read: FolderNotes): FolderNotes {
+        val left = FolderNotes(
+            keptBoth = keptBoth - read.keptBoth.toSet(),
+            removed = removed - read.removed.toSet(),
+            restored = restored - read.restored.toSet(),
+            tooBig = tooBig - read.tooBig.toSet(),
+            large = large - read.large.toSet(),
+            newer = newer - read.newer.toSet(),
+        )
+
+        val entries = (left.keptBoth + left.removed + left.restored + left.tooBig + left.large + left.newer).toSet()
+        return left.copy(private = private.filter { it in entries })
+    }
 }
 
 private val notesJson = Json { ignoreUnknownKeys = true }
@@ -450,8 +502,21 @@ class FolderSync(
     /** The maps found with every picture, video and sound they point at, by folder and map, with the text ([MapSummary.contentKey]) they had then. */
     private val complete = mutableMapOf<Pair<String, String>, String>()
 
-    /** Pictures and videos too big for their maps, by folder and map, which stay only in the folder and aren't tried again. */
-    private val refused = mutableMapOf<Pair<String, String>, MutableSet<String>>()
+    /**
+     * Pictures and videos too big for their maps, by folder and map, then
+     * name, which stay only in the folder: each with the folder's file and
+     * the map's room as they were then, so it isn't tried again until either
+     * changes.
+     */
+    private val refused = mutableMapOf<Pair<String, String>, MutableMap<String, Pair<FolderFile, Long>>>()
+
+    /**
+     * The pictures, videos and sounds in the folder that couldn't be brought
+     * to their maps, by folder, map and name (none when the map's couldn't be
+     * looked at as a whole), with when that first happened, by [elapsed]: one
+     * that goes on failing for [MEDIA_PATIENCE] is a problem the sync reports.
+     */
+    private val unfetched = mutableMapOf<Triple<String, String, String>, Long>()
 
     /**
      * The pictures, videos and sounds here known to be the very file the
@@ -530,14 +595,25 @@ class FolderSync(
         requests.trySend(Unit)
     }
 
-    /** The user has read the notes: they go. */
-    fun dismissNotes() {
-        status.update { it.copy(notes = FolderNotes()) }
+    /**
+     * The user has read these notes (`read`), as Home or Settings showed
+     * them: they go, and the others stay, as those about private maps do
+     * while private maps hide. The maps the folder sent to the trash were
+     * kept there until their note was read: from now on, they have the
+     * trash's usual days, but those `hidden` (a private map's, while private
+     * maps hide), which wait until their note is read too.
+     */
+    fun dismissNotes(read: FolderNotes, hidden: (TrashedMap) -> Boolean = { false }) {
+        val left = status.updateAndGet { it.copy(notes = it.notes - read) }.notes
 
         scope.launch(Dispatchers.IO) {
-            notesFile.delete()
-            // The maps the folder sent to the trash were kept there until their note was read: from now on, the usual 30 days.
-            maps.seeFolderRemovals()
+            if (left.isEmpty) {
+                notesFile.delete()
+            } else {
+                runCatching { writeAtomically(notesFile, notesText(left)) }
+            }
+
+            maps.seeFolderRemovals(keeping = hidden)
         }
     }
 
@@ -639,6 +715,8 @@ class FolderSync(
                     device = outcome.roster?.device ?: current.device,
                     devices = outcome.roster?.devices ?: current.devices,
                     mediaTypes = outcome.roster?.mediaTypes ?: current.mediaTypes,
+                    fileTypes = outcome.roster?.fileTypes ?: current.fileTypes,
+                    partly = outcome.roster?.partly ?: current.partly,
                     // Not those the person answered about while this sync ran.
                     held = (if (outcome.problem == null || outcome.held.isNotEmpty()) outcome.held else current.held).filterNot { it in approved || it in kept },
                 )
@@ -660,7 +738,7 @@ class FolderSync(
     )
 
     /** This device and the others, as their records in the folder say. */
-    private class Roster(val device: FolderDevice, val devices: List<FolderDevice>, val mediaTypes: Set<String>)
+    private class Roster(val device: FolderDevice, val devices: List<FolderDevice>, val mediaTypes: Set<String>, val partly: Map<String, List<String>> = emptyMap(), val fileTypes: Set<String> = emptySet())
 
     /** One sync with the folder at `address`. */
     private inner class Run(private val address: String, private val folder: SyncFolder) {
@@ -678,11 +756,26 @@ class FolderSync(
         /** The folder's markdown files as listed when the sync began, or as this sync wrote them, by name. */
         private val listed = mutableMapOf<String, FolderFile>()
 
+        /**
+         * The text of each of the folder's markdown files as this sync
+         * compared it, as a [digest], by name: as read, as its record says
+         * for one just as it was when it last matched, or as this sync wrote
+         * it. A file is written over or deleted only while it still holds it
+         * (see [stillAsCompared]).
+         */
+        private val compared = mutableMapOf<String, String>()
+
         /** The notes about private maps, among the four above. */
         private val privateNotes = mutableListOf<String>()
 
-        /** The files this sync found waiting to settle (see [settling]). */
+        /** The files this sync found waiting to settle (see [settling]), or changed since it compared them. */
         private val waiting = mutableSetOf<String>()
+
+        /** The pictures, videos and sounds this sync couldn't bring to their maps, as [unfetched] keeps them. */
+        private val failing = mutableSetOf<Triple<String, String, String>>()
+
+        /** The pictures, videos and sounds this sync didn't copy to or from the folder for lack of room on this device, by name. */
+        private val roomless = mutableSetOf<String>()
 
         /** The maps deleted here whose files were in the folder, as the sync began. */
         private var deletions: List<SyncRecord> = emptyList()
@@ -711,6 +804,17 @@ class FolderSync(
 
         suspend fun sync(): Outcome {
             val name = folder.name
+
+            // The maps deleted here, which a sync can't do without: taken for none, a deleted private map's file would come back
+            // as a map like any other. Until they can be read, nothing happens, and the sync says so.
+            val deleted = try {
+                maps.folderDeletions()
+            } catch (unreadable: IOException) {
+                Logs.warn("OrbitFolder", "The maps deleted here couldn't be read", unreadable)
+                return Outcome(name, words.string(R.string.data_folder_deletions_unreadable))
+            }
+
+            deletions = deleted
             val listing = folder.files()
             names += listing.map { it.name }
             listing.associateByTo(listed) { it.name }
@@ -732,11 +836,15 @@ class FolderSync(
             val before = summaries.associate { it.id to it.metadata.sync }
             val mine = device()
             install = mine?.id
-            val deleted = maps.folderDeletions()
-            deletions = deleted
             // A file just as it was when it last matched needn't be read again.
             val known = (summaries.mapNotNull { it.metadata.sync } + deleted).filter { it.folder == address }.associateBy { it.file }
             var unreadable = 0
+
+            // Too big to be a map: it stays only in the folder, and its map, if it has one, as it is.
+            fun tooLarge(file: FolderFile, record: SyncRecord?): RemoteFile {
+                note(large, file.name, record?.let { known -> summaries.any { it.metadata.sync == known && it.metadata.isPrivate } } == true)
+                return RemoteFile(file, null, unreadable = true)
+            }
 
             val files = listing.map { file ->
                 val record = known[file.name]
@@ -745,9 +853,7 @@ class FolderSync(
                 if (unchanged) {
                     RemoteFile(file, null)
                 } else if (file.size > MAP_TEXT_LIMIT) {
-                    // Too big to be a map: it stays only in the folder, and its map, if it has one, as it is.
-                    note(large, file.name, record?.let { known -> summaries.any { it.metadata.sync == known && it.metadata.isPrivate } } == true)
-                    RemoteFile(file, null, unreadable = true)
+                    tooLarge(file, record)
                 } else {
                     // One file that can't be read waits for the next sync; the others go on.
                     try {
@@ -755,6 +861,9 @@ class FolderSync(
                     } catch (arriving: StillArriving) {
                         // Still being written, it waits, unless it has stayed as it is a while: then that's how it is.
                         if (settled(file.name, arriving.text)) RemoteFile(file, arriving.text) else RemoteFile(file, null, unreadable = true)
+                    } catch (large: TooLargeForAMap) {
+                        // Listed smaller, or at a size the folder can't tell: only what a map holds was read of it.
+                        tooLarge(file, record)
                     } catch (failure: IOException) {
                         unreadable += 1
                         RemoteFile(file, null, unreadable = true)
@@ -766,6 +875,11 @@ class FolderSync(
                         RemoteFile(file, null, unreadable = true)
                     }
                 }
+            }
+
+            // What each file was compared as: its text as read, or as its record says for one just as it was then.
+            for (file in files.filterNot { it.unreadable }) {
+                (file.hash ?: known[file.name]?.hash)?.let { compared[file.name] = it }
             }
 
             val local = summaries.map { LocalMap(it.id, it.contentKey, it.metadata.sync, readable = !it.unreadable) }
@@ -780,6 +894,9 @@ class FolderSync(
                 // A step that fails, whatever the folder's app throws, is tried again by the next sync; the others go on.
                 try {
                     perform(step)
+                } catch (full: NoRoomForMedia) {
+                    // Its map waits with it, and the sync says why.
+                    roomless += full.name
                 } catch (failure: IOException) {
                     failed += 1
                 } catch (refused: SecurityException) {
@@ -791,17 +908,20 @@ class FolderSync(
             }
 
             // Media that reached the folder after its map's text, which the steps above found missing.
-            try {
-                fetchMissingMedia()
-            } catch (refused: SecurityException) {
-                throw refused
-            } catch (failure: Exception) {
-                Logs.warn("OrbitFolder", "Pictures and videos missing here couldn't be fetched from the folder", failure)
-            }
+            fetchMissingMedia()
+            val now = elapsed()
+
+            // Media that failed before and not this time arrived, or isn't wanted anymore. What has gone on failing a while is
+            // a problem, as a file the folder's app can never give whole is.
+            failing.forEach { unfetched.putIfAbsent(it, now) }
+            unfetched.keys.removeAll { it.first == address && it !in failing }
+            val stuck = unfetched.filter { (key, since) -> key.first == address && now - since >= MEDIA_PATIENCE.inWholeMilliseconds }.keys.map { it.second }.toSet()
 
             val problems = listOfNotNull(
                 failed.takeIf { it > 0 }?.let { count -> words.plural(R.plurals.data_folder_maps_not_in_step, count, count) },
                 unreadable.takeIf { it > 0 }?.let { count -> words.plural(R.plurals.data_folder_files_unreadable, count, count) },
+                stuck.size.takeIf { it > 0 }?.let { count -> words.plural(R.plurals.data_folder_media_not_arriving, count, count) },
+                roomless.size.takeIf { it > 0 }?.let { count -> words.plural(R.plurals.data_folder_no_room, count, count) },
             )
             // Each problem is a sentence of its own, and so is what Orbit does about them.
             val problem = problems.takeIf { it.isNotEmpty() }?.joinToString(" ", postfix = " " + words.string(R.string.data_folder_tries_again))
@@ -866,6 +986,9 @@ class FolderSync(
 
                 val own = texts[me].orEmpty()
                 val ownRecords = own.mapNotNull { (file, text) -> FolderStudy.decode(text)?.let { file to it } }.toMap()
+                // This device's own records a newer Orbit wrote and says this one would misread, as after going back to an older
+                // version: left as they are, never written over with what this one knows, nor deleted, so the newer one finds them.
+                val newer = own.filterValues { FolderStudy.read(it) == StudyRead.Incompatible }.keys
                 val written = mutableSetOf<String>()
 
                 for (map in maps.maps.value.orEmpty()) {
@@ -873,10 +996,10 @@ class FolderSync(
                     val previous = before[map.id]
                     var answers = map.metadata.study.orEmpty()
 
-                    // Kept in another folder before: what the devices there studied stays this map's.
+                    // Kept in another folder before: what the devices there studied stays this map's, joining this device's
+                    // answers as they are now, an answer just given among them.
                     if ((previous == null || previous.folder != address) && !map.metadata.studyElsewhere.isNullOrEmpty()) {
-                        answers = map.metadata.studyProgress
-                        maps.saveStudy(map.id, answers)
+                        answers = maps.takeStudyElsewhere(map.id) ?: map.metadata.studyProgress
                     }
 
                     val renamedFrom = previous?.takeIf { it.folder == address && it.file != record.file }?.file
@@ -890,8 +1013,8 @@ class FolderSync(
                         maps.saveStudyElsewhere(map.id, elsewhere)
                     }
 
-                    if (answers.isNotEmpty() && me !in unread) {
-                        val kept = (own[file] ?: earlier?.let(own::get))?.let(FolderStudy::fields)
+                    if (answers.isNotEmpty() && me !in unread && file !in newer) {
+                        val kept = (own[file] ?: earlier?.takeIf { it !in newer }?.let(own::get))?.let(FolderStudy::fields)
                         val text = FolderStudy.encode(FolderStudy.record(record.file, answers, renamedFrom, remembered), kept)
 
                         if (text != own[file]) {
@@ -903,8 +1026,8 @@ class FolderSync(
                     }
                 }
 
-                // This device's records of maps no longer in the folder, or of files they had before, go.
-                for (file in if (me in unread) emptySet() else own.keys - written) {
+                // This device's records of maps no longer in the folder, or of files they had before, go: not a newer Orbit's.
+                for (file in if (me in unread) emptySet() else own.keys - written - newer) {
                     folder.deleteStudyRecord(me, file)
                     known -= me to file
                 }
@@ -944,19 +1067,27 @@ class FolderSync(
          */
         private fun roster(device: FolderDevice?): Roster? {
             val now = System.currentTimeMillis()
-            val mine = device?.copy(synced = now) ?: return null
+            // Ideas' files are of any kind: the record lists those the folder holds, so a version from before them says it can't open them.
+            val fileTypes = pictures.keys.filter(::isIdeaFileName).mapNotNull { name -> name.substringAfterLast('.', "").lowercase().ifEmpty { null } }.toSet()
+            val mine = device?.let { it.copy(synced = now, mediaTypes = (it.mediaTypes + fileTypes).distinct().sorted()) } ?: return null
 
             return try {
                 val others = FolderDeviceRecords(folder, records.getOrPut(address) { mutableMapOf() }).update(mine, now)
                 // Which kinds of file are there matters only when two devices carry different ones: then the folder's media is listed.
                 val differ = others.any { it.mediaTypes.toSet() != mine.mediaTypes.toSet() }
                 val types = if (differ) pictures.keys.mapNotNull { name -> name.substringAfterLast('.', "").lowercase().ifEmpty { null } }.toSet() else emptySet()
-                Roster(mine, others, types)
+                // What each map in the folder comes to matters only when a device there keeps less of it than this one.
+                val partly = if (FolderRoster.keepLess(others)) FolderRoster.partlyKept(others, folderMaps()) else emptyMap()
+                Roster(mine, others, types, partly, fileTypes)
             } catch (failure: Exception) {
                 Logs.warn("OrbitFolder", "The devices' records in the folder couldn't be read or written", failure)
                 null
             }
         }
+
+        /** The maps kept in this folder, by title, with the sizes of the pictures, videos and sounds each points at. */
+        private fun folderMaps(): List<Pair<String, List<Long>>> =
+            maps.maps.value.orEmpty().filter { it.metadata.sync?.folder == address && !it.unreadable }.map { it.title to maps.mediaFileSizes(it.id) }
 
         private suspend fun perform(step: SyncStep) {
             when (step) {
@@ -970,8 +1101,16 @@ class FolderSync(
                     }
                 }
                 is SyncStep.Link -> {
-                    val hash = step.file.hash ?: digest(maps.read(step.id))
-                    maps.setSyncRecord(step.id, record(step.file.file, hash))
+                    val markdown = maps.read(step.id)
+                    // The same text, but a picture here may not be the one the folder holds by its name: as when the map is written,
+                    // the folder gets the ones it lacks, and one it holds another file by goes there under a name of its own, which
+                    // the map's file then points at. Only then do they match, so a sync that fails before links them again.
+                    val given = givePictures(step.id, markdown) ?: return
+                    maps.setSyncRecord(step.id, record(step.file.file, step.file.hash ?: digest(markdown)))
+
+                    if (given != markdown) {
+                        write(step.id, step.file.name)
+                    }
                 }
                 is SyncStep.KeepBoth -> {
                     val text = step.file.text ?: folder.read(step.file.name)
@@ -1020,6 +1159,13 @@ class FolderSync(
                     takePictures(id, text)
                 }
                 is SyncStep.DeleteFile -> {
+                    // Deleted only while it holds the very text compared: changed since, by another device say, it stays, and so
+                    // does its deletion, for the next sync to compare it again (it then comes back as a map).
+                    if (!stillAsCompared(step.record.file, always = true)) {
+                        waiting += step.record.file
+                        return
+                    }
+
                     folder.delete(step.record.file)
                     names -= step.record.file
                     maps.forgetFolderDeletion(step.record)
@@ -1091,15 +1237,10 @@ class FolderSync(
             val markdown = givePictures(id, maps.read(id)) ?: return
             val name = file ?: MapText.fileName(named ?: MapText.outline(markdown, words).title, names, words)
 
-            // A file that changed since the folder was listed isn't written over: the next sync compares it again.
-            if (file != null) {
-                val before = listed[file]
-                val now = folder.describe(file)
-
-                if (before != null && now != null && (now.modified != before.modified || now.size != before.size)) {
-                    waiting += file
-                    return
-                }
+            // A file that changed since this sync compared it isn't written over: the next sync compares it again.
+            if (file != null && !stillAsCompared(file)) {
+                waiting += file
+                return
             }
 
             // Until the file is seen to hold the text, its record says it's being written (see [SyncRecord.writing]).
@@ -1110,6 +1251,14 @@ class FolderSync(
             var written = folder.write(name, markdown, create = file == null)
             names += written.name
             listed[written.name] = written
+
+            // A file this write made is the map's from the moment it's there, empty as it was made: until it's seen to hold the
+            // text whole, its record says it's being written, so a later sync takes it for this device's own write, should
+            // reading it back fail, rather than for a map of its own.
+            if (file == null) {
+                maps.setSyncRecord(id, SyncRecord(address, written.name, digest(""), writing = digest(markdown), install = install))
+            }
+
             val back = readBack(written.name)
 
             if (back != markdown) {
@@ -1134,6 +1283,7 @@ class FolderSync(
                 }
             }
 
+            compared[written.name] = digest(markdown)
             maps.setSyncRecord(id, record(written, digest(markdown)))
 
             // Every Orbit reads the first format: a map written for a later one, a device here that reads only earlier ones can
@@ -1153,6 +1303,39 @@ class FolderSync(
         }
 
         /**
+         * Whether the folder's `name` still holds the text this sync compared
+         * it as ([compared]), checked right before it's written over or
+         * deleted: its time and size as listed, or as this sync wrote it, and
+         * where the folder can't tell a file's time, or `always` (as before a
+         * deletion), the text itself. One gone, or that can't be read whole
+         * now, has changed. Android's storage access can't write or delete a
+         * file only while it's unchanged, so a change that lands between this
+         * check and the write or deletion right after it is the one still
+         * lost (see `docs/architecture.md`).
+         */
+        private fun stillAsCompared(name: String, always: Boolean = false): Boolean {
+            val before = listed[name] ?: return false
+            val expected = compared[name] ?: return false
+            val now = folder.describe(name) ?: return false
+
+            if (now.modified != before.modified || now.size != before.size) {
+                return false
+            }
+
+            if (now.modified != 0L && !always) {
+                return true
+            }
+
+            val text = try {
+                folder.read(name)
+            } catch (changed: IOException) {
+                return false
+            }
+
+            return digest(text) == expected
+        }
+
+        /**
          * The pictures and videos the map points at that the folder doesn't
          * have yet, or has only the start of, as a copy cut short leaves it.
          * The folder keeps one `media/` for every map, so one there by the
@@ -1167,12 +1350,13 @@ class FolderSync(
         private suspend fun givePictures(id: String, markdown: String): String? {
             var text = markdown
 
-            for (name in MediaNames.references(markdown)) {
-                val file = maps.picture(id, name) ?: continue
+            // Its ideas' files too, of any kind, by the names its text gives them.
+            for (name in carriedNames(markdown)) {
+                val file = maps.picture(id, name, fileNamesIn(text)) ?: continue
                 val there = pictures[name]
 
                 if (there == null) {
-                    give(name, file)
+                    text = give(id, name, file, text) ?: return null
                     continue
                 }
 
@@ -1183,13 +1367,17 @@ class FolderSync(
                 when (copyThere(name, file)) {
                     FolderCopy.Same -> remember(file, there)
                     // Gone from the folder since it was listed, or a copy there cut short: this map's goes there whole.
-                    null, FolderCopy.CutShort -> give(name, file)
+                    null, FolderCopy.CutShort -> text = give(id, name, file, text) ?: return null
                     // A copy here that holds only the start of the folder's isn't another file: the folder's stays whole.
                     FolderCopy.Whole -> Unit
                     FolderCopy.Other -> {
                         val renamed = freeName(id, name)
                         text = maps.renameMedia(id, name, renamed, expected = text) ?: return null
-                        maps.picture(id, renamed)?.let { give(renamed, it) }
+                        val copy = maps.picture(id, renamed, fileNamesIn(text))
+
+                        if (copy != null) {
+                            text = give(id, renamed, copy, text) ?: return null
+                        }
                     }
                 }
             }
@@ -1197,10 +1385,50 @@ class FolderSync(
             return text
         }
 
-        private fun give(name: String, file: File) {
+        /**
+         * Puts the map's `name` (`file` here) into the folder's media, and
+         * returns the map's `text` as it's to be written. The folder's app may
+         * name it otherwise: as it names a copy when a file by that name
+         * arrived since `media/` was listed, or a name whose extension doesn't
+         * say its type the way it likes. Then the map points at it by that
+         * name, when a map's file can have it and the map has none by it; one
+         * it can't follow goes from the folder rather than stay there as no
+         * map's, and the next sync finds what the folder holds by the name.
+         * Null when the map changed meanwhile, for the next sync to write.
+         */
+        private suspend fun give(id: String, name: String, file: File, text: String): String? {
             val written = folder.writeMedia(name, file)
-            pictures[name] = written
-            remember(file, written)
+            pictures[written.name] = written
+
+            if (written.name == name) {
+                remember(file, written)
+                return text
+            }
+
+            // An idea's file follows a name of any kind; a picture, video or sound keeps its kind.
+            val files = fileNamesIn(text)
+            val follows = isMediaName(written.name) || (name in files && MediaNames.NAME.matches(written.name))
+
+            if (!follows || maps.picture(id, written.name, files + written.name) != null) {
+                discard(written.name)
+                throw IOException("The folder named $name ${written.name}")
+            }
+
+            val followed = maps.renameMedia(id, name, written.name, expected = text)
+
+            if (followed == null) {
+                discard(written.name)
+                return null
+            }
+
+            maps.picture(id, written.name, fileNamesIn(followed))?.let { remember(it, written) }
+            return followed
+        }
+
+        /** Deletes a picture or video this sync put in the folder's media that no map points at. */
+        private fun discard(name: String) {
+            folder.deleteMedia(name)
+            pictures -= name
         }
 
         /**
@@ -1249,35 +1477,51 @@ class FolderSync(
          * map doesn't have yet. One that would be more than a map keeps, as
          * one from the phone would ([mediaRoom]), stays only in the folder,
          * where it's left as it is, and the notes say so: the map then
-         * still fits in its zip, and comes back from it.
+         * still fits in its zip, and comes back from it. It isn't tried again
+         * until the folder's file changes or the map has more room ([refused]).
+         * One that can't be read now is tried again by the next sync, and
+         * one that goes on failing for [MEDIA_PATIENCE] is a problem the sync
+         * reports ([unfetched]). One this device hasn't room for waits for room,
+         * and the sync says so.
          */
         private suspend fun takePictures(id: String, markdown: String) {
             var carried = maps.mediaSize(id, markdown)
+            val files = fileNamesIn(markdown)
 
-            for (name in MediaNames.references(markdown)) {
+            for (name in carriedNames(markdown)) {
                 val there = pictures[name] ?: continue
 
-                if (maps.picture(id, name) != null || name in refused[address to id].orEmpty()) {
+                if (maps.picture(id, name, files) != null) {
                     continue
                 }
 
                 val room = mediaRoom(carried)
+                val refusal = refused[address to id]?.get(name)
+
+                // Too big before, and the folder's file and the map's room are as they were: it stays only in the folder.
+                if (refusal != null && refusal.first == there && room <= refusal.second) {
+                    continue
+                }
 
                 try {
                     if (there.size > room) {
                         throw MediaRefusedException(words.string(R.string.data_more_than_a_map_keeps))
                     }
 
-                    val added = maps.addMediaFile(id, name, room) { output -> folder.readMedia(name, output) }
+                    val added = maps.addMediaFile(id, name, room, size = there.size, files = files) { output -> folder.readMedia(name, output) }
                     carried += added
+                    refused[address to id]?.remove(name)
                     // Taken from the folder, it's the very file the folder holds: writing the map needn't read it again.
                     maps.picture(id, name)?.takeIf { added > 0 }?.let { remember(it, there) }
                 } catch (tooLarge: MediaRefusedException) {
-                    refused.getOrPut(address to id) { mutableSetOf() } += name
+                    refused.getOrPut(address to id) { mutableMapOf() }[name] = there to room
                     note(tooBig, words.string(R.string.data_folder_too_big_file, name, MapText.outline(markdown, words).title), isPrivate(id))
+                } catch (full: NoRoomForMedia) {
+                    roomless += name
                 } catch (unreadable: IOException) {
                     // One still arriving, or that can't be read now, doesn't keep its map from the text: a later sync fetches it.
                     Logs.warn("OrbitFolder", "A picture or video in the folder couldn't be read", unreadable)
+                    failing += Triple(address, id, name)
                 }
             }
         }
@@ -1286,8 +1530,11 @@ class FolderSync(
          * The pictures, videos and sounds that maps kept in the folder point
          * at but don't have, as one that reaches the folder after its map's
          * text leaves it: fetched now. A map is looked at again only once its
-         * text changes, or while one it points at is still missing, and the
-         * folder's media is listed only then.
+         * text changes, or while one it points at is still missing (one too
+         * big for it included, which is tried again once the folder's file
+         * or the map's room changes), and the folder's media is listed only
+         * then. A map whose media can't be listed or brought here now is
+         * tried again by the next sync, the others going on.
          */
         private suspend fun fetchMissingMedia() {
             for (summary in maps.maps.value.orEmpty()) {
@@ -1297,15 +1544,25 @@ class FolderSync(
                     continue
                 }
 
-                val markdown = maps.read(summary.id)
-                val wanted = MediaNames.references(markdown) - refused[key].orEmpty()
+                try {
+                    val markdown = maps.read(summary.id)
+                    val wanted = carriedNames(markdown)
+                    val files = fileNamesIn(markdown)
 
-                if (wanted.any { maps.picture(summary.id, it) == null }) {
-                    takePictures(summary.id, markdown)
-                }
+                    if (wanted.any { maps.picture(summary.id, it, files) == null }) {
+                        takePictures(summary.id, markdown)
+                    }
 
-                if (wanted.all { maps.picture(summary.id, it) != null || it in refused[key].orEmpty() }) {
-                    complete[key] = summary.contentKey
+                    if (wanted.all { maps.picture(summary.id, it, files) != null }) {
+                        complete[key] = summary.contentKey
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (denied: SecurityException) {
+                    throw denied
+                } catch (failure: Exception) {
+                    Logs.warn("OrbitFolder", "Pictures and videos missing here couldn't be fetched from the folder", failure)
+                    failing += Triple(address, summary.id, "")
                 }
             }
         }
@@ -1444,6 +1701,13 @@ private val CONFLICTED_COPY = Regex("""(.+?) \([^()]*\bconflict(?:ed|o)?\b[^()]*
  * it is before its map takes it: a file still arriving changes before then.
  */
 internal val SETTLING = 30.seconds
+
+/**
+ * How long a picture, video or sound in the folder can go on failing to
+ * reach its map, as one still arriving does for a while, before a sync says
+ * so: then it's more likely one the folder's app can't give whole.
+ */
+internal val MEDIA_PATIENCE = 10.minutes
 
 /** A device's id, as its folders and records in `.orbit/` are named: Orbit's own random one. */
 private val DEVICE_ID = Regex("[A-Za-z0-9-]{8,64}")

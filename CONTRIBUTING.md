@@ -18,6 +18,8 @@ About has "Support Orbit", a link to the donation page, in the libre build only:
 
 The APK for the website and GitHub looks for new versions too, since no store updates it: once a day, it asks GitHub for the latest release, and Settings can turn it off. Only that build looks, made with `-Porbit.checkForUpdates=true`. Every other build leaves updates to its store, F-Droid's and AppGallery's included, and the play build never looks.
 
+Big videos are made smaller (Media3's Transformer) only with an encoder in the phone's hardware, quick and kind to its battery. An emulator has none, so debug builds take its software one too, and `-Porbit.softwareVideoEncoding=true` makes a release that does, to try a release build there.
+
 ```bash
 ./gradlew assembleLibreDebug     # app/build/outputs/apk/libre/debug/app-libre-debug.apk
 ./gradlew assemblePlayDebug      # app/build/outputs/apk/play/debug/app-play-debug.apk
@@ -30,19 +32,44 @@ The libraries the release builds ship are locked in `app/gradle.lockfile`, so a 
 
 ## Before a pull request
 
-Run the unit tests and lint for both builds, the code style check and its rules' tests, and the pages' tests, type check and lint if `web/` changed. CI runs the same checks on every pull request (`.github/workflows/ci.yml`). It also builds both minified release builds, which catches R8 errors and release-only lint errors, and starts the libre one on an emulator (`scripts/smoke-test.sh`): installed, started cold, the welcome map opened, started again, and nothing in the crash log. That catches a library R8 breaks as Orbit starts or draws a map, but nothing further in, so try what you changed in the release build too, as below.
+Run the unit tests and lint for both builds, the code style check and its rules' tests, and the pages' tests, type check and lint if `web/` changed. CI runs the same checks on every pull request (`.github/workflows/ci.yml`). It also builds both minified release builds, which catches R8 errors and release-only lint errors, and runs the device checks below on emulators: both release builds through the smoke test and the journeys, the debug build through the device tests, and Android 10 with the oldest WebViews. They catch a library R8 breaks, and the everyday journeys they take, but not everything a change can touch, so try what you changed in the release build too, as below.
 
 ```bash
 ./gradlew testLibreDebugUnitTest verifyRoborazziLibreDebug testPlayDebugUnitTest lintLibreDebug lintPlayDebug ktlintCheck :code-style:test
 ```
 
-`verifyRoborazziLibreDebug` compares Home and Settings, drawn on a phone and a tablet each way up, in dark and in Spanish (`ScreensTest`), with their pictures in `app/src/test/screenshots/`. When a change means they should look different, `./gradlew recordRoborazziLibreDebug` draws the pictures again: look at them before you commit them. A comparison that fails leaves the screen as it's drawn now beside its picture in `app/build/outputs/roborazzi/`.
+`verifyRoborazziLibreDebug` compares Home and Settings, drawn on a phone and a tablet each way up, in dark, in Spanish and in Brazilian Portuguese (`ScreensTest`), with their pictures in `app/src/test/screenshots/`. When a change means they should look different, `./gradlew recordRoborazziLibreDebug` draws the pictures again: look at them before you commit them. A comparison that fails leaves the screen as it's drawn now beside its picture in `app/build/outputs/roborazzi/`.
 
 `./gradlew ktlintFormat` applies the Kotlin code style: blank lines around blocks (`if`s, loops, composables with content…) and around members with a doc comment. `ktlintCheck` also asks for the app's own components where Material's crash a tablet's panes (AGENTS.md): `ui/ListRow`, `ui/OrbitSlider` and `ui/OrbitSnackbarHost`. The rules are in `code-style/`, and `:code-style:test` checks what they report and what `ktlintFormat` makes of it.
 
 Then try what changed on a phone and on a tablet, each way up, and in the minified release build: R8 can break a library that works in a debug build. Changes to the screens' layout need both: the app has its own layouts for tablets and for phones on their side.
 
 Pull requests aren't merged on GitHub directly: an accepted change ships in the next release, with its author credited (`Co-authored-by`), and the pull request is closed with a link to that release.
+
+## Device tests
+
+Unit tests run Android's framework on the JVM (Robolectric) and the pages in a pretend browser (happy-dom). These run Orbit on an emulator or a phone, its maps drawn by the device's own WebView, as people use it:
+
+- **The device tests** (`app/src/androidTest/`), in Orbit's own process, on its debug build: a map loading and drawing on the device's WebView, an idea typed on the map and saved to the map's file, a page whose main frame doesn't load ("The map didn't load"), a page whose process Android stops ("The map stopped"), each loaded again with nothing lost, and a job the spare page never finishes, called off on the page, which stops its work and goes on with the next one. They read and touch the map's page through its own document, and fail the WebView's own way: a navigation where nothing answers, `chrome://kill`, a picture whose loading never ends.
+- **The journeys** (`journeys/`), an APK of their own, in a process of their own, that drives whichever Orbit is installed through its screen alone (UiAutomator, which reads the map's page as TalkBack does), so R8's renaming doesn't touch them: an idea added on a map, edited, found with its search and there after a restart; a panel that stays open as the phone turns; a file opened with Orbit and text, styled text and a file shared to it, each a new map, as another app hands them (the journeys' own app, through its file provider); an idea caught from the Quick Settings tile; and a map's screen, and a private map's behind the screen lock, as Android brings them back after it stopped Orbit's process. Each starts from a fresh install of the build.
+- **The oldest Android and WebView:** Orbit's minimum is Android 10 with Chromium 99. On an Android 10 emulator without Google's apps (`system-images;android-29;default;x86_64`), the smoke test first checks that the WebView it came with, Chromium 74, gets Orbit's notice instead of a map; then `scripts/aosp-webview.sh` makes Chromium 101, the closest above 99 that Android's open-source project shipped for Android 10, which installs as an update of that image's own, and the smoke test and the journeys run on it.
+
+```bash
+./gradlew assembleLibreRelease assemblePlayRelease assembleLibreDebug assembleLibreDebugAndroidTest :journeys:assembleDebug
+export journeys=journeys/build/outputs/apk/debug/journeys-debug.apk
+scripts/smoke-test.sh app/build/outputs/apk/libre/release/*.apk build/smoke/libre $journeys
+scripts/smoke-test.sh app/build/outputs/apk/play/release/*.apk build/smoke/play $journeys
+scripts/device-tests.sh app/build/outputs/apk/libre/debug/app-libre-debug.apk app/build/outputs/apk/androidTest/libre/debug/app-libre-debug-androidTest.apk $journeys build/device
+# Android 10, on an emulator of its own: its own WebView, then Chromium 101.
+scripts/aosp-webview.sh build/webview.apk
+SMOKE_AVD=orbit-android-10 SMOKE_IMAGE="system-images;android-29;default;x86_64" scripts/with-emulator.sh bash -c '
+    scripts/smoke-test.sh app/build/outputs/apk/libre/release/*.apk build/oldest/stock-webview &&
+    SMOKE_WEBVIEW=build/webview.apk scripts/smoke-test.sh app/build/outputs/apk/libre/release/*.apk build/oldest/chromium-101 "$journeys"'
+```
+
+They take the device adb has (`ANDROID_SERIAL` picks one of several), and replace the Orbit on it, maps included: use an emulator. `scripts/with-emulator.sh` runs a command on an emulator of its own, made from `SMOKE_IMAGE` when it doesn't exist, wiped as it starts and stopped after, on `SMOKE_PORT` (5640), as the maintainers' runner does: give it a virtual device no one else uses. Each script keeps its screenshots and logs in the folder it's given, and the screen and its layout as any check failed.
+
+A check finds things by what Orbit's screens say, in English, as the emulators speak it. When a change renames what a check looks for, change the check with it; when it adds a way in or out of Orbit, add a journey. Checks wait for what they look for, never for a set time, and never repeat a step until it happens to work: on a busy machine a check only takes longer.
 
 ## Changing what the app keeps
 
@@ -58,7 +85,7 @@ The maps are drawn by pages inside the app's WebViews, written in TypeScript in 
    ```bash
    cd web
    ORBIT_PATH=../../orbit bun run build       # default ORBIT_PATH: ../../orbit
-   ORBIT_PATH=../../orbit bun run test        # the goals' math, rings by themselves, maps saved and read back, the pages' words, maps they lock, and every release's maps
+   ORBIT_PATH=../../orbit bun run test        # the goals' math, rings by themselves, maps saved and read back, the pages' words, maps they lock, every release's maps, and the presentations' pages: in browsers, on second screens and TVs, and web pages presented and printed
    ORBIT_PATH=../../orbit bun run typecheck   # the pages' types, against Orbit's, with JavaScript's built-ins up to ES2022
    ORBIT_PATH=../../orbit bun run lint        # the library's code style in web/, art/ and scripts/; add -- --fix to apply it
    ```
@@ -79,7 +106,7 @@ Debug builds also put in the city library (`app/src/debug/assets/samples/`), a m
 
 ## The emoji names
 
-The icon sheet's search finds emoji by the names and keywords Unicode's CLDR gives them, in English and Spanish, with the emoji people use most first, as Unicode ranks them. `bun scripts/emoji-names.ts` writes them into `app/src/main/assets/emoji/` from Unicode's emoji list, its emoji frequency page and CLDR; the versions it reads are at its top. Unicode's data comes under the Unicode License v3, which the licenses screen shows (`app/config/`).
+The icon sheet's search finds emoji by the names and keywords Unicode's CLDR gives them, in English, Spanish and Brazilian Portuguese, with the emoji people use most first, as Unicode ranks them. `bun scripts/emoji-names.ts` writes them into `app/src/main/assets/emoji/` from Unicode's emoji list, its emoji frequency page and CLDR; the versions it reads are at its top. Unicode's data comes under the Unicode License v3, which the licenses screen shows (`app/config/`).
 
 ## The baseline profile
 
@@ -99,9 +126,9 @@ ANDROID_SERIAL=emulator-5554 ./gradlew :app:generateBaselineProfile   # ANDROID_
 
 TVs show presentations with the audience's page, as a Google Cast receiver. Orbit's is registered at the [Google Cast SDK Developer Console](https://cast.google.com/publish) as `68BB88D5`, served from https://orbit.hyuchia.com/cast, and `gradle.properties` builds the play app with it (`orbit.castReceiverId`).
 
-- **The receiver:** `bun run build` in `web/` writes it to `web/dist/cast-receiver/`, from the same Orbit as the app's pages: as `index.html` and `receiver.js`, and as one file with its script inside, `orbit-cast-receiver.html`, which is what https://orbit.hyuchia.com/cast serves. TVs load it from its address every time, so put a new one there when the pages change, before the play build that needs it ships (RELEASE.md, "The Cast receiver").
+- **The receiver:** `bun run build` in `web/` writes it to `web/dist/cast-receiver/`, from the same Orbit as the app's pages: as `index.html` and `receiver.js`, and as one file with its script inside, `orbit-cast-receiver.html`. https://orbit.hyuchia.com/cast serves the two files: the page, a few kilobytes, whose `<script>` names the script's full address, and the script on its own, at an address of its own for each release. The page loads the script as a module from another origin, and the page at /cast runs in a sandbox, so its requests say `Origin: null`: the script's host has to answer with `Access-Control-Allow-Origin: *`, or TVs don't run it. TVs load the page from its address every time, so put a new one there when the pages change, before the play build that needs it ships (RELEASE.md, "The Cast receiver").
 - **Testing:** until the receiver is published in the console, it only starts on the Chromecasts and Google TVs added there as test devices.
 - **Versions:** the phone says hello with the protocol it speaks, and the receiver answers with its own, the newest map format its Orbit reads, and its Orbit's commit (`web/receiver-protocol.ts`, `present/ScreenVersions.kt`). Every version of the app casts to the same receiver, so the receiver only ever adds to what it understands: it keeps following every older command. A new command raises `AUDIENCE_PROTOCOL` and `RECEIVER_PROTOCOL` together and says its protocol in `AudienceCommand.protocol`, so a TV whose receiver is older doesn't get it. Publish that receiver before the app that sends it ships.
 - **A receiver of your own:** put that folder on any HTTPS host, register it as a Custom Receiver (a one-time $5), and build with `-Porbit.castReceiverId=ABCD1234`, or put `orbit.castReceiverId=ABCD1234` in `~/.gradle/gradle.properties`.
 
-Without an ID (`-Porbit.castReceiverId=`), in the libre build, and on phones without Google Play services, the app presents on second screens and in browsers, and casts the phone's screen. A TV can't reach the pictures kept on the phone, so they travel inside the map, shrunk to 1280 pixels.
+Without an ID (`-Porbit.castReceiverId=`), in the libre build, and on phones without Google Play services, the app presents on second screens and in browsers, and casts the phone's screen. A TV can't reach the pictures kept on the phone, so they travel inside the map, shrunk to 1280 pixels, up to 48 MiB of them.

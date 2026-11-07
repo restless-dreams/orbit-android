@@ -126,9 +126,9 @@ fun TrashScreen(onOpen: (String) -> Unit, onBack: () -> Unit) {
         }
     }
 
-    fun say(text: String) {
+    fun say(text: String, duration: SnackbarDuration = SnackbarDuration.Short) {
         snackbars.currentSnackbarData?.dismiss()
-        scope.launch { snackbars.showSnackbar(text) }
+        scope.launch { snackbars.showSnackbar(text, duration = duration) }
     }
 
     SettingsScaffold(
@@ -221,11 +221,14 @@ fun TrashScreen(onOpen: (String) -> Unit, onBack: () -> Unit) {
                     val shown = items.mapTo(HashSet()) { it.folder.name }
 
                     scope.launch {
-                        maps.emptyTrash(keeping = { it.folder.name !in shown })
+                        val stayed = maps.emptyTrash(keeping = { it.folder.name !in shown })
                         // Only what went is counted: nothing does while a newer version keeps the maps.
                         val gone = shown.count { name -> maps.trash.value.none { it.folder.name == name } }
 
-                        if (gone > 0) {
+                        // Maps whose files didn't all delete are still there, and that's what's said: never that they went.
+                        if (stayed > 0) {
+                            say(resources.getQuantityString(R.plurals.settings_trash_not_emptied, stayed, stayed), SnackbarDuration.Long)
+                        } else if (gone > 0) {
                             say(resources.getQuantityString(R.plurals.settings_trash_emptied, gone, gone))
                         }
                     }
@@ -249,10 +252,11 @@ fun TrashScreen(onOpen: (String) -> Unit, onBack: () -> Unit) {
                     deleting = null
 
                     scope.launch {
-                        maps.deleteForever(item)
-
-                        if (maps.trash.value.none { it.folder == item.folder }) {
+                        // Nothing goes while a newer version keeps the maps, and nothing's said; a map whose files didn't all delete is still there, and that's said.
+                        if (maps.deleteForever(item)) {
                             say(resources.getString(R.string.settings_deleted_for_good, item.shownTitle()))
+                        } else if (maps.writable.value) {
+                            say(resources.getString(R.string.settings_could_not_delete_for_good, item.shownTitle()), SnackbarDuration.Long)
                         }
                     }
                 }) { Text(stringResource(R.string.settings_delete_for_good)) }

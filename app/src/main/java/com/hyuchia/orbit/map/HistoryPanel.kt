@@ -156,8 +156,9 @@ fun HistoryPanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
 
 @Composable
 private fun VersionList(versions: List<MapVersion>, history: HistoryUi, onShow: (Long?) -> Unit, onSummarize: (Long) -> Unit) {
+    // Times, and the days they're grouped by, follow the phone's time zone as it changes.
     val words = rememberTimeWords()
-    val zone = ZoneId.systemDefault()
+    val zone = words.zone
 
     // Times within the hour say how long ago: they move on while the panel is open.
     val now by produceState(System.currentTimeMillis()) {
@@ -444,7 +445,7 @@ internal fun whenWords(time: Long, now: Long, words: TimeWords): ShownText {
 }
 
 /** Why a version was kept, in words, as of `now`; null for one from before reasons were kept. */
-internal fun reasonWords(reason: VersionReason?, now: Long, words: TimeWords, zone: ZoneId = ZoneId.systemDefault()): ShownText? = when (reason) {
+internal fun reasonWords(reason: VersionReason?, now: Long, words: TimeWords, zone: ZoneId = words.zone): ShownText? = when (reason) {
     VersionReason.Opened -> ShownText.Resource(R.string.map_history_why_opened)
     VersionReason.Editing -> ShownText.Resource(R.string.map_history_why_editing)
     is VersionReason.Removing -> if (reason.under > 0) {
@@ -548,7 +549,7 @@ private fun restoringWords(from: Long?, now: Long, words: TimeWords, zone: ZoneI
  * map: "Restored the map as it was today at 14:32", or "on Monday at 9:14",
  * or "on October 3, 2025".
  */
-internal fun restoredMessage(time: Long, words: TimeWords, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): ShownText {
+internal fun restoredMessage(time: Long, words: TimeWords, now: Long = System.currentTimeMillis(), zone: ZoneId = words.zone): ShownText {
     val date = day(time, zone)
     val at = words.clock(time)
 

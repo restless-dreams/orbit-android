@@ -26,7 +26,7 @@ Download the APK from [orbit.hyuchia.com/android](https://orbit.hyuchia.com/andr
 - **Between your devices:** send a map to a phone or tablet nearby, encrypted end to end, or keep every map as a markdown file in a folder you sync.
 - **Phones, tablets and Chromebooks,** either way up, with a keyboard and a mouse too.
 - **Your maps stay yours:** no account, no ads and no tracking. Maps are plain files on your phone, with versions, a trash and backups.
-- **In English and Spanish.**
+- **In English, Spanish and Brazilian Portuguese.**
 
 Every feature, area by area, is in [docs/features.md](docs/features.md).
 
@@ -47,4 +47,4 @@ Copyright © 2026 Diana Islas Ocampo.
 
 Orbit for Android is free software: you can redistribute it and/or modify it under the terms of the [GNU General Public License](LICENSE) as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. The `play` build links the Google Play services libraries, under the [additional permission](LICENSE-EXCEPTION.md) in section 7 of the license; the `libre` build has none of them.
 
-The maps are drawn by [Orbit](https://orbit.hyuchia.com), under the MIT License, and the app's font is [Google Sans Flex](https://github.com/googlefonts/googlesans-flex), under the SIL Open Font License 1.1. Orbit breaks long words in English and Spanish with the [hyph-utf8 package](https://www.hyphenation.org/tex)'s hyphenation patterns: Gerard D.C. Kuiken's for American English, under its own permissive notice, and Javier Bezos and CervanTeX's for Spanish, under the MIT License. The app lists every library it's built with, and their licenses, under Settings, About.
+The maps are drawn by [Orbit](https://orbit.hyuchia.com), under the MIT License, and the app's font is [Google Sans Flex](https://github.com/googlefonts/googlesans-flex), under the SIL Open Font License 1.1. Orbit breaks long words in English, Spanish and Portuguese with the [hyph-utf8 package](https://www.hyphenation.org/tex)'s hyphenation patterns: Gerard D.C. Kuiken's for American English, under its own permissive notice, Javier Bezos and CervanTeX's for Spanish, under the MIT License, and Pedro J. de Rezende, J. Joao Dias Almeida, Leonardo Araujo and Aline Benevides's for Portuguese, under the BSD 3-Clause License. The app lists every library it's built with, and their licenses, under Settings, About.

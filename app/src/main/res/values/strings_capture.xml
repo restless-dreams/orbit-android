@@ -24,6 +24,12 @@
         <item quantity="one">Added %1$d idea to %2$s</item>
         <item quantity="other">Added %1$d ideas to %2$s</item>
     </plurals>
+    <!-- Ideas went to a private map that locked while they were being added: no map is named. -->
+    <string name="capture_added_idea_to_locked_map">Added your idea</string>
+    <plurals name="capture_added_ideas_to_locked_map">
+        <item quantity="one">Added %d idea</item>
+        <item quantity="other">Added %d ideas</item>
+    </plurals>
     <!-- %1$s is the map's title. -->
     <string name="capture_problem">Orbit couldn\'t add to %1$s. Your ideas are still here.</string>
     <!-- %1$s is the map's title, %2$s what went wrong, as the system says it. -->

@@ -4,6 +4,7 @@ import com.hyuchia.orbit.data.AppSettings
 import com.hyuchia.orbit.data.MapMetadata
 import com.hyuchia.orbit.data.MapOutline
 import com.hyuchia.orbit.data.MapSummary
+import com.hyuchia.orbit.data.MapText
 import com.hyuchia.orbit.data.SortOrder
 import com.hyuchia.orbit.privacy.PrivateView
 import kotlinx.coroutines.currentCoroutineContext
@@ -68,6 +69,21 @@ class HomeStateTest {
         assertEquals(listOf(null, "Opening story about Lisbon"), state.results?.map { it.snippet })
         assertEquals("lisbon", state.searched)
         assertEquals(emptyList<SearchHit>(), homeState(maps, "lisbon basil", AppSettings(), tag = null).results)
+    }
+
+    @Test
+    fun `a YAML map is found by its ideas and notes, never by the words of its structure`() {
+        val yaml = "title: Biology\nnodes:\n  - text: Cells\n    status: done\n    note: The smallest unit of life\n    children:\n      - text: Nucleus\n"
+        val biology = map("biology", "Biology", MapText.searchText(yaml))
+
+        // Every YAML map has these words, as keys or values no one writes to be read.
+        for (search in listOf("children", "text", "note", "status done")) {
+            assertEquals(search, emptyList<SearchHit>(), homeState(listOf(biology), search, AppSettings(), tag = null).results)
+        }
+
+        // A note is found, and shown as it reads.
+        assertEquals(listOf("The smallest unit of life"), homeState(listOf(biology), "smallest", AppSettings(), tag = null).results?.map { it.snippet })
+        assertEquals(listOf("Nucleus"), homeState(listOf(biology), "nucleus", AppSettings(), tag = null).results?.map { it.snippet })
     }
 
     @Test

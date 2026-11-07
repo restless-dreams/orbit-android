@@ -6,7 +6,9 @@
     to make. OrbitBackupAgent picks the files these rules allow, and keeps a backup within its
     quota: the maps' text first, the most recently changed first, then as many of their pictures
     and videos as fit. Settings, Export all maps keeps everything, history, pictures and videos
-    included.
+    included. Android restores folder-deletions.json, named here on its own, only in its very
+    place, so OrbitBackupAgent reads its bytes itself, into a file beside it that takes its place
+    once all of them came.
 -->
 <data-extraction-rules>
     <cloud-backup>

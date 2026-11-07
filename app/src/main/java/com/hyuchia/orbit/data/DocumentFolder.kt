@@ -7,6 +7,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
 import android.system.Os
+import android.system.OsConstants
 import androidx.core.net.toUri
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
@@ -71,13 +72,15 @@ class DocumentFolder(private val resolver: ContentResolver, private val tree: Ur
     /**
      * A file's text, in whatever encoding it was written (see [decodeText]).
      * One that stops partway through a character, or isn't the size it was
-     * listed at, is still being written, by a sync app say: [StillArriving].
+     * listed at (an empty one too, as a file being written starts), is still
+     * being written, by a sync app say: [StillArriving]. One that holds more
+     * than a map may is [TooLargeForAMap], whatever size it was listed at.
      */
     override fun read(name: String): String {
-        val bytes = resolver.openInputStream(uri(name))?.use { it.readBytes() } ?: throw FileNotFoundException(name)
+        val bytes = readDocument(uri(name), name)
         val size = listed[name]?.size ?: -1
 
-        if (endsMidCharacter(bytes) || (size > 0 && size != bytes.size.toLong())) {
+        if (endsMidCharacter(bytes) || (size >= 0 && size != bytes.size.toLong())) {
             throw StillArriving(name, decodeText(bytes))
         }
 
@@ -121,8 +124,9 @@ class DocumentFolder(private val resolver: ContentResolver, private val tree: Ur
         val input = resolver.openInputStream(document(child.id)) ?: return false
         val copied = input.use { it.copyTo(into) }
 
-        // One that isn't the size it was listed at is still being written, by a sync app say: what's there is only its start.
-        if (child.file.size > 0 && copied != child.file.size) {
+        // One that isn't the size it was listed at (an empty one too) is still being written, by a sync app say: what's there
+        // is only its start.
+        if (child.file.size >= 0 && copied != child.file.size) {
             throw IOException("$name is still arriving")
         }
 
@@ -136,11 +140,16 @@ class DocumentFolder(private val resolver: ContentResolver, private val tree: Ur
             document(existing.id)
         } else {
             val folder = media ?: makeMediaFolder()
-            DocumentsContract.createDocument(resolver, document(folder), mediaType(name), name) ?: throw IOException("Couldn't make $name")
+            DocumentsContract.createDocument(resolver, document(folder), storedType(name), name) ?: throw IOException("Couldn't make $name")
         }
 
         // A copy the folder didn't take whole goes, unless it was there before: the next sync tries again.
         val written = removedOnFailure(uri, made = existing == null) {
+            // A new one, where the folder is on this device, isn't started without room for it and some to spare.
+            if (existing == null && roomFor(uri).let { it > 0 && it < from.length() + ROOM_LEFT_FREE }) {
+                throw NoRoomForMedia(name)
+            }
+
             from.inputStream().use { input -> writeOver(uri, from.length()) { input.copyTo(it) } }
             val written = describe(uri) ?: throw FileNotFoundException(name)
 
@@ -153,6 +162,16 @@ class DocumentFolder(private val resolver: ContentResolver, private val tree: Ur
 
         mediaDocuments()[written.name] = written
         return written.file
+    }
+
+    override fun deleteMedia(name: String) {
+        val child = mediaDocuments()[name] ?: return
+
+        if (!DocumentsContract.deleteDocument(resolver, document(child.id))) {
+            throw IOException("Couldn't delete $name")
+        }
+
+        mediaDocuments().remove(name)
     }
 
     override fun deviceRecords(): List<FolderFile> {
@@ -169,7 +188,7 @@ class DocumentFolder(private val resolver: ContentResolver, private val tree: Ur
 
     override fun readDeviceRecord(name: String): String {
         val id = records[name] ?: throw FileNotFoundException(name)
-        return resolver.openInputStream(document(id))?.use { it.readBytes().decodeToString() } ?: throw FileNotFoundException(name)
+        return readDocument(document(id), name).decodeToString()
     }
 
     override fun writeDeviceRecord(name: String, text: String) {
@@ -207,7 +226,7 @@ class DocumentFolder(private val resolver: ContentResolver, private val tree: Ur
 
     override fun readStudyRecord(device: String, name: String): String {
         val id = studyRecords[device to name] ?: throw FileNotFoundException(name)
-        return resolver.openInputStream(document(id))?.use { it.readBytes().decodeToString() } ?: throw FileNotFoundException(name)
+        return readDocument(document(id), name).decodeToString()
     }
 
     override fun writeStudyRecord(device: String, name: String, text: String) {
@@ -261,8 +280,40 @@ class DocumentFolder(private val resolver: ContentResolver, private val tree: Ur
 
     private fun document(id: String): Uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
 
+    /**
+     * A document's bytes, no more than a map's text may hold: one with more
+     * is [TooLargeForAMap], whatever size the folder said it was, or when it
+     * couldn't say.
+     */
+    private fun readDocument(uri: Uri, name: String): ByteArray {
+        val bytes = resolver.openInputStream(uri)?.use { it.readAtMost(MAP_TEXT_LIMIT.toInt() + 1) } ?: throw FileNotFoundException(name)
+
+        if (bytes.size > MAP_TEXT_LIMIT) {
+            throw TooLargeForAMap(name)
+        }
+
+        return bytes
+    }
+
     private fun writeBytes(uri: Uri, bytes: ByteArray) {
         writeOver(uri, bytes.size.toLong()) { it.write(bytes) }
+    }
+
+    /**
+     * How many bytes the storage a document is on has free, when it's a file
+     * on this device, as one a folder on the phone's storage is; 0 when it
+     * can't say, as for a cloud's document, which says so as it's written.
+     */
+    private fun roomFor(uri: Uri): Long = try {
+        resolver.openFileDescriptor(uri, "r")?.use { document ->
+            if (OsConstants.S_ISREG(Os.fstat(document.fileDescriptor).st_mode)) {
+                Os.fstatvfs(document.fileDescriptor).let { it.f_bavail * it.f_frsize }
+            } else {
+                0L
+            }
+        } ?: 0L
+    } catch (unknown: Exception) {
+        0L
     }
 
     /**

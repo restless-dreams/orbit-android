@@ -24,6 +24,8 @@ import java.util.Locale
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
 
 class BrowserPresentingTest {
     /** What a phone in English shows. */
@@ -121,6 +123,47 @@ class BrowserPresentingTest {
         room.audience.send(AudienceCommand.Playback(true))
         now += 3_000
         assertEquals("data: {\"type\":\"media\",\"id\":\"tram\",\"kind\":\"video\",\"playing\":true,\"at\":3.0}", join(room).readLine())
+    }
+
+    @Test
+    fun aBrowserCatchingUpAsThePresenterStepsOnHearsThatStep() {
+        // The clock is read as a joining browser catches up with a video playing, before it follows the room: there,
+        // the presenter steps on, from another thread, as the phone's main thread does.
+        val stepping = AtomicBoolean(false)
+        var stepper: Thread? = null
+        lateinit var room: BrowserPresenting
+
+        val clock = {
+            if (stepping.compareAndSet(true, false)) {
+                val step = thread { room.audience.send(AudienceCommand.Step("lisbon", 0, 2)) }
+                stepper = step
+                val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+
+                // Until the step has gone out, or waits for the browser to finish catching up.
+                while (step.state !in setOf(Thread.State.TERMINATED, Thread.State.BLOCKED, Thread.State.WAITING) && System.nanoTime() < until) {
+                    Thread.sleep(5)
+                }
+            }
+
+            now
+        }
+
+        room = BrowserPresenting(::asset, english, mapFolder, scope, JoiningOptions(askNames = false), preferredPort = 0, policy = anyone, listenOn = { null }, clock = clock)
+        rooms += room
+        room.start()
+        showMap(room)
+        room.audience.send(AudienceCommand.Media("tram", MediaKind.Video, playing = true, at = 0.0))
+        stepping.set(true)
+        val lines = join(room)
+        assertEquals("data: {\"type\":\"media\",\"id\":\"tram\",\"kind\":\"video\",\"playing\":true,\"at\":0.0}", lines.readLine())
+        assertEquals("", lines.readLine())
+        stepper!!.join(10_000)
+
+        // What comes next: the step it was catching up as, then what the presenter does after.
+        room.audience.send(AudienceCommand.Captions(false))
+        assertEquals("data: {\"type\":\"step\",\"id\":\"lisbon\",\"index\":0,\"total\":2}", lines.readLine())
+        assertEquals("", lines.readLine())
+        assertEquals("data: {\"type\":\"captions\",\"on\":false}", lines.readLine())
     }
 
     @Test

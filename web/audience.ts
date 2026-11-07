@@ -61,7 +61,11 @@ const CATCH_UP = 2;
 let map: OrbitSVGRenderer | null = null;
 let baseUrl: string | undefined;
 let captionsOn = true;
-let current: string | null = null;
+/**
+ * The idea the presenter is on, which the map flies to: its caption comes in a moment later, as the map arrives, so
+ * quick steps back and forth go by this, never by the caption still on its way.
+ */
+let destination: string | null = null;
 /** Under the map, the captions' room only grows during a presentation, so the map doesn't move with every step. */
 let tallestCaption = 0;
 /**
@@ -210,6 +214,7 @@ const show = (command: Extract<AudienceCommand, { type: 'show' }>): void => {
     onMediaState: mediaState,
   });
   page.classList.add('audience--showing');
+  destination = command.focus ?? null;
 
   if (command.focus) {
     fillCaption(command.focus);
@@ -222,10 +227,11 @@ const step = (id: string, index: number, total: number): void => {
   closeMedia();
   progress.style.transform = `scaleX(${total > 0 ? (index + 1) / total : 0})`;
 
-  if (!map || id === current) {
+  if (!map || id === destination) {
     return;
   }
 
+  destination = id;
   // The bar takes the color of the idea it reached.
   const color = map.getNodeColor(id);
 
@@ -251,7 +257,7 @@ const end = (): void => {
   closeMedia();
   map?.destroy();
   map = null;
-  current = null;
+  destination = null;
   mapElement.replaceChildren();
   page.classList.remove('audience--showing');
   progress.style.transform = 'scaleX(0)';
@@ -448,7 +454,6 @@ const hideStill = (): void => {
  * focus on the title, and says what that focus is on.
  */
 const fillCaption = (id: string): void => {
-  current = id;
   const tree = map?.getDocument()?.root;
   const node = tree ? findNodeById(tree, id) : null;
   title.textContent = node ? [node.icon, node.text].filter(Boolean).join(' ') : '';

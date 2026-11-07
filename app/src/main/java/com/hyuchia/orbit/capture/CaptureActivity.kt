@@ -81,6 +81,7 @@ import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
 import com.hyuchia.orbit.data.AppSettings
 import com.hyuchia.orbit.data.MapSummary
+import com.hyuchia.orbit.privacy.KeyboardsDontLearn
 import com.hyuchia.orbit.privacy.PrivateOnScreen
 import com.hyuchia.orbit.privacy.PrivateView
 import com.hyuchia.orbit.privacy.ShowPrivateMapsButton
@@ -93,6 +94,8 @@ import com.hyuchia.orbit.theme.ThemedSystemBars
 import com.hyuchia.orbit.theme.appIsDark
 import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.systemReason
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -105,6 +108,19 @@ fun captureIntent(context: Context, mapId: String? = null): Intent =
     Intent(context, CaptureActivity::class.java)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         .apply { mapId?.let { putExtra(EXTRA_CAPTURE_MAP, it) } }
+
+/**
+ * What another app shared, to catch as ideas: its subject and its text, a
+ * line each, once when they're the same. Text with styles, as a notes app
+ * or a browser shares it, comes as a CharSequence that isn't a String: its
+ * words come all the same.
+ */
+internal fun sharedText(intent: Intent): String =
+    listOfNotNull(intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT), intent.getCharSequenceExtra(Intent.EXTRA_TEXT))
+        .map { it.toString() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .joinToString("\n")
 
 /**
  * Catches ideas into a map without opening it: a sheet over whatever is on
@@ -129,10 +145,7 @@ class CaptureActivity : ComponentActivity() {
 
         // A page warms while the idea is typed, so adding it is quick.
         app.pages.warm()
-        val shared = listOfNotNull(intent.getStringExtra(Intent.EXTRA_SUBJECT), intent.getStringExtra(Intent.EXTRA_TEXT))
-            .filter { it.isNotBlank() }
-            .distinct()
-            .joinToString("\n")
+        val shared = sharedText(intent)
         val requested = intent.getStringExtra(EXTRA_CAPTURE_MAP)
 
         setContent {
@@ -241,24 +254,23 @@ private fun CaptureSheet(maps: List<MapSummary>, initialMapId: String?, initialT
 
         adding = true
         problem = null
+        val container = context.container
+        val typed = text.text
 
         scope.launch {
-            try {
-                context.container.capture.add(target.id, text.text)
-            } catch (failed: Exception) {
-                adding = false
-                problem = captureProblem(resources, target.title, failed)
-                return@launch
-            }
+            // Said as private maps are once the ideas are in, which takes a moment: the map as it is then, and the lock.
+            val hidesNow = { container.privateMaps.view.value.hides(container.maps.summary(target.id) ?: target) }
 
-            val message = if (ideas.size == 1) {
-                resources.getString(R.string.capture_added_idea, target.title)
-            } else {
-                resources.getQuantityString(R.plurals.capture_added_ideas, ideas.size, ideas.size, target.title)
+            when (val outcome = captureInto(target, ideas.size, resources, hidesNow) { container.capture.add(target.id, typed) }) {
+                is CaptureOutcome.Added -> {
+                    Toast.makeText(context.applicationContext, outcome.said, Toast.LENGTH_SHORT).show()
+                    onDone()
+                }
+                is CaptureOutcome.NotAdded -> {
+                    adding = false
+                    problem = outcome.problem
+                }
             }
-
-            Toast.makeText(context.applicationContext, message, Toast.LENGTH_SHORT).show()
-            onDone()
         }
     }
 
@@ -304,36 +316,42 @@ private fun CaptureSheet(maps: List<MapSummary>, initialMapId: String?, initialT
                 },
                 onUnlock = if (choices.unlockInList) ({ unlocking.ask() }) else null,
             )
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = {
-                    val label = if (ideas.size > 1) {
-                        pluralStringResource(R.plurals.capture_ideas_one_on_each_line, ideas.size, ideas.size)
-                    } else {
-                        stringResource(R.string.capture_your_idea)
-                    }
 
-                    Text(label)
-                },
-                placeholder = { Text(stringResource(R.string.capture_one_idea_on_each_line)) },
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                minLines = 2,
-                maxLines = 8,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 96.dp)
-                    .focusRequester(focus)
-                    // With a keyboard, Ctrl+Enter adds, as Enter starts a new line, a new idea.
-                    .onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown && event.key == Key.Enter && event.isCtrlPressed) {
-                            add()
-                            true
+            // Ideas for a private map, chosen or waited for while it's locked, ask keyboards not to learn from them, as
+            // what's typed into the map does.
+            KeyboardsDontLearn(enabled = map?.metadata?.isPrivate == true || waitingFor != null) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = {
+                        val label = if (ideas.size > 1) {
+                            pluralStringResource(R.plurals.capture_ideas_one_on_each_line, ideas.size, ideas.size)
                         } else {
-                            false
+                            stringResource(R.string.capture_your_idea)
                         }
+
+                        Text(label)
                     },
-            )
+                    placeholder = { Text(stringResource(R.string.capture_one_idea_on_each_line)) },
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                    minLines = 2,
+                    maxLines = 8,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 96.dp)
+                        .focusRequester(focus)
+                        // With a keyboard, Ctrl+Enter adds, as Enter starts a new line, a new idea.
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown && event.key == Key.Enter && event.isCtrlPressed) {
+                                add()
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                )
+            }
+
             // The sheet has a window of its own, focused once it's up (from Quick Settings, once the panel
             // folds away) and again after a map is chosen: the keyboard comes up then, ready for the idea.
             val window = LocalWindowInfo.current
@@ -379,6 +397,50 @@ private fun CaptureSheet(maps: List<MapSummary>, initialMapId: String?, initialT
             }
         }
     }
+}
+
+/** How adding ideas to a map went, in the words quick capture says it with. */
+internal sealed interface CaptureOutcome {
+    /** They're in the map: `said` says so. */
+    data class Added(val said: String) : CaptureOutcome
+
+    /** They aren't: `problem` says why, or is null for a private map that locked meanwhile, which isn't named. */
+    data class NotAdded(val problem: String?) : CaptureOutcome
+}
+
+/**
+ * Adds `ideas` ideas to `target` with `add`, and says how it went as private
+ * maps are once it's done (`hidesNow`, asked then), not as they were when
+ * it began: adding takes a moment, and they can lock meanwhile, as when the
+ * screen turns off. A private map that's locked by then isn't named: the
+ * ideas are said to be added, to no map named, and what went wrong goes
+ * unsaid, as when they lock while it shows (the map leaves the list, and
+ * the ideas stay, to add once it's unlocked).
+ */
+internal suspend fun captureInto(target: MapSummary, ideas: Int, resources: Resources, hidesNow: () -> Boolean, add: suspend () -> Unit): CaptureOutcome {
+    val failure = try {
+        add()
+        null
+    } catch (failed: Exception) {
+        // Unless the sheet itself went, anything that stopped the ideas is what went wrong.
+        currentCoroutineContext().ensureActive()
+        failed
+    }
+
+    val hidden = hidesNow()
+
+    if (failure != null) {
+        return CaptureOutcome.NotAdded(if (hidden) null else captureProblem(resources, target.title, failure))
+    }
+
+    val said = when {
+        hidden && ideas == 1 -> resources.getString(R.string.capture_added_idea_to_locked_map)
+        hidden -> resources.getQuantityString(R.plurals.capture_added_ideas_to_locked_map, ideas, ideas)
+        ideas == 1 -> resources.getString(R.string.capture_added_idea, target.title)
+        else -> resources.getQuantityString(R.plurals.capture_added_ideas, ideas, ideas, target.title)
+    }
+
+    return CaptureOutcome.Added(said)
 }
 
 /** What the sheet says when ideas didn't join the map called `title`: why, when that's known, and that they're still here. */

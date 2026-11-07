@@ -112,10 +112,10 @@
         <item quantity="one">Emptied in the folder, so Orbit kept their ideas and wrote them back: %1$s.</item>
         <item quantity="other">Emptied in the folder, so Orbit kept their ideas and wrote them back: %1$s.</item>
     </plurals>
-    <!-- %1$s lists the pictures and videos, with the maps they're in. %2$s and %3$s are sizes, as 50 MB. The quantity is how many pictures and videos. -->
+    <!-- %1$s lists the pictures, videos and sounds, with the maps they're in. %2$s and %3$s are sizes, as 250 MB and 1 GB. The quantity is how many files. -->
     <plurals name="settings_folder_too_big">
-        <item quantity="one">Too big for a map, so they\'re only in the folder: %1$s. A map keeps videos of up to %2$s, and up to %3$s of pictures and videos in all, so it always fits in its zip.</item>
-        <item quantity="other">Too big for a map, so they\'re only in the folder: %1$s. A map keeps videos of up to %2$s, and up to %3$s of pictures and videos in all, so it always fits in its zip.</item>
+        <item quantity="one">Too big for a map, so they\'re only in the folder: %1$s. A map keeps files of up to %2$s, and up to %3$s of pictures, videos and sounds in all, so it always fits in its zip.</item>
+        <item quantity="other">Too big for a map, so they\'re only in the folder: %1$s. A map keeps files of up to %2$s, and up to %3$s of pictures, videos and sounds in all, so it always fits in its zip.</item>
     </plurals>
     <!-- %1$s lists the files' names, as “Big notes.md”. %2$s is a size, as 8 MB. The quantity is how many files. -->
     <plurals name="settings_folder_too_large">
@@ -186,10 +186,17 @@
     <string name="settings_delete_for_good_body">It won\'t come back, and neither will its history.</string>
     <string name="settings_delete_for_good">Delete for good</string>
     <string name="settings_deleted_for_good">Deleted “%1$s” for good</string>
+    <!-- A map whose files Orbit couldn't all delete (storage that fails, say): it stays in the trash, to delete again. %1$s is its title. -->
+    <string name="settings_could_not_delete_for_good">Orbit couldn\'t delete “%1$s” for good. It\'s still in the trash.</string>
     <!-- After Empty trash: how many maps it deleted. -->
     <plurals name="settings_trash_emptied">
         <item quantity="one">Deleted %1$d map for good</item>
         <item quantity="other">Deleted %1$d maps for good</item>
+    </plurals>
+    <!-- After Empty trash, when some maps' files couldn't all be deleted: how many stayed in the trash, to delete again. -->
+    <plurals name="settings_trash_not_emptied">
+        <item quantity="one">Orbit couldn\'t delete %1$d map for good. It\'s still in the trash.</item>
+        <item quantity="other">Orbit couldn\'t delete %1$d maps for good. They\'re still in the trash.</item>
     </plurals>
     <string name="settings_empty_the_trash_question">Empty the trash?</string>
     <plurals name="settings_empty_trash_body">

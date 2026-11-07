@@ -5,6 +5,7 @@ import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.net.Uri
 import android.os.Build
 import android.os.LocaleList
 import android.os.SystemClock
@@ -34,28 +35,39 @@ import com.hyuchia.orbit.data.TrashedMap
 import com.hyuchia.orbit.data.Updates
 import com.hyuchia.orbit.map.MapApp
 import com.hyuchia.orbit.map.MapClipboard
+import com.hyuchia.orbit.media.SketchPictures
 import com.hyuchia.orbit.media.SoundPlayback
 import com.hyuchia.orbit.media.StillAnimations
+import com.hyuchia.orbit.media.TransformerVideoMaker
+import com.hyuchia.orbit.media.VideoMaker
 import com.hyuchia.orbit.nearby.NearbyHost
 import com.hyuchia.orbit.page.MapPage
 import com.hyuchia.orbit.page.MapPictures
 import com.hyuchia.orbit.page.OrbitBuild
 import com.hyuchia.orbit.page.OrbitPage
 import com.hyuchia.orbit.page.PagePool
+import com.hyuchia.orbit.privacy.PrivateCopies
 import com.hyuchia.orbit.privacy.PrivateLock
 import com.hyuchia.orbit.privacy.PrivateMaps
+import com.hyuchia.orbit.reminders.AndroidReminderAlarms
+import com.hyuchia.orbit.reminders.AndroidReminderNotices
+import com.hyuchia.orbit.reminders.IdeaToShow
+import com.hyuchia.orbit.reminders.Reminders
 import com.hyuchia.orbit.settings.MapBackups
 import com.hyuchia.orbit.ui.TimeWords
 import com.hyuchia.orbit.widget.offerWidgetPreview
 import com.hyuchia.orbit.widget.updateMapWidgets
+import com.hyuchia.orbit.widget.widgetRedraws
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
@@ -91,6 +103,8 @@ class AppContainer(context: Context, /** Reports of crashes, kept on the phone. 
     val pages = PagePool(context, mapsDirectory)
     override val pictures = MapPictures(pages, context.cacheDir, OrbitBuild.bundled(context)?.commit.orEmpty())
     override val importer = Importer(maps, pages, words)
+
+    override val videoMaker: VideoMaker = TransformerVideoMaker(context.applicationContext)
 
     /** Maps renamed, tagged and copied from Home, as Orbit reads them, on the spare page. */
     val edits = MapEdits(maps, MapTextEditor.onPages(pages), words)
@@ -138,6 +152,18 @@ class AppContainer(context: Context, /** Reports of crashes, kept on the phone. 
 
     override val privateLock: PrivateLock get() = privateMaps.lock
 
+    /** Files shared to Orbit for the map that's open, which its screen adds to its idea in focus. */
+    val sharedFiles = MutableSharedFlow<SharedFiles>(extraBufferCapacity = 4)
+
+    /** Copies of private maps' files opened in other apps, deleted as private maps lock. */
+    val privateCopies = PrivateCopies(applicationScope, privateMaps.lock.newlyLocked, File(context.cacheDir, "exports"))
+
+    /** Ideas' dates, reminding on this device as they come. */
+    val reminders = Reminders(File(context.filesDir, "reminders.json"), AndroidReminderAlarms(context.applicationContext), AndroidReminderNotices(context.applicationContext, words))
+
+    /** An idea a reminder opens its map at, until the map's screen shows it. */
+    override val ideaToShow = MutableStateFlow<IdeaToShow?>(null)
+
     override fun takePage(): MapPage = pages.take()
 
     // Only pages from takePage come back, and the pool made each of them: an OrbitPage.
@@ -152,6 +178,9 @@ class AppContainer(context: Context, /** Reports of crashes, kept on the phone. 
         nearby.hidden = { id -> maps.summary(id)?.let { privateMaps.view.value.hides(it) } == true }
     }
 }
+
+/** Files shared to Orbit for map `mapId`, open as they came: they join its idea in focus. */
+data class SharedFiles(val mapId: String, val uris: List<Uri>)
 
 class OrbitApplication : Application(), SingletonImageLoader.Factory, WorkConfiguration.Provider {
     lateinit var container: AppContainer
@@ -179,6 +208,7 @@ class OrbitApplication : Application(), SingletonImageLoader.Factory, WorkConfig
         locales = resources.configuration.locales
         fontScale = resources.configuration.fontScale
         keepWidgetsCurrent()
+        keepRemindersCurrent()
         container.folderSync.start(ProcessLifecycleOwner.get().lifecycle)
         container.privateMaps.start(ProcessLifecycleOwner.get().lifecycle)
     }
@@ -192,6 +222,8 @@ class OrbitApplication : Application(), SingletonImageLoader.Factory, WorkConfig
     override fun newImageLoader(context: PlatformContext): ImageLoader =
         ImageLoader.Builder(context)
             .components {
+                // Orbit's own sketches, drawn as their canvas draws them: Coil reads no other SVG.
+                add(SketchPictures())
                 add(StillAnimations())
                 add(AnimatedImageDecoder.Factory())
             }
@@ -251,12 +283,29 @@ class OrbitApplication : Application(), SingletonImageLoader.Factory, WorkConfig
     }
 
     /**
-     * Draws the maps on the home screen again once a change settles: an edit,
-     * ideas caught, a map renamed or deleted; and when the wallpaper's colors
-     * are turned on or off, which the pictures are drawn in. Once the maps
-     * are read, the launcher's list of widgets gets a preview of them.
+     * Reads the maps' reminders again whenever a map's text changes, wherever
+     * the change came from, and as reminders are turned on or off. Without the
+     * maps read (Orbit started for an alarm, say), the reminders kept from the
+     * last reading ring.
      */
-    @OptIn(FlowPreview::class)
+    private fun keepRemindersCurrent() {
+        container.applicationScope.launch {
+            combine(container.maps.maps.filterNotNull(), container.settings.settings.map { it.reminders }.distinctUntilChanged()) { maps, on -> maps to on }
+                .collectLatest { (maps, on) ->
+                    // Once the maps are still: a change meanwhile starts this over.
+                    delay(REMINDERS_SETTLE)
+                    container.reminders.follow(maps, { id -> runCatching { container.maps.read(id) }.getOrNull() }, on)
+                }
+        }
+    }
+
+    /**
+     * Draws the maps on the home screen again once a change settles: an edit,
+     * ideas caught, a map renamed or deleted; at once as a map becomes
+     * private; and when the wallpaper's colors are turned on or off, which
+     * the pictures are drawn in. Once the maps are read, the launcher's list
+     * of widgets gets a preview of them.
+     */
     private fun keepWidgetsCurrent() {
         container.applicationScope.launch {
             container.maps.maps.filterNotNull().first()
@@ -264,12 +313,7 @@ class OrbitApplication : Application(), SingletonImageLoader.Factory, WorkConfig
         }
 
         container.applicationScope.launch {
-            container.maps.maps
-                .filterNotNull()
-                .distinctUntilChanged()
-                .drop(1)
-                .debounce(WIDGET_SETTLE)
-                .collect { updateMapWidgets(this@OrbitApplication) }
+            widgetRedraws(container.maps.maps, WIDGET_SETTLE).collect { updateMapWidgets(this@OrbitApplication) }
         }
 
         container.applicationScope.launch {
@@ -284,6 +328,9 @@ class OrbitApplication : Application(), SingletonImageLoader.Factory, WorkConfig
 
 /** How long the maps stay still before the widgets are drawn again, so typing doesn't redraw them on every letter. */
 private val WIDGET_SETTLE = 2.seconds
+
+/** How long the maps stay still before their reminders are read again: a date set, not each letter typed. */
+private val REMINDERS_SETTLE = 1.seconds
 
 val Context.container: AppContainer get() = (applicationContext as OrbitApplication).container
 

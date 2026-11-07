@@ -88,8 +88,17 @@ import com.hyuchia.orbit.theme.mapStyle
 import com.hyuchia.orbit.theme.mapTheme
 import com.hyuchia.orbit.theme.orbitColorScheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.runningFold
 import kotlinx.coroutines.withContext
+import kotlin.time.Duration
 
 /** The map a widget shows, in its Glance state; without one, it shows the pinned map, or the last opened. */
 val WidgetMapKey = stringPreferencesKey("map")
@@ -141,7 +150,7 @@ class MapWidget : GlanceAppWidget() {
 
             val shownPicture = map?.takeUnless { it.metadata.isPrivate }
 
-            val picture by produceState(shownPicture?.let { decodedPicture(glanceContext, it, dark, dynamicColor) }, shownPicture?.id, shownPicture?.contentKey, dark, dynamicColor) {
+            val picture by produceState(shownPicture?.let { decodedPicture(glanceContext, it, dark, dynamicColor) }, shownPicture?.id, shownPicture?.pictureKey, dark, dynamicColor) {
                 value = shownPicture?.let { picture(glanceContext, it, dark, dynamicColor) }
             }
 
@@ -186,6 +195,29 @@ suspend fun updateMapWidgets(context: Context) {
         MapWidget().updateAll(context)
     }
 }
+
+/** The private maps as the widgets are drawn, and whether a map became private since they were last drawn. */
+private class WidgetDrawing(val private: Set<String>, val madePrivate: Boolean)
+
+/**
+ * When the widgets are drawn again as `maps` change, the maps as they're
+ * first read left out: once a change has settled for `settle`, so typing
+ * doesn't draw them again on every letter, and at once when a map becomes
+ * private, so its widget shows its lock right away rather than its name and
+ * picture a moment longer.
+ */
+@OptIn(FlowPreview::class)
+fun widgetRedraws(maps: Flow<List<MapSummary>?>, settle: Duration): Flow<Unit> =
+    maps.filterNotNull()
+        .distinctUntilChanged()
+        .runningFold<List<MapSummary>, WidgetDrawing?>(null) { last, now ->
+            val private = now.filter { it.metadata.isPrivate }.map { it.id }.toSet()
+            WidgetDrawing(private, madePrivate = last != null && !last.private.containsAll(private))
+        }
+        .filterNotNull()
+        .drop(1)
+        .debounce { if (it.madePrivate) Duration.ZERO else settle }
+        .map {}
 
 /**
  * Shows the launcher's list of widgets the map a new widget would show, on
@@ -317,7 +349,7 @@ private val decodedPictures = LruCache<String, Bitmap>(6)
 /** The map's picture if it was decoded before, without waiting. */
 private fun decodedPicture(context: Context, map: MapSummary, dark: Boolean, dynamicColor: Boolean): Bitmap? {
     val theme = orbitColorScheme(context, dark, dynamicColor).mapTheme()
-    val file = context.container.pictures.cachedThumbnail(map.id, map.contentKey, map.outline.style, theme) ?: return null
+    val file = context.container.pictures.cachedThumbnail(map.id, map.pictureKey, map.outline.style, theme) ?: return null
     return decodedPictures[file.path]
 }
 
@@ -325,7 +357,7 @@ private fun decodedPicture(context: Context, map: MapSummary, dark: Boolean, dyn
 private suspend fun picture(context: Context, map: MapSummary, dark: Boolean, dynamicColor: Boolean): Bitmap? {
     val app = context.container
     val theme = orbitColorScheme(context, dark, dynamicColor).mapTheme()
-    val file = app.pictures.thumbnail(map.id, map.contentKey, map.outline.style, theme) { app.maps.read(map.id) } ?: return null
+    val file = app.pictures.thumbnail(map.id, map.pictureKey, map.outline.style, theme) { app.maps.read(map.id) } ?: return null
     decodedPictures[file.path]?.let { return it }
 
     val decoded = withContext(Dispatchers.IO) {

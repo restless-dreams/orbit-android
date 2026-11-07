@@ -45,9 +45,11 @@
     <string name="export_print_failed">No se pudo preparar el mapa para imprimir</string>
 
     <string name="export_could_not_make">Orbit no pudo crear este archivo. Vuelve a intentarlo en un momento.</string>
-    <string name="export_no_room_to_share">Orbit no pudo crear este archivo para compartirlo. ¿Está lleno el almacenamiento de este dispositivo?</string>
+    <string name="export_no_room">Orbit no pudo crear este archivo. ¿Está lleno el almacenamiento de este dispositivo?</string>
     <string name="export_could_not_save">Orbit no pudo guardar este archivo ahí. Prueba en otro lugar.</string>
     <string name="export_too_much_to_copy">Esto es demasiado para copiarlo de una vez. Compártelo o guárdalo.</string>
     <string name="export_newer_map_not_written">Una versión más reciente de Orbit hizo este mapa, así que esta no puede escribirlo así. Actualiza Orbit o expórtalo como markdown.</string>
     <string name="export_unreadable_map_not_written">Orbit no pudo leer todo este mapa, así que no puede escribirlo así. Corrige el texto o expórtalo como markdown.</string>
+    <string name="export_newer_yaml_map_not_written">Una versión más reciente de Orbit hizo este mapa, así que esta no puede escribirlo así. Actualiza Orbit o expórtalo como YAML.</string>
+    <string name="export_unreadable_yaml_map_not_written">Orbit no pudo leer todo este mapa, así que no puede escribirlo así. Corrige el texto o expórtalo como YAML.</string>
 </resources>

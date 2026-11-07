@@ -84,22 +84,58 @@ data class Heard(
 )
 
 /**
+ * A speech service, as [Listening] hears through it: the phone's own
+ * ([SpeechRecognizer]), or a stand-in in tests. It tells what it hears to
+ * the [RecognitionListener] it was made with.
+ */
+internal interface Recognizer {
+    fun startListening(intent: Intent)
+
+    /** Stops listening after what's being said, which it still answers for. */
+    fun stopListening()
+
+    /** Lets go of the speech service, and of the microphone it may still hold: it answers nothing more. */
+    fun destroy()
+}
+
+/** The phone's speech service, telling `listener` what it hears. */
+private class ServiceRecognizer(context: Context, listener: RecognitionListener) : Recognizer {
+    private val recognizer = SpeechRecognizer.createSpeechRecognizer(context).apply { setRecognitionListener(listener) }
+
+    override fun startListening(intent: Intent) = recognizer.startListening(intent)
+
+    override fun stopListening() = recognizer.stopListening()
+
+    override fun destroy() = recognizer.destroy()
+}
+
+/**
  * Listens through the phone's speech service until [stop], in Orbit's
  * language ([listeningLanguage]). A pause ends each idea, and its
  * sentences come out through `onIdeas`. Speech services
  * stop listening at a pause, so it starts again at once while it's wanted.
  * `onFinished` hears when listening is over, with the reason when something
  * went wrong. Everything happens on the main thread, as speech services need.
+ *
+ * Each talk has a speech service of its own, made as it starts and let go
+ * as it ends: one that's slow to answer, or never does, gives nothing to a
+ * talk that's over, and keeps no microphone. `recognizers` makes them.
  */
-class Listening(
+class Listening internal constructor(
     private val context: Context,
     private val onIdeas: (List<String>) -> Unit,
     private val onFinished: (problem: String?) -> Unit,
+    private val recognizers: (RecognitionListener) -> Recognizer,
 ) {
+    constructor(context: Context, onIdeas: (List<String>) -> Unit, onFinished: (problem: String?) -> Unit) :
+        this(context, onIdeas, onFinished, { listener -> ServiceRecognizer(context, listener) })
+
     private val state = MutableStateFlow(Heard())
     val heard: StateFlow<Heard> = state.asStateFlow()
     private val handler = Handler(Looper.getMainLooper())
-    private var recognizer: SpeechRecognizer? = null
+
+    /** The talk's speech service, while there's a talk. */
+    private var recognizer: Recognizer? = null
 
     /** Listening is wanted: after each idea, it listens for the next. */
     private var wanted = false
@@ -109,12 +145,14 @@ class Listening(
 
     fun start() {
         handler.removeCallbacksAndMessages(null)
+        // A talk before this one that's still finishing gives this one nothing: its speech service goes.
+        letGo()
         wanted = true
         state.value = Heard(listening = true)
         listen()
     }
 
-    /** Stops after the idea being said, which still comes out. */
+    /** Stops after the idea being said, which still comes out, unless the speech service takes too long to say it. */
     fun stop() {
         wanted = false
         handler.removeCallbacksAndMessages(null)
@@ -127,20 +165,33 @@ class Listening(
         }
     }
 
+    /** Stops at once, the idea being said left out, and lets the speech service and the microphone go. */
     fun close() {
         wanted = false
         handler.removeCallbacksAndMessages(null)
-        recognizer?.destroy()
-        recognizer = null
+        letGo()
         hearing = false
         state.update { it.copy(listening = false, words = "", level = 0f) }
     }
 
-    private fun listen() {
-        val recognizer = recognizer ?: SpeechRecognizer.createSpeechRecognizer(context).also {
-            it.setRecognitionListener(listener)
-            recognizer = it
+    /** Lets the talk's speech service go: whatever it says after this is heard by no one. */
+    private fun letGo() {
+        recognizer?.destroy()
+        recognizer = null
+    }
+
+    /** A speech service for the talk, whose answers the talk alone hears. */
+    private fun newRecognizer(): Recognizer {
+        val answers = Answers()
+
+        return recognizers(answers).also { made ->
+            answers.from = made
+            recognizer = made
         }
+    }
+
+    private fun listen() {
+        val recognizer = recognizer ?: newRecognizer()
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -168,9 +219,11 @@ class Listening(
         }, delay)
     }
 
+    /** The talk is over: the last idea is in, the speech service gave up, or it took too long to say the last. */
     private fun finish() {
         handler.removeCallbacksAndMessages(null)
         hearing = false
+        letGo()
 
         if (state.value.listening) {
             state.update { it.copy(listening = false, words = "", level = 0f) }
@@ -184,11 +237,18 @@ class Listening(
         wanted = false
         handler.removeCallbacksAndMessages(null)
         hearing = false
+        letGo()
         state.update { it.copy(listening = false, words = "", level = 0f, problem = problem) }
         onFinished(problem)
     }
 
-    private val listener = object : RecognitionListener {
+    /** What one speech service says, heard only while it's the talk's: a talk that's over, or another one, hears none of it. */
+    private inner class Answers : RecognitionListener {
+        /** The speech service these answers come from. */
+        var from: Recognizer? = null
+
+        private val current: Boolean get() = from != null && from === recognizer
+
         override fun onReadyForSpeech(params: Bundle?) = Unit
         override fun onBeginningOfSpeech() = Unit
         override fun onBufferReceived(buffer: ByteArray?) = Unit
@@ -196,6 +256,10 @@ class Listening(
         override fun onEvent(eventType: Int, params: Bundle?) = Unit
 
         override fun onRmsChanged(rmsdB: Float) {
+            if (!current) {
+                return
+            }
+
             // Speech services report about -2 dB in a quiet room and 10 dB for a raised voice.
             state.update { it.copy(level = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)) }
         }
@@ -203,12 +267,17 @@ class Listening(
         override fun onPartialResults(partialResults: Bundle?) {
             val words = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
 
-            if (words.isNotBlank()) {
+            if (current && words.isNotBlank()) {
                 state.update { it.copy(words = words) }
             }
         }
 
         override fun onResults(results: Bundle?) {
+            // Words that come too late, from a talk that's over, are left out.
+            if (!current) {
+                return
+            }
+
             hearing = false
             val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
             val ideas = ideasFrom(text)
@@ -226,6 +295,10 @@ class Listening(
         }
 
         override fun onError(error: Int) {
+            if (!current) {
+                return
+            }
+
             hearing = false
 
             when (error) {

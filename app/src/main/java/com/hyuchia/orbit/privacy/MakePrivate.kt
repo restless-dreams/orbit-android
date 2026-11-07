@@ -64,7 +64,11 @@ fun rememberMakePrivate(onDone: (String) -> Unit): (MapSummary, Boolean) -> Unit
                 return@launch
             }
 
-            done(resources.getString(if (private) R.string.private_made_private else R.string.private_made_not_private, map.title))
+            // Said as private maps are once it's done: made private as they locked (the screen turning off as it was
+            // written, say), it's locked now, and isn't named.
+            if (!privateMaps.hidesNow(map.id)) {
+                done(resources.getString(if (private) R.string.private_made_private else R.string.private_made_not_private, map.title))
+            }
         }
     }
 

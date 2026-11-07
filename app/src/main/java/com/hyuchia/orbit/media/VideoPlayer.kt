@@ -35,21 +35,26 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -73,6 +78,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -94,13 +101,16 @@ import androidx.media3.ui.compose.material3.buttons.SeekForwardButton
 import coil3.compose.AsyncImage
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.cleanLink
 import com.hyuchia.orbit.ui.controlsLinger
 import com.hyuchia.orbit.ui.linkScheme
 import com.hyuchia.orbit.ui.openLink
-import com.hyuchia.orbit.ui.sharedFileUri
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.io.File
 
 /** How long the controls stay after a touch or a key while the video plays. */
 private const val CONTROLS_LINGER_MILLISECONDS = 3_000L
@@ -113,13 +123,13 @@ private const val PROGRESS_TICK_MILLISECONDS = 250L
 
 /**
  * The idea's video, full screen, played by the player for where it's from:
- * a file in the map's folder or on the web plays in Media3's ExoPlayer,
- * YouTube's and Vimeo's in their own players, and anything else opens in
- * the app for it. `resolve` says what an address is, as for pictures.
- * `onKey` takes keys first, as a presentation does.
+ * a file in the folder of the map `mapId` or on the web plays in Media3's
+ * ExoPlayer, YouTube's and Vimeo's in their own players, and anything else
+ * opens in the app for it. `resolve` says what an address is, as for
+ * pictures. `onKey` takes keys first, as a presentation does.
  */
 @Composable
-fun VideoScreen(item: GalleryItem, resolve: (String) -> Any?, onClosed: () -> Unit, onKey: (android.view.KeyEvent) -> Boolean = { false }) {
+fun VideoScreen(mapId: String, item: GalleryItem, resolve: (String) -> Any?, onClosed: () -> Unit, onKey: (android.view.KeyEvent) -> Boolean = { false }) {
     val context = LocalContext.current
     val source = remember(item) { videoSource(item.media, resolve) }
     val title = item.media.caption?.takeIf { it.isNotBlank() } ?: item.label
@@ -127,7 +137,8 @@ fun VideoScreen(item: GalleryItem, resolve: (String) -> Any?, onClosed: () -> Un
 
     when (source) {
         is VideoSource.InMap -> if (source.file.isFile) {
-            VideoPlayer(title, Uri.fromFile(source.file), poster, onElsewhere = { openVideoElsewhere(context, source) }, onClosed = onClosed, onKey = onKey)
+            val elsewhere = rememberOpeningElsewhere(mapId, source.file)
+            VideoPlayer(title, Uri.fromFile(source.file), poster, onElsewhere = elsewhere::start, onClosed = onClosed, onKey = onKey, opening = elsewhere)
         } else {
             // One a backup left out, say: only its poster is here.
             VideoPlayer(title, null, poster, onElsewhere = null, onClosed = onClosed, onKey = onKey)
@@ -152,6 +163,9 @@ fun VideoScreen(item: GalleryItem, resolve: (String) -> Any?, onClosed: () -> Un
  * the arrows, J and L go back and on, M turns the sound off or on, and
  * Escape closes. With no `uri`, the video isn't on this phone, and its
  * poster shows, saying so. `onKey` takes keys first, as a presentation does.
+ * `opening`, for a video in a map's folder, is how it's opening in another
+ * app, as `onElsewhere` starts it: the button waits for its copy, and what
+ * it asks or says shows over the player.
  */
 @OptIn(UnstableApi::class)
 @Composable
@@ -162,6 +176,7 @@ fun VideoPlayer(
     onElsewhere: (() -> Unit)?,
     onClosed: () -> Unit,
     onKey: (android.view.KeyEvent) -> Boolean = { false },
+    opening: OpeningElsewhere? = null,
 ) {
     val context = LocalContext.current
 
@@ -309,13 +324,13 @@ fun VideoPlayer(
                 }
 
                 AnimatedVisibility(controls, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopCenter)) {
-                    PlayerTopBar(player, title, onClose = window::close, onElsewhere = onElsewhere)
+                    PlayerTopBar(player, title, onClose = window::close, onElsewhere = onElsewhere, busy = opening?.busy == true)
                 }
 
                 val failed = problem
 
                 if (failed != null) {
-                    PlayerProblem(stringResource(failed), onElsewhere, Modifier.align(Alignment.Center))
+                    PlayerProblem(stringResource(failed), onElsewhere, busy = opening?.busy == true, Modifier.align(Alignment.Center))
                 } else {
                     AnimatedVisibility(controls, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.Center)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -347,12 +362,14 @@ fun VideoPlayer(
                 }
             }
         }
+
+        opening?.let { OpeningElsewhereDialogs(it) }
     }
 }
 
-/** Closing, the video's name, its sound, and opening it in another app, over a shade. */
+/** Closing, the video's name, its sound, and opening it in another app, `busy` while its copy is made, over a shade. */
 @Composable
-private fun PlayerTopBar(player: Player, title: String, onClose: () -> Unit, onElsewhere: (() -> Unit)?) {
+private fun PlayerTopBar(player: Player, title: String, onClose: () -> Unit, onElsewhere: (() -> Unit)?, busy: Boolean) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -374,7 +391,13 @@ private fun PlayerTopBar(player: Player, title: String, onClose: () -> Unit, onE
             val elsewhere = stringResource(R.string.media_open_in_another_app)
 
             Hint(elsewhere) {
-                IconButton(onClick = onElsewhere) { Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = elsewhere) }
+                IconButton(onClick = onElsewhere, enabled = !busy, modifier = Modifier.semantics { contentDescription = elsewhere }) {
+                    if (busy) {
+                        LoadingIndicator(Modifier.size(24.dp), color = Color.White)
+                    } else {
+                        Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null)
+                    }
+                }
             }
         }
     }
@@ -443,7 +466,7 @@ private fun PlayerProgress(player: Player) {
 
 /** Why the video doesn't play, on a shade that keeps it readable over the poster, and what to do when the phone can't play it: another app may. */
 @Composable
-private fun PlayerProblem(message: String, onElsewhere: (() -> Unit)?, modifier: Modifier = Modifier) {
+private fun PlayerProblem(message: String, onElsewhere: (() -> Unit)?, busy: Boolean, modifier: Modifier = Modifier) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -457,30 +480,120 @@ private fun PlayerProblem(message: String, onElsewhere: (() -> Unit)?, modifier:
         Text(message, style = MaterialTheme.typography.bodyLarge)
 
         if (onElsewhere != null) {
-            FilledTonalButton(onClick = onElsewhere) { Text(stringResource(R.string.media_open_in_another_app)) }
+            FilledTonalButton(onClick = onElsewhere, enabled = !busy) { Text(stringResource(R.string.media_open_in_another_app)) }
         }
     }
 }
 
 /**
- * Opens a video outside Orbit: a file in the map's folder in the phone's
- * video app, YouTube's and Vimeo's in their apps or the browser, and any
- * other in the app that takes its address, else a tab.
+ * "Open in another app" for a video in the folder of a map: a clean copy of
+ * it opens ([openVideoInAnotherApp]), `busy` while it's made. One Orbit
+ * can't clean waits for the person to say whether it goes as it is
+ * (`asking`), and one no copy could be made of says so (`failed`).
+ */
+@Stable
+class OpeningElsewhere internal constructor(
+    private val scope: CoroutineScope,
+    private val open: suspend () -> Shared,
+    private val openAsItIs: () -> Unit,
+) {
+    var busy by mutableStateOf(false)
+        private set
+
+    var asking by mutableStateOf(false)
+        private set
+
+    var failed by mutableStateOf(false)
+        private set
+
+    fun start() {
+        if (busy) {
+            return
+        }
+
+        busy = true
+
+        scope.launch {
+            try {
+                when (open()) {
+                    Shared.Clean -> Unit
+                    Shared.NotClean -> asking = true
+                    Shared.Failed -> failed = true
+                }
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    /** The person's answer: whether the video goes as it is. */
+    fun answer(asItIs: Boolean) {
+        asking = false
+
+        if (asItIs) {
+            openAsItIs()
+        }
+    }
+
+    fun dismissFailure() {
+        failed = false
+    }
+}
+
+/** How the video `file` in the folder of the map `mapId` opens in another app: see [OpeningElsewhere]. */
+@Composable
+fun rememberOpeningElsewhere(mapId: String, file: File): OpeningElsewhere {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    return remember(mapId, file) {
+        OpeningElsewhere(scope, open = { openVideoInAnotherApp(context, mapId, file) }, openAsItIs = { openVideoAsItIs(context, mapId, file) })
+    }
+}
+
+/**
+ * Asks whether a video Orbit couldn't clean opens in another app as it is,
+ * with where and when it was recorded and on what, as sharing one asks: a
+ * risk the person takes knowingly, never one Orbit takes for them. And says
+ * so when no copy of it could be made.
+ */
+@Composable
+private fun OpeningElsewhereDialogs(opening: OpeningElsewhere) {
+    if (opening.asking) {
+        AlertDialog(
+            onDismissRequest = { opening.answer(asItIs = false) },
+            title = {
+                EscapeCloses { opening.answer(asItIs = false) }
+                Text(stringResource(R.string.media_open_video_as_it_is_title))
+            },
+            text = { Text(stringResource(R.string.media_open_video_as_it_is_text)) },
+            confirmButton = { TextButton(onClick = { opening.answer(asItIs = true) }) { Text(stringResource(R.string.media_open_as_it_is)) } },
+            dismissButton = { TextButton(onClick = { opening.answer(asItIs = false) }) { Text(stringResource(R.string.common_cancel)) } },
+        )
+    }
+
+    if (opening.failed) {
+        AlertDialog(
+            onDismissRequest = opening::dismissFailure,
+            text = {
+                EscapeCloses(opening::dismissFailure)
+                Text(stringResource(R.string.media_open_video_failed))
+            },
+            confirmButton = { TextButton(onClick = opening::dismissFailure) { Text(stringResource(R.string.common_close)) } },
+        )
+    }
+}
+
+/**
+ * Opens a video on the web outside Orbit: YouTube's and Vimeo's in their
+ * apps or the browser, and any other in the app that takes its address,
+ * else a tab. A video in a map's folder never goes from here, with all its
+ * file says: it opens as a clean copy ([openVideoInAnotherApp]), or as it
+ * is only once the person chose to ([openVideoAsItIs]).
  */
 fun openVideoElsewhere(context: Context, source: VideoSource) {
     val address = when (source) {
-        is VideoSource.InMap -> {
-            val uri = sharedFileUri(context, source.file) ?: return
-            val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "video/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-
-            try {
-                context.startActivity(intent)
-            } catch (missing: ActivityNotFoundException) {
-                Logs.warn("OrbitVideo", "No app plays videos")
-            }
-
-            return
-        }
+        is VideoSource.InMap -> return
         is VideoSource.OnTheWeb -> source.url
         is VideoSource.YouTube -> watchUrl(source)
         is VideoSource.Vimeo -> watchUrl(source)

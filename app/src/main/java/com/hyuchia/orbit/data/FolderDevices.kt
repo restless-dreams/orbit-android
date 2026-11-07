@@ -3,6 +3,8 @@ package com.hyuchia.orbit.data
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import java.io.IOException
 
@@ -31,9 +33,10 @@ const val DEVICE_FORMAT = 1
 
 /**
  * What a device keeps in the folder about itself, so the others can tell
- * what it opens: its Orbit, the newest map format it reads, and the kinds
- * of file it carries in maps. Fields are only ever added, never renamed,
- * and a device keeps what a newer Orbit wrote in its own record.
+ * what it opens: its Orbit, the newest map format it reads, the kinds of
+ * file it carries in maps, and how big they may be there. Fields are only
+ * ever added, never renamed, and a device keeps what a newer Orbit wrote in
+ * its own record.
  */
 @Serializable
 data class FolderDevice(
@@ -52,7 +55,12 @@ data class FolderDevice(
     /** The newest map format it reads: a map written for a newer one only shows there. */
     val mapFormat: Int,
 
-    /** The extensions of the files it carries in maps: one in the folder that isn't among them it leaves out. */
+    /**
+     * The extensions of the files it carries in maps: one in the folder that
+     * isn't among them it leaves out. One that keeps ideas' files ([ideaFiles])
+     * lists those of the ones the folder holds too, so a version from before
+     * them says it can't open them.
+     */
     val mediaTypes: List<String>,
 
     /** When it last synced with the folder, in milliseconds; a day at most before its last sync, as it writes its record. */
@@ -62,7 +70,34 @@ data class FolderDevice(
 
     /** The oldest record format that reads this one right: a version whose `DEVICE_FORMAT` is older leaves the record out. */
     val compatible: Int = 1,
+
+    /**
+     * The most one of a map's files may be on it ([MEDIA_FILE_LIMIT]): one
+     * past it there stays only in the folder. Orbit 0.4.0's record says
+     * nothing, and it keeps 50 MB ([keepsFile]).
+     */
+    val mediaFileLimit: Long? = null,
+
+    /**
+     * The most a map's pictures, videos and sounds may come to on it
+     * ([MAP_MEDIA_LIMIT]): what's past it there stays only in the folder.
+     * Orbit 0.4.0's record says nothing, and it keeps 90 MB ([keepsMapMedia]).
+     */
+    val mapMediaLimit: Long? = null,
+
+    /**
+     * Whether it keeps the files ideas hold ([fileNamesIn]), of any kind.
+     * Records from before them say nothing: those devices keep only the
+     * kinds in [mediaTypes].
+     */
+    val ideaFiles: Boolean? = null,
 ) {
+    /** The most one of a map's files may be on it, as its record says, or as Orbit 0.4.0 keeps when it says nothing. */
+    val keepsFile: Long get() = mediaFileLimit?.takeIf { it > 0 } ?: MEDIA_FILE_LIMIT_UP_TO_0_4_0
+
+    /** The most a map's pictures, videos and sounds may come to on it, as [keepsFile] says it. */
+    val keepsMapMedia: Long get() = mapMediaLimit?.takeIf { it > 0 } ?: MAP_MEDIA_LIMIT_UP_TO_0_4_0
+
     companion object {
         const val PHONE = "phone"
         const val TABLET = "tablet"
@@ -119,14 +154,21 @@ internal object FolderRoster {
     fun needsWriting(written: FolderDevice?, mine: FolderDevice): Boolean =
         written == null || written.copy(synced = mine.synced) != mine || mine.synced - written.synced >= REWRITE
 
-    /** What `me` should hear about each of `others`, given the extensions of the files the folder's media holds. */
-    fun notices(me: FolderDevice, others: List<FolderDevice>, present: Set<String>): List<FolderNotice> = others.mapNotNull { other ->
+    /**
+     * What `me` should hear about each of `others`, given the extensions of
+     * the files the folder's media holds (`present`), and of the ideas'
+     * files among them (`ideaFiles`): a device that keeps ideas' files opens
+     * those of every kind, whatever its record lists.
+     */
+    fun notices(me: FolderDevice, others: List<FolderDevice>, present: Set<String>, ideaFiles: Set<String> = emptySet()): List<FolderNotice> = others.mapNotNull { other ->
         val newer = other.appVersionCode > me.appVersionCode || other.mapFormat > me.mapFormat
         val older = other.appVersionCode < me.appVersionCode || other.mapFormat < me.mapFormat
+        val opensHere = if (me.ideaFiles == true) ideaFiles else emptySet()
+        val opensThere = if (other.ideaFiles == true) ideaFiles else emptySet()
 
         when {
-            newer -> FolderNotice.Newer(other, (other.mediaTypes.toSet() - me.mediaTypes.toSet()).intersect(present).sorted(), other.mapFormat > me.mapFormat)
-            older -> FolderNotice.Older(other, (me.mediaTypes.toSet() - other.mediaTypes.toSet()).intersect(present).sorted(), other.mapFormat < me.mapFormat)
+            newer -> FolderNotice.Newer(other, (other.mediaTypes.toSet() - me.mediaTypes.toSet() - opensHere).intersect(present).sorted(), other.mapFormat > me.mapFormat)
+            older -> FolderNotice.Older(other, (me.mediaTypes.toSet() - other.mediaTypes.toSet() - opensThere).intersect(present).sorted(), other.mapFormat < me.mapFormat)
             else -> null
         }
     }
@@ -137,6 +179,22 @@ internal object FolderRoster {
      * reads, its notes say so (`FolderNotes.newer`).
      */
     fun leftBehind(others: List<FolderDevice>, format: Int): List<FolderDevice> = others.filter { it.mapFormat < format }
+
+    /**
+     * The maps each of `others` keeps only part of, by the device's id: one
+     * whose files may be smaller, or fewer, than this device's ([FolderDevice.keepsFile],
+     * [FolderDevice.keepsMapMedia]) keeps what's past its room only in the
+     * folder, as Orbit 0.4.0 does with what's past 50 MB a file and 90 MB a
+     * map. `maps` are the folder's maps, by title, with the sizes of the
+     * files each points at; a device that keeps all of them isn't there.
+     */
+    fun partlyKept(others: List<FolderDevice>, maps: List<Pair<String, List<Long>>>): Map<String, List<String>> =
+        others.associate { device ->
+            device.id to maps.filter { (_, sizes) -> sizes.sum() > device.keepsMapMedia || sizes.any { it > device.keepsFile } }.map { it.first }
+        }.filterValues { it.isNotEmpty() }
+
+    /** Whether any of `others` may keep less of a map's files than this version does: only then are the maps' sizes looked at. */
+    fun keepLess(others: List<FolderDevice>): Boolean = others.any { it.keepsFile < MEDIA_FILE_LIMIT || it.keepsMapMedia < MAP_MEDIA_LIMIT }
 }
 
 /**
@@ -152,15 +210,45 @@ internal class FolderDeviceRecords(private val folder: SyncFolder, private val k
         val listed = folder.deviceRecords().filter { RECORD_NAME.matches(it.name) }
         val own = "${mine.id}.json"
         val records = listed.associate { file -> file.name to read(file) }
-        val written = records[own]
 
-        if (FolderRoster.needsWriting(written, mine)) {
-            val kept = listed.firstOrNull { it.name == own }?.let { runCatching { recordJson.parseToJsonElement(folder.readDeviceRecord(own)).jsonObject }.getOrNull() }
-            folder.writeDeviceRecord(own, encode(mine, kept))
-            known -= own
+        if (FolderRoster.needsWriting(records[own], mine)) {
+            write(mine, listed.any { it.name == own })
         }
 
         return FolderRoster.current(records.filterKeys { it != own }.values.filterNotNull(), mine.id, now)
+    }
+
+    /**
+     * Writes this device's record, keeping what a newer Orbit wrote in it
+     * (one that's there already, when `there`). One that can't be read now
+     * stays as it is, and so does one a newer Orbit says this one would
+     * misread (`compatible`), as after going back to an older version: the
+     * newer one finds it as it left it.
+     */
+    private fun write(mine: FolderDevice, there: Boolean) {
+        val own = "${mine.id}.json"
+
+        val kept = if (there) {
+            val text = try {
+                folder.readDeviceRecord(own)
+            } catch (unreadable: IOException) {
+                return
+            }
+
+            // Not a record at all, as one cut short leaves it: written afresh.
+            val fields = runCatching { recordJson.parseToJsonElement(text).jsonObject }.getOrNull()
+
+            if (fields != null && !readable(fields)) {
+                return
+            }
+
+            fields
+        } else {
+            null
+        }
+
+        folder.writeDeviceRecord(own, encode(mine, kept))
+        known -= own
     }
 
     /** The other devices' recent records, read without writing this device's (`me`). */
@@ -198,6 +286,16 @@ internal class FolderDeviceRecords(private val folder: SyncFolder, private val k
         /** A record, or null when the text isn't one, or one a newer version says this one would misread (`compatible`). */
         fun decode(text: String): FolderDevice? =
             runCatching { recordJson.decodeFromString(FolderDevice.serializer(), text) }.getOrNull()?.takeIf { it.compatible <= DEVICE_FORMAT }
+
+        /**
+         * Whether a record's fields are ones this version reads right: its
+         * `compatible`, when it has one, is a format no newer than this one's.
+         * One it can't make out counts as a newer Orbit's.
+         */
+        fun readable(fields: JsonObject): Boolean {
+            val compatible = fields["compatible"] ?: return true
+            return (compatible as? JsonPrimitive)?.intOrNull?.let { it <= DEVICE_FORMAT } == true
+        }
 
         /** The record as JSON, keeping what a newer Orbit wrote in this device's record before (`kept`). */
         fun encode(device: FolderDevice, kept: JsonObject? = null): String {

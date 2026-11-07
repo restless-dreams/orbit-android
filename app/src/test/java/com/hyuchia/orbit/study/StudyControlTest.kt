@@ -1,16 +1,24 @@
 package com.hyuchia.orbit.study
 
+import com.hyuchia.orbit.data.FolderStudy
+import com.hyuchia.orbit.data.MetadataFile
 import com.hyuchia.orbit.map.MapUi
 import com.hyuchia.orbit.map.ReadOnly
 import com.hyuchia.orbit.page.MapCommand
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.MapState
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -28,12 +36,32 @@ class StudyControlTest {
         MapNode("estoy", "estoy", parentId = "estar", depth = 2),
     )
     private val ui = MutableStateFlow(MapUi(ready = true, map = MapState("Spanish verbs", nodes)))
+
+    /** The map once Ser and the idea under it went, as the page says. */
+    private val withoutSer = listOf(
+        MapNode("verbs", "Spanish verbs", depth = 0, childCount = 1),
+        MapNode("estar", "Estar", parentId = "verbs", depth = 1, childCount = 1),
+        MapNode("estoy", "estoy", parentId = "estar", depth = 2),
+    )
+
     private val sent = mutableListOf<MapCommand>()
     private val now = 1_800_000_000_000L
     private var progress: Map<String, StudyCard> = emptyMap()
     private var elsewhere: Map<String, Map<String, StudyCard>> = emptyMap()
     private var newADay = NEW_CARDS_A_DAY
+
+    /** This device's answers after each change was written, as the map's details had them then. */
     private val kept = mutableListOf<Map<String, StudyCard>>()
+
+    /** While it's there, each change waits for it before it's written, as one does while the storage is slow. */
+    private var holding: CompletableDeferred<Unit>? = null
+
+    /** Writes a change as the maps do: to this device's answers as they are when it's written, beside the other devices'. */
+    private val keep: suspend (StudyChange) -> Unit = { change ->
+        holding?.await()
+        progress = change.applyTo(progress, elsewhere)
+        kept += progress
+    }
 
     private val TestScope.control: StudyControl
         get() = StudyControl(
@@ -41,7 +69,7 @@ class StudyControlTest {
             ui = ui,
             send = { sent += it },
             progress = { progress },
-            keep = { cards -> kept += cards },
+            keep = keep,
             today = { today },
             elsewhere = { elsewhere },
             newADay = { newADay },
@@ -257,6 +285,194 @@ class StudyControlTest {
         control.start("top")
         control.keepGoing()
         assertEquals((6..10).map { "idea-$it" }, study.queue)
+    }
+
+    @Test
+    fun `Keep going while the last answer is still being written goes on from it, and keeps every answer`() = runTest {
+        val control = control
+        val ideas = listOf(MapNode("top", "Top", depth = 0, childCount = 3)) + (1..3).map { MapNode("idea-$it", "Idea $it", parentId = "top", depth = 1, note = "Note $it") }
+        ui.value = MapUi(ready = true, map = MapState("Top", ideas))
+        newADay = 1
+        control.start("top")
+        assertEquals(listOf("idea-1"), study.queue)
+
+        // The storage takes its time: the answer is still being written as the session ends, and Keep going is pressed.
+        holding = CompletableDeferred()
+        control.reveal()
+        control.answer(knew = true)
+        runCurrent()
+        assertEquals(StudyEnding.Finished, study.ending)
+        assertTrue(kept.isEmpty())
+        control.keepGoing()
+
+        // The session begins again from the answers as they'll be: Idea 1 is studied, so another day's new card comes.
+        assertEquals(listOf("idea-2"), study.queue)
+        control.reveal()
+        control.answer(knew = true)
+        holding!!.complete(Unit)
+        runCurrent()
+        assertEquals(setOf("idea-1", "idea-2"), progress.keys)
+    }
+
+    @Test
+    fun `leaving the folder while an answer is still being written keeps the other devices' answers and the new one`() = runTest {
+        val control = control
+        val tablet = StudyCard(box = 2, due = today + 3, first = today - 9, at = now - DAY)
+        progress = mapOf("ser" to StudyCard(box = 1, due = today, first = today - 9, at = now - 2 * DAY))
+        elsewhere = mapOf("tablet" to mapOf("estar" to tablet))
+        control.start("verbs")
+        holding = CompletableDeferred()
+        control.reveal()
+        control.answer(knew = true)
+        runCurrent()
+
+        // The folder is left meanwhile: the tablet's answers join this device's (MapRepository.keepStudyHere).
+        progress = mergedProgress(progress, elsewhere)
+        elsewhere = emptyMap()
+        holding!!.complete(Unit)
+        runCurrent()
+        assertEquals(mapOf("ser" to StudyCard(box = 2, due = today + 3, first = today - 9, at = now), "estar" to tablet), progress)
+    }
+
+    @Test
+    fun `an answer taken back once the folder was left gives the card back as the other devices left it`() = runTest {
+        val control = control
+        val tablet = StudyCard(box = 2, due = today, first = today - 9, at = now - 1_000)
+        elsewhere = mapOf("tablet" to mapOf("ser" to tablet))
+        control.start("verbs")
+        control.reveal()
+        control.answer(knew = false)
+        runCurrent()
+
+        // The folder is left: the tablet's answers join this device's, where Again, the latest, stands for the card.
+        progress = mergedProgress(progress, elsewhere)
+        elsewhere = emptyMap()
+        control.undo()
+        runCurrent()
+        assertEquals(mapOf("ser" to tablet), progress)
+    }
+
+    @Test
+    fun `an answer taken back after another device's later one came in leaves that one`() = runTest {
+        val control = control
+        control.start("verbs")
+        control.reveal()
+        control.answer(knew = true)
+        runCurrent()
+
+        // The tablet answered Ser later, and the folder, left since, folded its answer in over this one.
+        val later = StudyCard(box = 0, due = today, first = today, at = now + 60_000)
+        progress = progress + ("ser" to later)
+        control.undo()
+        runCurrent()
+        assertEquals(later, progress["ser"])
+    }
+
+    @Test
+    fun `a card the map no longer has, as it changed elsewhere, leaves the session at once, and the next one comes hidden`() = runTest {
+        val control = control
+        control.start("verbs")
+        control.reveal()
+        sent.clear()
+
+        // Ser went from the map on another device, and the folder brought the change while it's studied.
+        ui.update { it.copy(map = MapState("Spanish verbs", withoutSer)) }
+        runCurrent()
+        assertEquals(listOf("estar"), study.queue)
+        assertEquals(1, study.total)
+        assertFalse(study.revealed)
+        assertEquals(listOf<MapCommand>(MapCommand.Focus("estar")), sent)
+
+        control.reveal()
+        control.answer(knew = true)
+        runCurrent()
+        assertEquals(StudyEnding.Finished, study.ending)
+        assertEquals(setOf("estar"), progress.keys)
+    }
+
+    @Test
+    fun `a card gone before the session followed the map takes no answer`() = runTest {
+        val control = control
+        control.start("verbs")
+        control.reveal()
+
+        // The map changed elsewhere a moment ago, and Knew it is pressed before the session has followed it.
+        ui.value = ui.value.copy(map = MapState("Spanish verbs", withoutSer))
+        control.answer(knew = true)
+        assertEquals(listOf("estar"), study.queue)
+        assertFalse(study.revealed)
+        runCurrent()
+        assertTrue(kept.isEmpty())
+        assertNull(study.last)
+    }
+
+    @Test
+    fun `an idea that's no longer a card, its ideas and note gone, leaves the session too`() = runTest {
+        val control = control
+        control.start("verbs")
+        ui.update { it.copy(map = MapState("Spanish verbs", nodes.filter { node -> node.id != "soy" }.map { node -> if (node.id == "ser") node.copy(childCount = 0) else node })) }
+        runCurrent()
+        assertEquals(listOf("estar"), study.queue)
+        control.reveal()
+        assertTrue(study.revealed)
+    }
+
+    @Test
+    fun `the session's last cards going end it on its summary, and the answer to take back goes with its card`() = runTest {
+        val control = control
+        control.start("verbs")
+        control.reveal()
+        control.answer(knew = true)
+        assertEquals("ser", study.last?.card)
+        sent.clear()
+
+        ui.update { it.copy(map = MapState("Spanish verbs", listOf(MapNode("verbs", "Spanish verbs", depth = 0)))) }
+        runCurrent()
+        assertEquals(StudyEnding.Finished, study.ending)
+        assertEquals(1, study.total)
+        assertNull(study.last)
+        assertEquals(listOf<MapCommand>(MapCommand.Focus("verbs")), sent)
+        control.undo()
+        assertEquals(StudyEnding.Finished, study.ending)
+    }
+
+    @Test
+    fun `odd boxes in this device's details or another device's record in the folder don't stop a session`() = runTest {
+        val control = control
+        // A box under the first, as this device's details hold it, and one past the last, as the tablet's record says.
+        progress = MetadataFile.decode("""{"study":{"ser":{"box":-1,"due":$today,"first":${today - 9}}}}""").study.orEmpty()
+        elsewhere = mapOf("tablet" to FolderStudy.decode("""{"map":"Verbs.md","cards":{"estar":{"box":${Int.MAX_VALUE},"due":$today,"first":${today - 9},"at":1}}}""")!!.cards)
+        control.start("verbs")
+        assertEquals(listOf("ser", "estar"), study.queue)
+        // Each goes on from the nearest box: Ser's first, Estar's last.
+        assertEquals(1L, study.ifKnown)
+        control.reveal()
+        control.answer(knew = true)
+        assertEquals(180L, study.ifKnown)
+        control.reveal()
+        control.answer(knew = true)
+        runCurrent()
+        assertEquals(1, progress.getValue("ser").box)
+        assertEquals(STUDY_INTERVALS.size, progress.getValue("estar").box)
+    }
+
+    @Test
+    fun `answers given right before the map closes are still written once it has`() = runTest {
+        // The screen's scope goes as the map closes; the answers are written on the app's, which stays.
+        val screen = CoroutineScope(backgroundScope.coroutineContext + Job())
+        val control = StudyControl(screen, ui, { sent += it }, { progress }, keep, { today }, { elsewhere }, { newADay }, { now }, writing = backgroundScope)
+        holding = CompletableDeferred()
+        control.start("verbs")
+        control.reveal()
+        control.answer(knew = true)
+        control.reveal()
+        control.answer(knew = false)
+        control.close()
+        screen.cancel()
+        holding!!.complete(Unit)
+        control.written()
+        assertEquals(setOf("ser", "estar"), progress.keys)
+        assertEquals(2, kept.size)
     }
 
     @Test

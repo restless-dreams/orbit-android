@@ -15,6 +15,11 @@
     <string name="folder_devices_this_cannot_open">This device can\'t open the %1$s files it adds</string>
     <string name="folder_devices_shows_only">Opens maps saved by a newer Orbit read-only</string>
     <string name="folder_devices_saves_newer">Saves maps this device can only show</string>
+    <!-- A device with an older Orbit, which keeps less of a map's pictures, videos and sounds: %1$s lists the maps, as “Trip” and “Plan”; %2$s and %3$s are sizes, as 50 MB and 90 MB. The quantity is how many maps. -->
+    <plurals name="folder_devices_keeps_part">
+        <item quantity="one">Keeps only part of %1$s: files over %2$s, and what\'s past %3$s a map, stay in the folder there. Update Orbit there to keep it all</item>
+        <item quantity="other">Keeps only part of %1$s: files over %2$s, and what\'s past %3$s a map, stay in the folder there. Update Orbit there to keep them all</item>
+    </plurals>
     <string name="folder_devices_note">Devices show here once they sync with this version of Orbit or a later one.</string>
     <string name="folder_devices_only_this_one">Other devices that keep their maps in this folder show here once they sync with this version of Orbit or a later one.</string>
 

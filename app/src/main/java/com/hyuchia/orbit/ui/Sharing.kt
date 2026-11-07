@@ -16,6 +16,8 @@ import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
 import com.hyuchia.orbit.data.MEDIA_DIRECTORY
+import com.hyuchia.orbit.data.requireRoom
+import com.hyuchia.orbit.data.watched
 import com.hyuchia.orbit.page.findActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -45,11 +47,89 @@ private const val EXPORT_KEPT = 24 * 60 * 60 * 1000L
  * nothing opens. Says whether the sheet opened. Throws when the export can't
  * be written whole (a full phone, a picture that went).
  */
-suspend fun shareExport(context: Context, name: String, mimeType: String, title: String, goes: () -> Boolean, write: suspend (OutputStream) -> Unit): Boolean {
-    val file = writeExport(context, name, write)
+suspend fun shareExport(context: Context, name: String, mimeType: String, title: String, goes: () -> Boolean, write: suspend ExportRoom.(OutputStream) -> Unit): Boolean {
+    val file = makeExport(context, name) { output ->
+        write(output)
+        true
+    }
 
+    return shareMade(context, checkNotNull(file), mimeType, title, goes)
+}
+
+/**
+ * Shares a file of the map `mapId` as [shareExport] does: the sheet opens
+ * only while the map doesn't show locked, as it is right before it would
+ * ([com.hyuchia.orbit.privacy.PrivateMaps.hidesNow]). Every way out that
+ * writes a file of a map and hands it to another app goes through here, or
+ * through [shareMapFile] once it's written.
+ */
+suspend fun shareMapExport(context: Context, mapId: String, name: String, mimeType: String, title: String, write: suspend ExportRoom.(OutputStream) -> Unit): Boolean =
+    shareExport(context, name, mimeType, title, goes = { !context.container.privateMaps.hidesNow(mapId) }, write)
+
+/**
+ * Opens the share sheet for a file of the map `mapId` already made in the
+ * cache ([makeExport]), as [shareMapExport] does: only while the map doesn't
+ * show locked, as it is right before it would. Otherwise the file goes, and
+ * nothing opens. Says whether the sheet opened.
+ */
+fun shareMapFile(context: Context, mapId: String, file: File, mimeType: String, title: String): Boolean =
+    shareMade(context, file, mimeType, title, goes = { !context.container.privateMaps.hidesNow(mapId) })
+
+/**
+ * Makes a file of the map `mapId` in the cache, as [shareMapExport] does,
+ * and opens it in the app the phone has for `mimeType` rather than the
+ * share sheet: only while the map doesn't show locked, as it is right
+ * before it would. One that locked while the file was made opens nothing,
+ * and the file goes. What makes a big file says how big it is first, to its
+ * [ExportRoom]. Says whether an app opened it. Throws when the file can't
+ * be made whole: [com.hyuchia.orbit.data.OutputFailed] when there's no room
+ * for it.
+ */
+suspend fun openMapExport(context: Context, mapId: String, name: String, mimeType: String, write: suspend ExportRoom.(OutputStream) -> Unit): Boolean {
+    val file = makeExport(context, name) { output ->
+        write(output)
+        true
+    }
+
+    if (context.container.privateMaps.hidesNow(mapId)) {
+        forgetExport(checkNotNull(file))
+        return false
+    }
+
+    return openFile(context, sharedFileUri(context, checkNotNull(file)) ?: throw IOException("An export landed outside the exports"), mimeType)
+}
+
+/**
+ * Opens a file of the map `mapId` itself, with all it says, in the app the
+ * phone has for `mimeType`, only while the map doesn't show locked: for a
+ * file the person chose to hand over as it is. Says whether an app opened
+ * it.
+ */
+fun openMapFile(context: Context, mapId: String, file: File, mimeType: String): Boolean {
+    if (context.container.privateMaps.hidesNow(mapId)) {
+        return false
+    }
+
+    return sharedFileUri(context, file)?.let { openFile(context, it, mimeType) } ?: false
+}
+
+/** Opens a file in the app the phone has for `mimeType`, with leave to read it. False when no app opens it. */
+fun openFile(context: Context, uri: Uri, mimeType: String): Boolean {
+    val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mimeType).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+    return try {
+        context.startActivity(view)
+        true
+    } catch (missing: ActivityNotFoundException) {
+        Logs.warn("OrbitSharing", "No app opens a file of that kind")
+        false
+    }
+}
+
+/** Opens the share sheet for an export made in the cache, unless `goes`, asked right before, says it mustn't: then the export goes. */
+internal fun shareMade(context: Context, file: File, mimeType: String, title: String, goes: () -> Boolean): Boolean {
     if (!goes()) {
-        file.parentFile?.deleteRecursively()
+        forgetExport(file)
         return false
     }
 
@@ -58,38 +138,62 @@ suspend fun shareExport(context: Context, name: String, mimeType: String, title:
 }
 
 /**
- * Shares a file of the map `mapId` as [shareExport] does: the sheet opens
- * only while the map doesn't show locked, as it is right before it would
- * ([com.hyuchia.orbit.privacy.PrivateMaps.hidesNow]). Every way out that
- * writes a file of a map and hands it to another app goes through here.
+ * Writes an export to the cache, in a folder of its own, a piece at a time
+ * as `write` makes it, and gives its file: null, with nothing left behind,
+ * when `write` says it couldn't make it. What writes a big file says how big
+ * it may be first, to its [ExportRoom], as a page and a zip do. Throws when
+ * it can't be written whole: [com.hyuchia.orbit.data.OutputFailed] when the
+ * cache can't take it, as on a phone whose storage is full.
  */
-suspend fun shareMapExport(context: Context, mapId: String, name: String, mimeType: String, title: String, write: suspend (OutputStream) -> Unit): Boolean =
-    shareExport(context, name, mimeType, title, goes = { !context.container.privateMaps.hidesNow(mapId) }, write)
+suspend fun makeExport(context: Context, name: String, write: suspend ExportRoom.(OutputStream) -> Boolean): File? = makeExport(File(context.cacheDir, EXPORTS), name, write)
 
-/** Writes an export to the cache, a folder of its own, and gives its file. Throws when it can't be written whole. */
-private suspend fun writeExport(context: Context, name: String, write: suspend (OutputStream) -> Unit): File = withContext(Dispatchers.IO) {
-    val file = exportDestination(File(context.cacheDir, "exports"), name, System.currentTimeMillis())
+/** [makeExport] into `exports`. */
+internal suspend fun makeExport(exports: File, name: String, write: suspend ExportRoom.(OutputStream) -> Boolean): File? = withContext(Dispatchers.IO) {
+    val file = exportDestination(exports, name, System.currentTimeMillis())
+    val room = ExportRoom(file.parentFile ?: exports)
+    var made = false
 
     try {
-        file.outputStream().use { write(it) }
-    } catch (failed: Exception) {
+        made = file.outputStream().watched().buffered().use { room.write(it) }
+    } finally {
         // Half an export is of no use to the app it would go to.
-        file.parentFile?.deleteRecursively()
-        throw failed
+        if (!made) {
+            forgetExport(file)
+        }
     }
 
-    file
+    file.takeIf { made }
 }
+
+/**
+ * The storage an export is written to, for what writes a big one to say how
+ * big it may be before it starts: called with that, it throws
+ * [com.hyuchia.orbit.data.OutputFailed] when the storage hasn't room for it
+ * ([requireRoom]), so a big file isn't started where it can't be finished.
+ */
+class ExportRoom internal constructor(private val folder: File) : (Long) -> Unit {
+    override fun invoke(size: Long) = requireRoom(folder, size)
+}
+
+/** Lets an export in the cache go, with the folder of its own it's in, once it's saved, or isn't to be. */
+fun forgetExport(file: File) {
+    file.parentFile?.deleteRecursively()
+}
+
+/** The cache's folder for exports: Orbit hands what's in it to other apps ([sharedFileUri]). */
+private const val EXPORTS = "exports"
 
 /**
  * The address another app is given to read `file`, or null for a file Orbit
  * never hands out. The app's file provider reaches all of the maps' folder,
- * since a video in a map plays in the phone's video app; this gives out only
- * an export in the cache or a picture, video or sound in a map's media
- * folder ([sharesFile]), never a map's text, its versions or its details.
+ * since a video in a map can open in the phone's video app as it is, once
+ * the person chose so for one Orbit couldn't clean ([openMapFile]); this
+ * gives out only an export in the cache or a picture, video or sound in a
+ * map's media folder ([sharesFile]), never a map's text, its versions or
+ * its details.
  */
 fun sharedFileUri(context: Context, file: File): Uri? {
-    val exports = File(context.cacheDir, "exports")
+    val exports = File(context.cacheDir, EXPORTS)
     val maps = File(context.filesDir, "maps")
 
     if (!sharesFile(file, exports, maps)) {

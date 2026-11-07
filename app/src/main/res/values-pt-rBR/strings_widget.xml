@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- O widget do mapa na tela inicial e a escolha do mapa que ele mostra. Pouco espaço: textos curtos. Veja TRANSLATING.md. -->
+<resources>
+    <string name="widget_no_maps">Seus mapas vão aparecer aqui. Abra o Orbit para começar um.</string>
+    <!-- Tarefas e metas concluídas (ou metas alcançadas), de quantas. O número de concluídas pode ser 0, que usa a forma "one": por isso o plural em todas. -->
+    <plurals name="widget_progress_done">
+        <item quantity="one">%1$d de %2$d concluídas</item>
+        <item quantity="many">%1$d de %2$d concluídas</item>
+        <item quantity="other">%1$d de %2$d concluídas</item>
+    </plurals>
+    <plurals name="widget_progress_reached">
+        <item quantity="one">%1$d de %2$d alcançadas</item>
+        <item quantity="many">%1$d de %2$d alcançadas</item>
+        <item quantity="other">%1$d de %2$d alcançadas</item>
+    </plurals>
+    <string name="widget_add_idea">Adicionar uma ideia a %1$s</string>
+    <string name="widget_choose_map">Escolha um mapa</string>
+    <string name="widget_shown_now">Exibido agora</string>
+    <string name="widget_show_map">Mostrar %1$s</string>
+    <string name="widget_open_orbit">Abrir o Orbit</string>
+</resources>

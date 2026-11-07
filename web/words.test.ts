@@ -80,6 +80,7 @@ const WHERE: Record<Exclude<keyof PageWords, 'language' | 'kinds'>, string> = {
 
 const english = resources('values');
 const spanish = resources('values-es');
+const portuguese = resources('values-pt-rBR');
 
 const goalNode = (attrs: Record<string, unknown>): OrbitNode => {
   return { id: 'goal', text: 'Goal', level: 1, type: 'goal', attrs, children: [] };
@@ -155,6 +156,17 @@ describe('the app\'s words', () => {
 
     expect(spanish.pages_goal_of_target).toBe('de %1$s');
   });
+
+  test('come in Brazilian Portuguese from the app\'s Portuguese', () => {
+    // The language alone, as Spanish's: the phone's own tag, pt-BR or pt-PT, is what pages get (PageWords.kt's pageLanguage).
+    expect(portuguese.pages_language).toBe('pt');
+
+    for (const name of [...Object.values(WHERE), ...Object.keys(KIND_NAMES).map((kind) => `map_kind_${kind}`)]) {
+      expect(`${name}: ${portuguese[name] ?? 'missing'}`).not.toBe(`${name}: missing`);
+    }
+
+    expect(portuguese.pages_goal_of_target).toBe('de %1$s');
+  });
 });
 
 describe('a goal\'s ring', () => {
@@ -178,6 +190,8 @@ describe('a TV', () => {
   test('waits in its own language when the app speaks it, and in English otherwise', () => {
     expect(tvWords('es-MX')).toEqual({ language: 'es', status: 'Presentando un mapa', waiting: spanish.pages_waiting_for_the_presenter });
     expect(tvWords('es')).toEqual(tvWords('es-ES'));
+    expect(tvWords('pt-BR')).toEqual({ language: 'pt', status: 'Apresentando um mapa', waiting: portuguese.pages_waiting_for_the_presenter });
+    expect(tvWords('pt-PT')).toEqual(tvWords('pt-BR'));
     expect(tvWords('en-US')).toEqual({ language: 'en', status: 'Presenting a map', waiting: english.pages_waiting_for_the_presenter });
     expect(tvWords('fr-FR')).toEqual(tvWords('en'));
     expect(tvWords(undefined)).toEqual(tvWords('en'));
@@ -188,7 +202,7 @@ describe('a map that\'s just a list', () => {
   test('gets its made-up top idea named in the app\'s language, and saves as the list it was', () => {
     const list = '- Groceries\n  - Apples\n- Chores\n';
 
-    for (const name of [english.common_untitled_map, spanish.common_untitled_map]) {
+    for (const name of [english.common_untitled_map, spanish.common_untitled_map, portuguese.common_untitled_map]) {
       const parsed = parseOrbit(list, { untitled: name });
       expect(parsed.root.text).toBe(name);
       expect(parsed.root.id).toBe('untitled-map');

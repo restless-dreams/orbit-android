@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- O que as páginas nas web views dos mapas e nos navegadores dizem por conta própria, além das palavras do próprio Orbit: a página do mapa, as telas do público, a página que pede um nome e um mapa compartilhado como página da web (web/words.ts). Veja TRANSLATING.md. -->
+<resources>
+    <!-- O idioma destas strings, como código de idioma BCP 47: o lang das páginas -->
+    <string name="pages_language">pt</string>
+
+    <!-- Dentro do anel de uma meta -->
+    <string name="pages_goal_of_target">de %1$s</string>
+    <string name="pages_goal_left">restantes</string>
+
+    <!-- Por que o app não pode alterar um mapa ou importar um texto -->
+    <string name="pages_no_ideas">O Orbit não encontrou ideias neste texto.</string>
+    <string name="pages_text_not_read">O Orbit não conseguiu ler todo este texto.</string>
+    <string name="pages_map_not_added_to">O Orbit não conseguiu ler todo este mapa, então não adicionou nada a ele.</string>
+    <string name="pages_map_from_a_newer_orbit">Uma versão mais recente do Orbit criou este mapa. Atualize o Orbit para adicionar ideias a ele.</string>
+
+    <!-- A tela do público, em uma segunda tela ou em um navegador -->
+    <string name="pages_waiting_for_the_presenter">Aguardando quem apresenta</string>
+    <string name="pages_looking_for_the_presenter">Procurando quem apresenta…</string>
+    <string name="pages_tap_for_sound">Toque para ativar o som</string>
+
+    <!-- A página que pede o nome de quem entra -->
+    <string name="pages_your_name">Seu nome</string>
+
+    <!-- Um mapa compartilhado como página da web -->
+    <string name="pages_present_key">Apresentar (P)</string>
+    <string name="pages_presentation">Apresentação</string>
+    <string name="pages_previous_idea">Ideia anterior</string>
+    <string name="pages_next_idea">Próxima ideia</string>
+    <string name="pages_stop_presenting_key">Parar de apresentar (Esc)</string>
+    <string name="pages_download_for_orbit">Baixar para o Orbit</string>
+    <string name="pages_drawn_with_orbit">Desenhado com Orbit</string>
+</resources>

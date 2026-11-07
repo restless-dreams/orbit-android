@@ -23,8 +23,10 @@ internal data class LiveMatches<T>(val pairs: List<Pair<T, T>>, val offer: Pair<
  *    first: a JPEG the phone made on the way out loses the id, and keeps the
  *    time.
  *
- * When one picture and one such movie are left, with nothing to say they
- * belong together, they're offered to be joined: the person knows.
+ * A still and a movie whose ids differ are two live photos' halves, never
+ * one's, whatever their names or times say. When one picture and one such
+ * movie are left, with nothing to say they belong together or apart,
+ * they're offered to be joined: the person knows.
  */
 internal object LivePairs {
     /** How far apart a still and its movie were taken, at most, by the phone's own clock. */
@@ -48,20 +50,27 @@ internal object LivePairs {
 
         for (movie in movies.toList()) {
             val stem = movie.name?.let(::stem) ?: continue
-            pictures.firstOrNull { picture -> picture.name?.let(::stem) == stem }?.let { join(it, movie) }
+            pictures.firstOrNull { picture -> picture.name?.let(::stem) == stem && !apart(picture, movie) }?.let { join(it, movie) }
         }
 
         // The nearest in time first, so two live photos a second apart each find their own.
         val near = pictures.flatMap { picture -> movies.mapNotNull { movie -> gap(picture, movie)?.let { Triple(picture, movie, it) } } }.sortedBy { it.third }
 
-        for ((picture, movie, apart) in near) {
-            if (apart <= NEAR && picture in pictures && movie in movies) {
+        for ((picture, movie, between) in near) {
+            if (between <= NEAR && picture in pictures && movie in movies && !apart(picture, movie)) {
                 join(picture, movie)
             }
         }
 
-        val offer = if (pictures.size == 1 && movies.size == 1) pictures.single().item to movies.single().item else null
+        val offer = if (pictures.size == 1 && movies.size == 1 && !apart(pictures.single(), movies.single())) pictures.single().item to movies.single().item else null
         return LiveMatches(pairs, offer)
+    }
+
+    /** Whether a still and a movie each carry an id, and not the same one: halves of two live photos. */
+    private fun <T> apart(picture: LiveHalf<T>, movie: LiveHalf<T>): Boolean {
+        val still = picture.still?.identifier ?: return false
+        val video = movie.video?.identifier ?: return false
+        return !still.equals(video, ignoreCase = true)
     }
 
     private fun stem(name: String): String = name.substringBeforeLast('.').lowercase()

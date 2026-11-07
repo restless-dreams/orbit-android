@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A data de uma ideia, no editor, no menu de toque longo, nos detalhes e nos tópicos, e a pergunta sobre notificações. Veja TRANSLATING.md. -->
+<resources>
+    <string name="map_section_date">Data</string>
+    <string name="map_date_add">Adicionar uma data</string>
+    <string name="map_date_add_time">Adicionar um horário</string>
+    <string name="map_date_remove">Remover a data</string>
+    <string name="map_date_change">Alterar a data</string>
+    <string name="map_date_change_time">Alterar o horário</string>
+    <string name="map_date_time_title">Horário</string>
+    <string name="map_date_no_time">Sem horário</string>
+    <string name="map_date_time_label">Horário: %1$s</string>
+    <string name="map_date_label">Data: %1$s</string>
+    <string name="map_date_overdue_label">Atrasada: %1$s</string>
+    <string name="map_date_overdue">Atrasada</string>
+    <string name="map_date_reminds_at">O Orbit lembra você às %1$s desse dia</string>
+    <string name="map_date_reminds_then">O Orbit lembra você nesse horário</string>
+    <string name="map_date_reminders_off">Os lembretes estão desativados nas configurações</string>
+    <string name="map_date_notifications_off">As notificações do Orbit estão desativadas, então ele não pode lembrar você</string>
+    <string name="reminders_ask_title">Lembrar você quando chegar a hora?</string>
+    <string name="reminders_ask_text">O Orbit pode lembrar você neste dispositivo quando chegar a data de uma ideia. Para isso, permita as notificações dele.</string>
+    <string name="reminders_ask_allow">Permitir</string>
+    <string name="reminders_ask_not_now">Agora não</string>
+</resources>

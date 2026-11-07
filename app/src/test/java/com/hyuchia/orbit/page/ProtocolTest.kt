@@ -145,8 +145,8 @@ class ProtocolTest {
         /** The command that tells a page the app's language and words, which both pages have. */
         const val LANGUAGE = "language"
 
-        /** Messages the app gives itself about its page, never from the page: its process stopped. */
-        val MADE_BY_THE_APP = setOf("stopped")
+        /** Messages the app gives itself about its page, never from the page: its process stopped, or it didn't load. */
+        val MADE_BY_THE_APP = setOf("stopped", "didNotLoad")
 
         /** `element` with every number written one way: 56 and 56.0 are the same number to a page. */
         fun canonical(element: JsonElement): JsonElement = when (element) {

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Apresentar um mapa: nesta tela, em uma segunda tela, em uma TV ou em navegadores; o roteiro e os ensaios; e ditar ideias no mapa. Veja TRANSLATING.md. -->
+<resources>
+    <!-- Os controles da apresentação -->
+    <string name="present_previous_idea">Ideia anterior</string>
+    <string name="present_next_idea">Próxima ideia</string>
+    <string name="present_pause">Pausar</string>
+    <string name="present_play_on_its_own">Avançar automaticamente</string>
+    <string name="present_show_the_captions">Mostrar as legendas</string>
+    <string name="present_hide_the_captions">Ocultar as legendas</string>
+    <string name="present_show_in_a_browser">Mostrar em um navegador</string>
+    <string name="present_show_on_a_tv">Mostrar em uma TV</string>
+    <string name="present_rehearsing">Ensaiando</string>
+    <string name="present_position">%1$d / %2$d</string>
+    <string name="present_progress">Ideia %1$d de %2$d</string>
+    <string name="present_on_pace">No ritmo</string>
+    <string name="present_behind">%1$s de atraso</string>
+    <string name="present_ahead">%1$s à frente</string>
+    <string name="present_time_left">Faltam %1$s</string>
+    <string name="present_time_over">%1$s a mais</string>
+
+    <!-- A tela de quem apresenta, enquanto o público assiste em uma segunda tela, uma TV ou navegadores -->
+    <string name="present_on_screen">Em %1$s</string>
+    <string name="present_on_the_tv">Na TV</string>
+    <string name="present_tv_too_old">Esta TV ainda não consegue mostrar apresentações desta versão do Orbit. Apresente neste dispositivo ou em outra tela.</string>
+    <string name="present_tv_older_maps">A TV desenha os mapas com uma versão mais antiga do Orbit, então partes deste mapa podem ficar diferentes lá.</string>
+    <plurals name="present_browsers_watching">
+        <item quantity="one">Navegadores: %d</item>
+        <item quantity="many">Navegadores: %d</item>
+        <item quantity="other">Navegadores: %d</item>
+    </plurals>
+    <string name="present_video_of">O vídeo de %1$s</string>
+    <string name="present_picture_of">A imagem de %1$s</string>
+    <string name="present_video_not_on_tv">Este vídeo é reproduzido em uma segunda tela e em navegadores, não na TV.</string>
+    <string name="present_video_playing">Reproduzindo · %1$s</string>
+    <string name="present_video_ended">Finalizado · %1$s</string>
+    <string name="present_video_paused">Pausado · %1$s</string>
+    <string name="present_back_to_the_map">Voltar ao mapa</string>
+    <string name="present_start_over">Começar de novo</string>
+    <string name="present_play_live_photo_again">Reproduzir a foto ao vivo de novo</string>
+    <string name="present_pause_the_video">Pausar o vídeo</string>
+    <string name="present_no_notes">Esta ideia não tem notas.</string>
+    <string name="present_up_next">A seguir</string>
+    <string name="present_the_end">Fim</string>
+    <string name="present_this_idea">Esta ideia</string>
+
+    <!-- Mostrar a apresentação em navegadores na rede local -->
+    <string name="present_connect_to_the_wifi">Conecte este dispositivo à rede Wi-Fi da sala, ou ative o hotspot dele e conecte o notebook a ele. Depois, volte aqui.</string>
+    <string name="present_open_in_a_browser">Em um notebook, no navegador de uma TV ou nos celulares da sala, na mesma rede Wi-Fi, abra:</string>
+    <string name="present_qr_code_for_address">Código QR deste endereço</string>
+    <string name="present_lockout">Um dispositivo digitou códigos errados demais, então precisa esperar antes de tentar de novo. Se não foi ninguém da sala, pare de mostrar e mostre de novo para ter um novo código.</string>
+    <string name="present_stop_showing">Parar de mostrar</string>
+
+    <!-- O roteiro da apresentação, enquanto é montado -->
+    <string name="present_path">Roteiro</string>
+    <string name="present_path_no_ideas">Nenhuma ideia ainda</string>
+    <plurals name="present_path_ideas">
+        <item quantity="one">%d ideia</item>
+        <item quantity="many">%d ideias, nesta ordem</item>
+        <item quantity="other">%d ideias, nesta ordem</item>
+    </plurals>
+    <string name="present_path_find_an_idea">Encontrar uma ideia para o roteiro</string>
+    <string name="present_path_start_over">Começar o roteiro de novo</string>
+    <string name="present_path_how_to">Agora toque nas ideias na ordem em que você vai apresentá-las</string>
+    <string name="present_path_add_again">Adicionar de novo</string>
+    <string name="present_path_add_idea">Adicionar %1$s</string>
+    <string name="present_path_fly_to_idea">Voar até %1$s</string>
+    <string name="present_path_move_idea">Mover %1$s no roteiro</string>
+    <string name="present_path_take_idea_off">Tirar %1$s do roteiro</string>
+    <string name="present_path_earlier">Antes</string>
+    <string name="present_path_later">Depois</string>
+    <string name="present_path_take_off">Tirar do roteiro</string>
+
+    <!-- Como foi um ensaio -->
+    <string name="present_rehearsed_in">Duração do ensaio</string>
+    <string name="present_rehearsal_sets_the_pace">Ao apresentar, você vai ver se está mantendo este ritmo.</string>
+    <string name="present_idea_no_longer_on_the_map">Uma ideia que não está mais no mapa</string>
+    <string name="present_longest">A mais longa</string>
+    <string name="present_rehearse_again">Ensaiar de novo</string>
+
+    <!-- Ditar ideias no mapa, mantendo o botão + pressionado -->
+    <string name="present_talk_ideas_onto_the_map">Ditar ideias no mapa</string>
+    <string name="present_talk_needs_the_microphone">O Orbit precisa do microfone para ouvir suas ideias.</string>
+    <string name="present_talk_no_speech_service">Este dispositivo não tem reconhecimento de voz: digite a ideia ou use o microfone do seu teclado.</string>
+    <string name="present_talk_adding_the_last_idea">Adicionando a última ideia…</string>
+    <string name="present_talk_say_an_idea">Diga uma ideia e faça uma pausa</string>
+    <string name="present_talk_listening">Ouvindo…</string>
+    <string name="present_talk_let_go_or_slide_up">Solte para terminar ou deslize para cima para continuar ouvindo</string>
+    <plurals name="present_talk_ideas_listening_until_done">
+        <item quantity="one">Ideias: %d · ouvindo até você tocar em Concluído</item>
+        <item quantity="many">Ideias: %d · ouvindo até você tocar em Concluído</item>
+        <item quantity="other">Ideias: %d · ouvindo até você tocar em Concluído</item>
+    </plurals>
+    <plurals name="present_talk_ideas_let_go_to_finish">
+        <item quantity="one">Ideias: %d · solte para terminar</item>
+        <item quantity="many">Ideias: %d · solte para terminar</item>
+        <item quantity="other">Ideias: %d · solte para terminar</item>
+    </plurals>
+</resources>

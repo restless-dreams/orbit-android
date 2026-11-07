@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="exports" path="exports/" />
-    <!-- Videos added to a map, played in the phone's video app. The app hands out only a map's media from here (sharedFileUri in ui/Sharing.kt). -->
+    <!-- A map's own videos, handed out only when the person chose to open one in another app as it is, after Orbit couldn't clean it: otherwise a video opens there as a clean copy from the exports. The app hands out only a map's media from here (sharedFileUri in ui/Sharing.kt). -->
     <files-path name="maps" path="maps/" />
 </paths>

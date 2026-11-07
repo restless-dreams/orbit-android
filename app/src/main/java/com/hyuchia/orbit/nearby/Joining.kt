@@ -20,13 +20,20 @@ import java.security.SecureRandom
  * their browser stopped following: long enough for a reload, or a
  * connection that dropped, to come back. Then they're away: their place is
  * free, and their session takes them back in when their browser returns,
- * as a phone that slept during the talk does, while there's room.
+ * as a phone that slept during the talk does, however long it slept, while
+ * there's room.
  */
 private const val AWAY_MILLISECONDS = 60_000L
-/** How long an away session is kept for its browser to come back. */
-private const val FORGET_MILLISECONDS = 30 * 60_000L
 /** The most sessions a room keeps, in and away together: past it, the longest away are forgotten. */
 private const val SESSIONS_KEPT = 512
+/**
+ * Wrong PINs every device together may type before new ones all wait, as
+ * with codes: a PIN has only 10,000 to guess from, so someone taking
+ * address after address to guess from gets few tries, while a room of
+ * people mistyping one said aloud never gets near it. A new PIN starts
+ * everyone over.
+ */
+private const val WRONG_PINS_TOGETHER = 20
 
 /** The bytes in a session's token: 128 bits, never guessed. */
 private const val TOKEN_BYTES = 16
@@ -65,7 +72,7 @@ enum class RoomState(val json: String) {
     Closed("closed"),
     Ended("ended"),
 
-    /** Not in, but free to join: a session that ended while its browser was away, or none yet. */
+    /** Not in, but free to join: no session yet, or one the room no longer keeps. */
     Left("left"),
 }
 
@@ -118,9 +125,12 @@ private fun wording(kind: RoomKind): Wording = when (kind) {
  *
  * With nothing to ask, opening the room's page joins at once. Otherwise
  * the page is a form, for a name, and the PIN shown on the phone when the
- * room takes one; wrong PINs make a device wait, as wrong codes do. The
+ * room takes one; wrong PINs make a device wait, as wrong codes do, and
+ * every new device once [WRONG_PINS_TOGETHER] came from them all. The
  * phone can cap how many are in at once, stop letting anyone new in, and
  * remove someone: their session ends, and their address can't join again.
+ * A session lasts as long as the room, so a browser that was away comes
+ * back in, unless the room is full by then.
  *
  * `template` is the join page (web/join.html), and `words` what it says,
  * in their language.
@@ -149,7 +159,7 @@ class Joining(
     private var guests = 0
     private var nextId = 1L
     private var ended = false
-    private val pinGuard = CodeGuard(clock, together = null)
+    private val pinGuard = CodeGuard(clock, together = WRONG_PINS_TOGETHER)
     private val currentOptions = MutableStateFlow(options.limited())
     private val currentPin = MutableStateFlow(if (options.requirePin) newPin() else null)
     private val currentMembers = MutableStateFlow<List<Member>>(emptyList())
@@ -171,7 +181,7 @@ class Joining(
         currentOptions.value = next
 
         if (next.requirePin && currentPin.value == null) {
-            currentPin.value = newPin()
+            usePin(newPin())
         }
 
         if (!next.requirePin) {
@@ -182,8 +192,14 @@ class Joining(
     /** A new PIN for whoever joins next: people already in stay. */
     fun replacePin() {
         if (currentOptions.value.requirePin) {
-            currentPin.value = newPin()
+            usePin(newPin())
         }
+    }
+
+    /** Takes `pin` from now on: wrong guesses at the one before no longer keep anyone waiting. */
+    private fun usePin(pin: String) {
+        currentPin.value = pin
+        pinGuard.reset()
     }
 
     private fun JoiningOptions.limited() = copy(limit = limit.coerceIn(0, hardLimit))
@@ -247,7 +263,6 @@ class Joining(
         val now = clock()
         val leaving = sessions.values.filter { !it.away && it.streams == 0 && now - it.awaySince > AWAY_MILLISECONDS }
         leaving.forEach { it.away = true }
-        sessions.values.removeAll { it.away && now - it.awaySince > FORGET_MILLISECONDS }
 
         if (leaving.isNotEmpty()) {
             publish()

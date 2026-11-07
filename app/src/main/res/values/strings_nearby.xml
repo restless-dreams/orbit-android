@@ -51,6 +51,9 @@
     <string name="nearby_send_maps_already_waiting">It has maps waiting for an answer already. Try again once they\'re answered.</string>
     <string name="nearby_send_update_this_device">Update Orbit on this device, then try again.</string>
     <string name="nearby_send_no_room_there">It doesn\'t have room for the map.</string>
+    <!-- %1$s is how big the map is as it goes, such as 180 MB: an older Orbit there takes maps of up to 64 MB. -->
+    <string name="nearby_send_update_for_size">It has an older Orbit, which can\'t take a map this big (%1$s). Update Orbit there, then send it again.</string>
+    <string name="nearby_send_no_room_here">There isn\'t room on this device to get the map ready to send.</string>
 
     <!-- A map that arrived from another device, or from a file of a map that's already here -->
     <string name="nearby_arrival_newer_version_from">A newer “%1$s” from %2$s</string>
@@ -126,6 +129,8 @@
     <string name="nearby_join_from_the_page">Join from the page at the address on the phone.</string>
     <string name="nearby_server_busy">Too many connections. Try again in a moment.</string>
     <string name="nearby_server_wrong_address">Open this with the address the phone shows.</string>
+    <!-- What a computer's browser shows, in plain text, when the phone sharing a map hasn't room to make its zip. -->
+    <string name="nearby_no_room_for_the_zip">There isn\'t room on the phone to make the map\'s zip. Free up some space there, and download it again.</string>
     <string name="nearby_let_new_people_in">Let new people in</string>
     <string name="nearby_let_new_people_in_description">Turn it off once everyone\'s in. People already in stay.</string>
     <!-- A device kept from guessing the PIN. -->

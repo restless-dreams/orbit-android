@@ -1,5 +1,7 @@
 package com.hyuchia.orbit.data
 
+import com.hyuchia.orbit.media.PictureInFile
+import com.hyuchia.orbit.media.PicturePieces
 import com.hyuchia.orbit.media.SharedPictures
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -29,12 +31,26 @@ internal sealed interface OutgoingFile {
         }
     }
 
-    /** A picture without what its file says beyond the picture, made in memory. */
+    /** A picture without what its file says beyond the picture, made in memory: an SVG drawing, whose text is read as a whole. */
     class Cleaned(val bytes: ByteArray) : OutgoingFile {
         override val size: Long get() = bytes.size.toLong()
 
         override fun writeTo(output: OutputStream) {
             output.write(bytes)
+        }
+    }
+
+    /**
+     * A JPEG, PNG, WebP or GIF picture without what its file says beyond the
+     * picture: the parts of its file it keeps, with the few bytes written in
+     * place of what goes ([SharedPictures.plan]), read as they're written, so
+     * a big picture is never whole in memory.
+     */
+    class Pieced(val file: File, val pieces: PicturePieces) : OutgoingFile {
+        override val size: Long get() = pieces.size
+
+        override fun writeTo(output: OutputStream) {
+            RandomAccessFile(file, "r").use { input -> pieces.writeTo(output, input) }
         }
     }
 
@@ -93,8 +109,12 @@ internal class Patches : ArrayList<Patch>() {
  *   their pixels, color profile and which way up they are. So do **GIFs**,
  *   without comments or other apps' blocks, and **SVG drawings**, with only
  *   what draws them.
- * - **HEIF and AVIF pictures** keep their picture: their EXIF and XMP items
- *   are written over with zeros where they are.
+ * - **HEIF and AVIF pictures** keep their picture, and an animation's
+ *   frames: their EXIF and XMP items are written over with zeros where they
+ *   are, an image sequence's movie is cleaned as a video's is (below), and
+ *   the boxes beside the picture, the video a motion photo keeps in it, a
+ *   phone's own trailer and other apps' among them, become free space, and
+ *   are left out when they come after it, as they do.
  * - **BMP pictures** keep their headers, colors, pixels and color profile;
  *   the bytes the format leaves to apps, and anything between or after
  *   those, say nothing ([Bitmaps]).
@@ -150,8 +170,36 @@ internal object OutgoingMedia {
      */
     fun of(file: File, asTheyAre: Set<String>): OutgoingFile? = of(file) ?: OutgoingFile.AsIs(file).takeIf { file.name in asTheyAre }
 
-    /** How `file` goes, or null when it doesn't: it can't be read, or read through. */
+    /**
+     * How `file` goes, or null when it doesn't: it can't be read, or read
+     * through. Working that out reads a sound frame by frame, so how a file
+     * goes is kept for as long as it's the same file, by its path, size and
+     * time ([plans]): the export panel and the send sheet, opened again and
+     * again, read none of them twice. An SVG drawing, cleaned in memory, is
+     * worked out each time.
+     */
     fun of(file: File): OutgoingFile? {
+        val key = PlanKey(file.path, file.length(), file.lastModified())
+        synchronized(plans) { plans[key] }?.let { return it }
+        val outgoing = plan(file)
+
+        if (outgoing != null && outgoing !is OutgoingFile.Cleaned) {
+            synchronized(plans) { plans[key] = outgoing }
+        }
+
+        return outgoing
+    }
+
+    /** A file as it was when how it goes was worked out: one written again, under its name, is another. */
+    private data class PlanKey(val path: String, val size: Long, val modified: Long)
+
+    /** How the files last asked about go, the latest few hundred, by what they were then. */
+    private val plans = object : LinkedHashMap<PlanKey, OutgoingFile>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<PlanKey, OutgoingFile>?): Boolean = size > PLANS_KEPT
+    }
+
+    /** How `file` goes, worked out from what it holds: see [of]. */
+    private fun plan(file: File): OutgoingFile? {
         val start = try {
             file.inputStream().use { input -> input.readAtMost(START_BYTES) }
         } catch (unreadable: IOException) {
@@ -160,8 +208,32 @@ internal object OutgoingMedia {
 
         return when (val kind = kindOf(start)) {
             null -> null
-            Kind.Picture -> SharedPictures.withoutMetadata(file.readBytes())?.let { OutgoingFile.Cleaned(it) }
+            Kind.Picture -> picture(file, start)
             else -> RandomAccessFile(file, "r").use { input -> plan(kind, FileBytes(input)) }?.let { (patches, end) -> OutgoingFile.Patched(file, patches, end) }
+        }
+    }
+
+    /**
+     * How a picture's file goes, whose first bytes are `start`: a JPEG, PNG,
+     * WebP or GIF as the parts of its file it keeps, read from the file as
+     * they're written, and an SVG drawing cleaned in memory; null when it
+     * can't be read through.
+     */
+    private fun picture(file: File, start: ByteArray): OutgoingFile? {
+        if (SharedPictures.kindOf(start) == SharedPictures.Kind.Svg) {
+            // Read whole to be cleaned: one bigger than any drawing a map has goes only as it is, when the person chooses.
+            if (file.length() > SVG_CLEANED_MOST) {
+                return null
+            }
+
+            return SharedPictures.withoutMetadata(file.readBytes())?.let { OutgoingFile.Cleaned(it) }
+        }
+
+        return try {
+            RandomAccessFile(file, "r").use { input -> SharedPictures.plan(PictureInFile(input)) }?.let { OutgoingFile.Pieced(file, it) }
+        } catch (unreadable: IOException) {
+            // It went, or changed, as it was read.
+            null
         }
     }
 
@@ -245,6 +317,12 @@ internal object OutgoingMedia {
 
     /** Enough of a file to tell its kind: a JPEG's or PNG's signature, an MP4's first box, or where an SVG's element starts. */
     private const val START_BYTES = 512
+
+    /** How many files' plans [of] keeps: a map's, and a few more. */
+    private const val PLANS_KEPT = 512
+
+    /** The most an SVG drawing may be to be cleaned, which reads it whole: drawings are kilobytes, a big one a few megabytes. */
+    private const val SVG_CLEANED_MOST = 32L * 1024 * 1024
 
     /** A picture inside a drawing: its media type, and its bytes in base64. */
     private val DATA_PICTURE = Regex("""data:(image/[A-Za-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)""")
@@ -354,7 +432,7 @@ private object MetadataPatches {
         val brands = top.firstOrNull { it.type == "ftyp" }?.let { IsoBoxes.brands(bytes, it) }.orEmpty()
 
         if (brands.any { it in IsoBoxes.PICTURE_BRANDS }) {
-            pictureMetadata(bytes, top)?.let { it to end }
+            pictureMetadata(bytes, top)
         } else {
             // A movie whose media data isn't whole, as one cut short in it, can't be played: its index points at frames that aren't there.
             movieMetadata(bytes, top)?.takeIf { top.any { it.type == "mdat" } }?.let { it to end }
@@ -387,6 +465,18 @@ private object MetadataPatches {
                 else -> patches += metadataOf(bytes, box)
             }
         }
+
+        patches += inMovie(bytes, movie) ?: return null
+        return patches
+    }
+
+    /**
+     * What a movie's own box says beyond what it plays: its header's dates,
+     * its tracks' metadata, its own metadata and free space, and a camera's
+     * `uuid` box. Null when one of them can't be read.
+     */
+    private fun inMovie(bytes: Bytes, movie: IsoBox): List<Patch>? {
+        val patches = Patches()
 
         for (box in IsoBoxes.children(bytes, movie) ?: return null) {
             when (box.type) {
@@ -468,12 +558,15 @@ private object MetadataPatches {
 
         return IsoBoxes.children(bytes, descriptions, skip = 8).orEmpty().flatMap { entry ->
             when {
-                handler == "vide" && entry.end - entry.body >= VISUAL_DESCRIPTION -> listOf(Patch(entry.body + 12, 4), Patch(entry.body + 42, 32))
+                handler in VISUAL_HANDLERS && entry.end - entry.body >= VISUAL_DESCRIPTION -> listOf(Patch(entry.body + 12, 4), Patch(entry.body + 42, 32))
                 handler == "soun" && entry.end - entry.body >= SOUND_DESCRIPTION -> listOf(Patch(entry.body + 12, 4))
                 else -> emptyList()
             }
         }
     }
+
+    /** The handlers of tracks of pictures: a video's, an image sequence's (an animated AVIF's), and their transparency's. */
+    private val VISUAL_HANDLERS = setOf("vide", "pict", "auxv")
 
     /** How long a video's and a sound's sample descriptions are at the least, after their box's header. */
     private const val VISUAL_DESCRIPTION = 78L
@@ -504,17 +597,23 @@ private object MetadataPatches {
     private val FREE_SPACE = setOf("free", "skip")
 
     /**
-     * A HEIF or AVIF picture's patches: its EXIF and XMP items written over
-     * with zeros, and the video a motion photo keeps in an `mpvd` box after
-     * them cleaned as any video is. Null when its items, or that video,
-     * can't be read.
+     * A HEIF or AVIF picture's patches, and where it ends. Its EXIF and XMP
+     * items are written over with zeros, and an image sequence's movie, as
+     * an animated AVIF's, is cleaned as any movie is. Every other box beside
+     * the picture becomes free space, and is left out when it comes after
+     * the picture, as it does: the video a motion photo keeps (`mpvd`),
+     * Samsung's own trailer (`sefd`), XMP, content credentials and a
+     * camera's own (`uuid`), what free space held, and any box of a kind a
+     * picture isn't made of, unless one of its items is in it. Null when its
+     * items, or its movie, can't be read.
      */
-    private fun pictureMetadata(bytes: Bytes, top: List<IsoBox>): List<Patch>? {
+    private fun pictureMetadata(bytes: Bytes, top: List<IsoBox>): Pair<List<Patch>, Long>? {
         val meta = top.firstOrNull { it.type == "meta" } ?: return null
         val parts = IsoBoxes.children(bytes, meta, skip = 4) ?: return null
-        val patches = top.filter { it.type == "uuid" && IsoBoxes.isXmp(bytes, it) }.flatMap(::freed).toMutableList()
+        val items = IsoBoxes.items(bytes, parts) ?: return null
+        val patches = Patches()
 
-        for (item in IsoBoxes.items(bytes, parts) ?: return null) {
+        for (item in items) {
             if (item.type != "Exif" && !(item.type == "mime" && item.contentType.lowercase().startsWith("application/rdf+xml"))) {
                 continue
             }
@@ -524,14 +623,28 @@ private object MetadataPatches {
             }
         }
 
-        for (motion in top.filter { it.type == "mpvd" }) {
-            val video = SliceBytes(bytes, motion.body, motion.end - motion.body)
-            val movie = movieMetadata(video, IsoBoxes.top(video).first) ?: return null
-            patches += movie.map { Patch(motion.body + it.at, it.length, it.with) }
+        // A box any of its items is in stays, whatever its kind.
+        val places = items.flatMap { it.ranges.orEmpty() }
+        val kept = top.filter { box -> box.type in PICTURE_BOXES || places.any { (at, length) -> at < box.end && at + length > box.start } }
+
+        for (box in top) {
+            when {
+                box !in kept -> patches += freed(box)
+                box.type == "moov" -> patches += inMovie(bytes, box) ?: return null
+                box.type == "moof" -> patches += metadataIn(bytes, box, "traf") ?: return null
+            }
         }
 
-        return patches
+        // What follows the last box it keeps is free space now, and stays out.
+        return patches to (kept.maxOfOrNull { it.end } ?: return null)
     }
+
+    /**
+     * The boxes a HEIF or AVIF picture is made of: its type, its items and
+     * their data, and an image sequence's movie, its fragments and their
+     * indexes.
+     */
+    private val PICTURE_BOXES = setOf("ftyp", "meta", "mdat", "moov", "moof", "mfra", "sidx", "ssix", "styp", "pdin")
 
     /** A box made free space: its type says so, and nothing it held is left. */
     private fun freed(box: IsoBox): List<Patch> = listOf(

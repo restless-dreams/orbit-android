@@ -28,6 +28,8 @@ internal fun actOnIdea(model: MapViewModel, ui: MapUi, dialogs: MapDialogsState,
         NodeAction.PickIcon -> dialogs.pickingIcon = node.id
         NodeAction.PickColor -> dialogs.pickingColor = node.id
         is NodeAction.SetStatus -> model.update(node.id, "status", action.status?.let(::JsonPrimitive))
+        is NodeAction.PickDate -> dialogs.pickingDate = DatePick(node.id, action.part)
+        NodeAction.ClearDate -> model.update(node.id, "due", null)
         is NodeAction.SetColor -> model.update(node.id, "color", action.color?.let(::JsonPrimitive))
         is NodeAction.SetCollapsed -> model.update(node.id, "collapsed", if (action.collapsed) JsonPrimitive(true) else null)
         NodeAction.Copy -> model.copy(node.id)
@@ -45,7 +47,9 @@ internal fun actOnIdea(model: MapViewModel, ui: MapUi, dialogs: MapDialogsState,
         }
         NodeAction.Delete -> model.remove(node.id)
         NodeAction.RecordMemo -> model.recordMemo(node.id)
+        NodeAction.AddFiles -> dialogs.pickingFiles = node.id
         NodeAction.PlaySound -> model.toggleSound(node.id)
+        NodeAction.Sketch -> model.sketch(node.id)
         is NodeAction.ChangeGoal -> {
             dialogs.changingGoal = node.id
             dialogs.goalChange = action.change

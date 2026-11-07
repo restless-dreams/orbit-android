@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dibujar en el planeta de una idea: su lienzo, los lápices, el borrador, y lo que el mapa dice de un dibujo. Consulta TRANSLATING.md. -->
+<resources>
+    <string name="sketch_sketch">Dibujar</string>
+    <string name="sketch_keep_sketching">Seguir dibujando</string>
+
+    <string name="sketch_canvas">Dibujo en %1$s</string>
+    <plurals name="sketch_strokes">
+        <item quantity="one">%d trazo</item>
+        <item quantity="many">%d trazos</item>
+        <item quantity="other">%d trazos</item>
+    </plurals>
+    <string name="sketch_close">Cerrar el dibujo</string>
+
+    <string name="sketch_pen">Lápiz</string>
+    <string name="sketch_pen_named">Lápiz: %1$s, %2$s</string>
+    <string name="sketch_eraser">Borrador</string>
+    <string name="sketch_clear">Borrar el dibujo</string>
+    <string name="sketch_fine">Fino</string>
+    <string name="sketch_medium">Mediano</string>
+    <string name="sketch_bold">Grueso</string>
+
+    <string name="sketch_describe_title">Describe tu dibujo</string>
+    <string name="sketch_describe_label">Descríbelo para lectores de pantalla</string>
+    <string name="sketch_keep_drawing">Seguir dibujando</string>
+
+    <string name="sketch_replace_title">¿Reemplazar la imagen con un dibujo?</string>
+    <string name="sketch_replace_text">El dibujo toma el lugar de la imagen de %1$s. Deshacer la recupera.</string>
+
+    <string name="sketch_discard_title">¿Descartar el dibujo?</string>
+    <string name="sketch_discard_text">Lo que dibujaste se pierde, y la idea queda como estaba.</string>
+    <string name="sketch_discard">Descartar</string>
+
+    <string name="sketch_replaced_the_picture">El dibujo reemplazó la imagen</string>
+    <string name="sketch_taken_off">La idea ya no tiene el dibujo</string>
+    <string name="sketch_lost">El dibujo se cerró: su idea ya no está</string>
+    <string name="sketch_not_kept">No se pudo guardar el dibujo</string>
+
+    <string name="sketch_shortcuts">Al dibujar</string>
+</resources>

@@ -1,5 +1,6 @@
 package com.hyuchia.orbit.data
 
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -10,6 +11,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.io.FileNotFoundException
+import java.io.IOException
 import java.io.OutputStream
 
 class FolderDevicesTest {
@@ -60,8 +62,16 @@ class FolderDevicesTest {
 
         override fun deviceRecords(): List<FolderFile> = records.map { (name, record) -> FolderFile(name, record.second, record.first.length.toLong()) }
 
+        /** Records that can't be read just now, as a provider failing would leave them. */
+        val unreadable = mutableSetOf<String>()
+
         override fun readDeviceRecord(name: String): String {
             reads += name
+
+            if (name in unreadable) {
+                throw IOException("Couldn't read $name")
+            }
+
             return records[name]?.first ?: throw FileNotFoundException(name)
         }
 
@@ -202,6 +212,85 @@ class FolderDevicesTest {
     }
 
     @Test
+    fun `a record from an Orbit before this one says nothing of how big a map's files may be there, and reads as the 50 MB and 90 MB it keeps`() {
+        // As Orbit 0.4.0 writes its record: every field it has, none about sizes.
+        val release = """
+            {
+                "id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+                "name": "Pixel 6",
+                "kind": "phone",
+                "appVersion": "0.4.0",
+                "appVersionCode": 5,
+                "mapFormat": 1,
+                "mediaTypes": [
+                    "jpg",
+                    "mp4"
+                ],
+                "synced": $now,
+                "format": 1,
+                "compatible": 1
+            }
+        """.trimIndent()
+
+        val read = FolderDeviceRecords.decode(release)!!
+        assertNull(read.mediaFileLimit)
+        assertNull(read.mapMediaLimit)
+        assertEquals(MEDIA_FILE_LIMIT_UP_TO_0_4_0, read.keepsFile)
+        assertEquals(MAP_MEDIA_LIMIT_UP_TO_0_4_0, read.keepsMapMedia)
+        assertEquals(50_000_000L, read.keepsFile)
+        assertEquals(90_000_000L, read.keepsMapMedia)
+    }
+
+    @Test
+    fun `this device's record says how big a map's files may be here, in fields the Orbit before reads past`() {
+        val mine = device("2a6c0e4e-0b7e-4c43-9d35-1f6f2d8e7a10").copy(mediaFileLimit = MEDIA_FILE_LIMIT, mapMediaLimit = MAP_MEDIA_LIMIT)
+        val text = FolderDeviceRecords.encode(mine)
+        val fields = Json.parseToJsonElement(text).jsonObject
+        assertEquals("250000000", fields.getValue("mediaFileLimit").jsonPrimitive.content)
+        assertEquals("1000000000", fields.getValue("mapMediaLimit").jsonPrimitive.content)
+        // Still read right by every version with records: 0.4.0 reads it as it reads its own, past what it doesn't know.
+        assertEquals("1", fields.getValue("compatible").jsonPrimitive.content)
+        val asOrbit040 = Json { ignoreUnknownKeys = true }.decodeFromString(Release040Record.serializer(), text)
+        assertEquals(Release040Record(mine.id, mine.name, mine.kind, mine.appVersion, mine.appVersionCode, mine.mapFormat, mine.mediaTypes, mine.synced), asOrbit040)
+        assertEquals(mine, FolderDeviceRecords.decode(text))
+        assertEquals(MEDIA_FILE_LIMIT, mine.keepsFile)
+        assertEquals(MAP_MEDIA_LIMIT, mine.keepsMapMedia)
+    }
+
+    /** A device's record as Orbit 0.4.0 reads one: its fields then, which a record only ever adds to. */
+    @Serializable
+    private data class Release040Record(
+        val id: String,
+        val name: String,
+        val kind: String = FolderDevice.PHONE,
+        val appVersion: String,
+        val appVersionCode: Int,
+        val mapFormat: Int,
+        val mediaTypes: List<String>,
+        val synced: Long,
+        val format: Int = 1,
+        val compatible: Int = 1,
+    )
+
+    @Test
+    fun `the maps a device with less room for a map's files keeps only part of are known, by title`() {
+        val release = device("0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0", name = "Pixel 6")
+        val current = device("7b1d9f30-5c2e-4a8b-b6f1-0e9d8c7b6a51", name = "Tablet").copy(mediaFileLimit = MEDIA_FILE_LIMIT, mapMediaLimit = MAP_MEDIA_LIMIT)
+        val maps = listOf(
+            "Trip" to listOf(40_000_000L, 40_000_000L),
+            "Concert" to listOf(60_000_000L),
+            "Lisbon" to listOf(40_000_000L, 40_000_000L, 20_000_000L),
+            "Plan" to emptyList(),
+        )
+
+        // Orbit 0.4.0 keeps files of up to 50 MB and 90 MB a map: a 60 MB video, and what's past 90 MB, stay in the folder there.
+        assertEquals(mapOf(release.id to listOf("Concert", "Lisbon")), FolderRoster.partlyKept(listOf(release, current), maps))
+        assertTrue(FolderRoster.keepLess(listOf(release, current)))
+        assertFalse(FolderRoster.keepLess(listOf(current)))
+        assertEquals(emptyMap<String, List<String>>(), FolderRoster.partlyKept(listOf(current), maps))
+    }
+
+    @Test
     fun `before maps go out in a newer format, the devices that could only show them are known`() {
         val others = listOf(device("a", format = 1), device("b", format = 2), device("c", format = 3))
         assertEquals(listOf("a"), FolderRoster.leftBehind(others, format = 2).map { it.id })
@@ -213,5 +302,47 @@ class FolderDevicesTest {
         val records = listOf(device("me"), device("b", name = "tablet"), device("a", name = "Laptop"))
         assertEquals(listOf("a", "b"), FolderRoster.current(records, me = "me", now = now).map { it.id })
         assertNull(FolderRoster.current(listOf(device("gone", synced = now - 91 * day)), me = "me", now = now).firstOrNull())
+    }
+
+    @Test
+    fun `this device's record a newer Orbit says this one would misread, or that can't be read now, isn't written over`() {
+        val folder = MemoryFolder()
+        val mine = device("2a6c0e4e-0b7e-4c43-9d35-1f6f2d8e7a10")
+        val own = "${mine.id}.json"
+
+        // Written by a newer Orbit on this device, before it went back to this version.
+        val newer = FolderDeviceRecords.encode(mine.copy(appVersionCode = 9)).replace("\"compatible\": 1", "\"compatible\": 2")
+        folder.records[own] = newer to 1L
+        FolderDeviceRecords(folder, mutableMapOf()).update(mine, now)
+        assertEquals(emptyList<String>(), folder.writes)
+        assertEquals(newer, folder.records.getValue(own).first)
+
+        // One that can't be read now waits too, rather than lose what a newer Orbit kept in it.
+        folder.records[own] = FolderDeviceRecords.encode(mine.copy(appVersionCode = 9)) to 2L
+        folder.unreadable += own
+        FolderDeviceRecords(folder, mutableMapOf()).update(mine, now)
+        assertEquals(emptyList<String>(), folder.writes)
+
+        // One that isn't a record at all is written afresh.
+        folder.unreadable.clear()
+        folder.records[own] = "{ not a record" to 3L
+        FolderDeviceRecords(folder, mutableMapOf()).update(mine, now)
+        assertEquals(listOf(own), folder.writes)
+        assertEquals(mine, FolderDeviceRecords.decode(folder.records.getValue(own).first))
+    }
+
+    @Test
+    fun `a device from before ideas files is said to leave out the kinds of them the folder holds, and one that keeps them never is`() {
+        val me = device("me", code = 6, media = listOf("jpg", "mp4", "pdf", "png")).copy(ideaFiles = true)
+        val older = device("older", name = "Old tablet", code = 5)
+        val newer = device("newer", name = "New phone", code = 7, media = listOf("jpg", "mp4", "png", "xlsx")).copy(ideaFiles = true)
+        val present = setOf("jpg", "pdf", "xlsx")
+        val ideaFiles = setOf("pdf", "xlsx")
+
+        val notices = FolderRoster.notices(me, listOf(older, newer), present, ideaFiles)
+
+        assertEquals(listOf("pdf"), (notices.single { it is FolderNotice.Older } as FolderNotice.Older).unopened)
+        // A newer device that keeps ideas' files listed another kind of them: this one opens those too.
+        assertEquals(emptyList<String>(), (notices.single { it is FolderNotice.Newer } as FolderNotice.Newer).unopened)
     }
 }

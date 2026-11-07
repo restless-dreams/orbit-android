@@ -2,8 +2,6 @@ package com.hyuchia.orbit.map
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.media.AudioAttributes
-import android.media.MediaPlayer
 import android.os.Build
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -69,13 +67,12 @@ import androidx.compose.material3.toPath
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -111,22 +108,20 @@ import androidx.graphics.shapes.Morph
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.hyuchia.orbit.R
-import com.hyuchia.orbit.data.VIDEO_SIZE_LIMIT
+import com.hyuchia.orbit.data.MEDIA_FILE_LIMIT
 import com.hyuchia.orbit.data.mediaRoom
-import com.hyuchia.orbit.data.megabytes
+import com.hyuchia.orbit.data.readableSize
 import com.hyuchia.orbit.media.RecorderPhase
 import com.hyuchia.orbit.media.SoundPlayButton
 import com.hyuchia.orbit.media.VoiceRecorder
 import com.hyuchia.orbit.media.barsOf
+import com.hyuchia.orbit.media.rememberVoiceRecorder
 import com.hyuchia.orbit.media.soundTime
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.rememberWords
 import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.Hint
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
@@ -150,7 +145,10 @@ private const val SMALLEST_MEMO = 256L * 1024
  * pauses and goes on, the waveform of what's said as it's said, its time,
  * and once it's finished, the take to listen to before saving it, or to
  * record again. Leaving Orbit pauses it, and so does a call. Closing with a
- * take asks first. The memo joins the idea with Undo.
+ * take asks first. The memo joins the idea with Undo. The take outlasts the
+ * screen made again for a new language or font size, done, to listen to
+ * and save; and one that couldn't be saved can still be played, and saved
+ * again.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -159,19 +157,18 @@ fun RecorderSheet(model: MapViewModel, node: MapNode, onDismiss: () -> Unit) {
     val view = LocalView.current
     val haptics = LocalAppSettings.current.haptics
     val scope = rememberCoroutineScope()
-    val file = remember { File(File(context.cacheDir, "recordings"), "take-${System.currentTimeMillis()}.mp4") }
     // What the map's pictures, videos and sounds come to: a memo may take the room that's left.
     val used = produceState<Long?>(null) { value = model.mediaSize() }
     val room = used.value?.let(::mediaRoom)
     val mapFull = room != null && room < SMALLEST_MEMO
-    val recorder = remember { VoiceRecorder(context.applicationContext, file, { used.value?.let(::mediaRoom) ?: 0L }, scope) }
+    val recorder = rememberVoiceRecorder(File(context.cacheDir, "recordings"), { used.value?.let(::mediaRoom) ?: 0L }, scope)
     val words = rememberWords()
-    val take = remember { TakePlayer(scope) }
-    var asking by remember { mutableStateOf(false) }
+    val take = remember { TakePlayer(context.applicationContext, scope) }
+    var asking by rememberSaveable { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<ShownText?>(null) }
     // The microphone was refused: Settings is the way to allow it now.
-    var refused by remember { mutableStateOf(false) }
+    var refused by rememberSaveable { mutableStateOf(false) }
     val hasMicrophone = remember { context.packageManager.hasSystemFeature(PackageManager.FEATURE_MICROPHONE) }
     val holdsTake = recorder.phase != RecorderPhase.Ready
 
@@ -196,12 +193,8 @@ fun RecorderSheet(model: MapViewModel, node: MapNode, onDismiss: () -> Unit) {
         },
     )
 
-    DisposableEffect(recorder) {
-        onDispose {
-            take.release()
-            recorder.release()
-        }
-    }
+    // The recorder lets the microphone go with the screen (rememberVoiceRecorder), and the take's player its sound.
+    DisposableEffect(take) { onDispose { take.release() } }
 
     // Leaving Orbit pauses the take: the microphone isn't kept in the background.
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
@@ -337,13 +330,12 @@ fun RecorderSheet(model: MapViewModel, node: MapNode, onDismiss: () -> Unit) {
                                 },
                                 onSave = {
                                     val recorded = recorder.take ?: return@TakeControls
-                                    take.release()
                                     saving = true
 
+                                    // Not kept (the map ran out of room, say): the take is still there to listen to, and save again.
                                     scope.launch {
-                                        val refusal = model.saveRecording(node.id, recorded)
+                                        problem = take.keep(recorded) { model.saveRecording(node.id, it) }
                                         saving = false
-                                        problem = refusal
                                     }
                                 },
                             )
@@ -377,9 +369,9 @@ fun RecorderSheet(model: MapViewModel, node: MapNode, onDismiss: () -> Unit) {
                     message = when {
                         !hasMicrophone -> stringResource(R.string.audio_no_microphone)
                         refused -> stringResource(R.string.audio_needs_the_microphone)
-                        recorder.full && room != null && room < VIDEO_SIZE_LIMIT -> stringResource(R.string.audio_map_room_reached)
+                        recorder.full && room != null && room < MEDIA_FILE_LIMIT -> stringResource(R.string.audio_map_room_reached)
                         recorder.full -> stringResource(R.string.audio_longest_memo)
-                        mapFull && !holdsTake -> stringResource(R.string.audio_map_full, megabytes(used.value ?: 0L, words))
+                        mapFull && !holdsTake -> stringResource(R.string.audio_map_full, readableSize(used.value ?: 0L, words))
                         else -> recorder.problem?.let { stringResource(it) } ?: problem?.text()
                     },
                     action = if (refused && hasMicrophone) stringResource(R.string.common_settings) else null,
@@ -671,86 +663,5 @@ private fun Waveform(levels: List<Float>, phase: RecorderPhase, progress: Float?
 
             drawRoundRect(tint, topLeft = Offset(x, middle - height / 2), size = Size(bar, height), cornerRadius = CornerRadius(bar / 2))
         }
-    }
-}
-
-/** The take, to listen to before keeping it: the phone's own player, enough for a file of its own. */
-@Stable
-private class TakePlayer(private val scope: CoroutineScope) {
-    var playing by mutableStateOf(false)
-        private set
-
-    var position by mutableLongStateOf(0L)
-        private set
-
-    var duration by mutableLongStateOf(0L)
-        private set
-
-    val loaded: Boolean get() = player != null
-    val progress: Float get() = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
-    private var player by mutableStateOf<MediaPlayer?>(null)
-    private var clock: Job? = null
-
-    fun load(file: File) {
-        release()
-
-        val player = try {
-            MediaPlayer().apply {
-                setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                setDataSource(file.path)
-                prepare()
-            }
-        } catch (unreadable: Exception) {
-            return
-        }
-
-        player.setOnCompletionListener {
-            playing = false
-            position = duration
-            clock?.cancel()
-        }
-
-        this.player = player
-        duration = player.duration.toLong().coerceAtLeast(0)
-        position = 0
-    }
-
-    fun toggle() {
-        val player = player ?: return
-
-        if (player.isPlaying) {
-            pause()
-            return
-        }
-
-        if (position >= duration) {
-            player.seekTo(0)
-        }
-
-        player.start()
-        playing = true
-        clock?.cancel()
-
-        clock = scope.launch {
-            while (isActive) {
-                position = player.currentPosition.toLong()
-                delay(80)
-            }
-        }
-    }
-
-    fun pause() {
-        player?.takeIf { it.isPlaying }?.pause()
-        playing = false
-        clock?.cancel()
-    }
-
-    fun release() {
-        clock?.cancel()
-        player?.release()
-        player = null
-        playing = false
-        position = 0
-        duration = 0
     }
 }

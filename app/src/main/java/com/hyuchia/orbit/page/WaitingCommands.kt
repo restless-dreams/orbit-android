@@ -47,10 +47,8 @@ internal class WaitingCommands {
         waiting += Waiting(encoded, kind, job)
     }
 
-    /** Takes job `job`'s command out: it was answered, given up on, or no longer wanted. */
-    fun forget(job: Int) {
-        waiting.removeAll { it.job == job }
-    }
+    /** Takes job `job`'s command out: it was answered, given up on, or no longer wanted. True if it still waited, never sent. */
+    fun forget(job: Int): Boolean = waiting.removeAll { it.job == job }
 
     /** The commands, in the order they came, which wait no more. */
     fun take(): List<String> = waiting.map { it.encoded }.also { waiting.clear() }

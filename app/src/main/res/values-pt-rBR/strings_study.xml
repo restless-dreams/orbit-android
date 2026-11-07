@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Modo de estudo: as ideias abaixo de cada ideia de um ramo viram cartões para lembrar. Veja TRANSLATING.md. -->
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="study_study">Estudar</string>
+
+    <!-- A barra superior -->
+    <string name="study_position">%1$d de %2$d</string>
+    <string name="study_position_description">Cartão %1$d de %2$d</string>
+    <string name="study_studying_anyway">Estudando mesmo assim</string>
+    <string name="study_undo_answer">Desfazer a última resposta</string>
+    <string name="study_stop">Parar de estudar</string>
+
+    <!-- Um cartão antes de ser revelado -->
+    <!-- Só para cartões com ideias embaixo, então a contagem nunca é 0, e o "one" não precisa do número. -->
+    <plurals name="study_recall_ideas" tools:ignore="ImpliedQuantity">
+        <item quantity="one">Lembre a ideia que vem abaixo</item>
+        <item quantity="many">Lembre as %1$d ideias que vêm abaixo</item>
+        <item quantity="other">Lembre as %1$d ideias que vêm abaixo</item>
+    </plurals>
+    <plurals name="study_recall_ideas_and_note" tools:ignore="ImpliedQuantity">
+        <item quantity="one">Lembre a ideia que vem abaixo e a nota</item>
+        <item quantity="many">Lembre as %1$d ideias que vêm abaixo e a nota</item>
+        <item quantity="other">Lembre as %1$d ideias que vêm abaixo e a nota</item>
+    </plurals>
+    <string name="study_recall_note">Lembre a nota</string>
+    <string name="study_show">Mostrar</string>
+    <string name="study_show_description">Mostrar o que vem abaixo de %1$s</string>
+
+    <!-- As respostas depois que um cartão é revelado -->
+    <string name="study_again">De novo</string>
+    <string name="study_knew_it">Eu sabia</string>
+    <string name="study_in_a_moment">em instantes</string>
+    <string name="study_tomorrow">amanhã</string>
+    <plurals name="study_in_days">
+        <item quantity="one">em %1$d dia</item>
+        <item quantity="many">em %1$d dias</item>
+        <item quantity="other">em %1$d dias</item>
+    </plurals>
+    <plurals name="study_in_weeks">
+        <item quantity="one">em %1$d semana</item>
+        <item quantity="many">em %1$d semanas</item>
+        <item quantity="other">em %1$d semanas</item>
+    </plurals>
+    <plurals name="study_in_months">
+        <item quantity="one">em %1$d mês</item>
+        <item quantity="many">em %1$d meses</item>
+        <item quantity="other">em %1$d meses</item>
+    </plurals>
+    <string name="study_again_description">De novo, volta %1$s</string>
+    <string name="study_knew_it_description">Eu sabia, volta %1$s</string>
+
+    <!-- O resumo no fim de uma sessão -->
+    <string name="study_finished_title">Pronto por enquanto</string>
+    <plurals name="study_finished">
+        <item quantity="one">Você estudou %1$d cartão</item>
+        <item quantity="many">Você estudou %1$d cartões</item>
+        <item quantity="other">Você estudou %1$d cartões</item>
+    </plurals>
+    <plurals name="study_first_try">
+        <item quantity="one">%1$d de primeira</item>
+        <item quantity="many">%1$d de primeira</item>
+        <item quantity="other">%1$d de primeira</item>
+    </plurals>
+    <plurals name="study_another_look">
+        <item quantity="one">%1$d precisou de mais uma olhada</item>
+        <item quantity="many">%1$d precisaram de mais uma olhada</item>
+        <item quantity="other">%1$d precisaram de mais uma olhada</item>
+    </plurals>
+    <string name="study_next">Os próximos cartões voltam %1$s.</string>
+    <plurals name="study_new_left">
+        <item quantity="one">%1$d cartão novo fica para outro dia.</item>
+        <item quantity="many">%1$d cartões novos ficam para outro dia.</item>
+        <item quantity="other">%1$d cartões novos ficam para outro dia.</item>
+    </plurals>
+    <string name="study_keep_going">Continuar</string>
+    <string name="study_new_cards_a_day">Cartões novos por dia</string>
+    <plurals name="study_new_cards_a_day_choice">
+        <item quantity="one">%1$d cartão novo por dia</item>
+        <item quantity="many">%1$d cartões novos por dia</item>
+        <item quantity="other">%1$d cartões novos por dia</item>
+    </plurals>
+    <plurals name="study_new_cards_a_day_short">
+        <item quantity="one">%1$d por dia</item>
+        <item quantity="many">%1$d por dia</item>
+        <item quantity="other">%1$d por dia</item>
+    </plurals>
+
+    <!-- Nada para estudar agora -->
+    <string name="study_caught_up_title">Tudo em dia</string>
+    <string name="study_caught_up">Não há nada para estudar abaixo de %1$s agora. Os próximos cartões voltam %2$s.</string>
+    <string name="study_anyway">Estudar mesmo assim</string>
+    <string name="study_anyway_explained">Os cartões que você já sabe continuam no cronograma, e os que você errar voltam mais cedo.</string>
+
+    <!-- A ideia não tem cartões abaixo dela -->
+    <string name="study_no_cards_title">Ainda não há nada para estudar aqui</string>
+    <string name="study_no_cards">Ideias com outras ideias ou uma nota abaixo delas viram cartões. Adicione algumas abaixo de %1$s e estude de novo.</string>
+
+    <!-- O mapa em Seus mapas: quantos dos seus cartões estão para estudar -->
+    <plurals name="study_due">
+        <item quantity="one">%1$d para estudar</item>
+        <item quantity="many">%1$d para estudar</item>
+        <item quantity="other">%1$d para estudar</item>
+    </plurals>
+
+    <!-- Os atalhos de teclado ao estudar -->
+    <string name="study_shortcuts">Ao estudar</string>
+    <string name="study_shortcut_show">Mostrar o que vem abaixo do cartão</string>
+</resources>

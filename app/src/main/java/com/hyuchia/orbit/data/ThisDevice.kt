@@ -32,6 +32,9 @@ class ThisDevice(private val context: Context, private val name: suspend () -> S
         mapFormat = MAP_FORMAT,
         mediaTypes = carriedMediaTypes().sorted(),
         synced = System.currentTimeMillis(),
+        mediaFileLimit = MEDIA_FILE_LIMIT,
+        mapMediaLimit = MAP_MEDIA_LIMIT,
+        ideaFiles = true,
     )
 
     private suspend fun id(): String = withContext(Dispatchers.IO) {

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Áudios nas ideias: notas de voz gravadas no Orbit, áudios do celular ou da web, e os reprodutores que os tocam. Veja TRANSLATING.md. -->
+<resources>
+    <string name="audio_sound">Áudio</string>
+    <string name="audio_voice_memo">Nota de voz</string>
+    <string name="audio_sound_of">Áudio de %1$s</string>
+
+    <!-- A seção do editor para o áudio de uma ideia -->
+    <string name="audio_section">Áudio</string>
+    <string name="audio_record_a_voice_memo">Gravar uma nota de voz</string>
+    <string name="audio_choose_a_sound">Escolher um arquivo de áudio</string>
+    <string name="audio_or_a_sound_address">Ou o endereço de um áudio na web</string>
+    <string name="audio_sound_address">Endereço do áudio</string>
+    <string name="audio_record_again">Gravar de novo</string>
+    <string name="audio_copying_the_sound">Copiando o áudio…</string>
+    <string name="audio_copying_the_sound_percent">Copiando o áudio… %1$s</string>
+    <string name="audio_sound_unreadable">Não foi possível ler esse áudio.</string>
+
+    <!-- Os botões dos reprodutores, para leitores de tela e como dicas -->
+    <string name="audio_play">Reproduzir</string>
+    <string name="audio_pause">Pausar</string>
+    <string name="audio_mute">Desativar o som</string>
+    <string name="audio_unmute">Ativar o som</string>
+    <string name="audio_stop">Parar o áudio</string>
+    <string name="audio_open_full_screen">Abrir o áudio em tela cheia</string>
+    <string name="audio_share">Compartilhar o áudio</string>
+    <string name="audio_position">Posição</string>
+    <string name="audio_time_of">%1$s de %2$s</string>
+    <string name="audio_unplayable">Não é possível reproduzir este áudio.</string>
+    <string name="audio_missing">Este áudio não está neste dispositivo.</string>
+
+    <!-- O botão da barra de ferramentas e do menu de toque longo para o áudio da ideia em foco -->
+    <string name="audio_play_the_sound_in">Reproduzir o áudio de %1$s</string>
+    <string name="audio_pause_the_sound_in">Pausar o áudio de %1$s</string>
+    <string name="audio_play_the_sound">Reproduzir o áudio</string>
+    <string name="audio_pause_the_sound">Pausar o áudio</string>
+    <string name="audio_plays_from_this_phone">Toca neste dispositivo</string>
+
+    <!-- O gravador -->
+    <string name="audio_recorder_for">Para %1$s</string>
+    <string name="audio_tap_to_record">Toque para gravar</string>
+    <string name="audio_recording">Gravando</string>
+    <string name="audio_paused">Em pausa</string>
+    <string name="audio_record">Gravar</string>
+    <string name="audio_pause_recording">Pausar a gravação</string>
+    <string name="audio_resume_recording">Continuar gravando</string>
+    <string name="audio_finish_recording">Finalizar</string>
+    <string name="audio_discard">Descartar</string>
+    <string name="audio_save">Salvar</string>
+    <string name="audio_saving">Salvando…</string>
+    <string name="audio_discard_title">Descartar esta nota de voz?</string>
+    <string name="audio_discard_body">O que você gravou não será salvo.</string>
+    <string name="audio_keep_it">Manter</string>
+    <string name="audio_needs_the_microphone">O Orbit precisa do microfone para gravar uma nota de voz. Você pode permitir o acesso nas Configurações.</string>
+    <string name="audio_no_microphone">Este dispositivo não tem um microfone que o Orbit possa usar para gravar.</string>
+    <string name="audio_recording_failed">A gravação parou. Talvez outro app esteja usando o microfone.</string>
+    <string name="audio_longest_memo">Uma nota de voz não pode ser mais longa que isso, então a gravação parou aí.</string>
+    <string name="audio_map_room_reached">Esse é todo o espaço que ainda resta neste mapa, então a gravação parou aí.</string>
+    <string name="audio_map_full">As imagens, os vídeos e os áudios deste mapa somam %1$s, tudo o que um mapa pode levar em um compartilhamento ou backup. Remova algum deles para abrir espaço para uma nota de voz.</string>
+    <string name="audio_memo_saved">Nota de voz salva em %1$s</string>
+    <string name="audio_ready_to_save">Pronta para salvar</string>
+
+    <!-- Áudios que um mapa não aceita -->
+    <string name="data_sound_too_big">Esse áudio tem %1$s, e um mapa guarda áudios de até %2$s para ainda poder ir para seus outros dispositivos. Corte o áudio ou adicione-o como endereço da web.</string>
+    <string name="data_sound_past_limit">Esse áudio tem mais de %1$s, o máximo que um mapa guarda para ainda poder ir para seus outros dispositivos. Corte o áudio ou adicione-o como endereço da web.</string>
+    <string name="data_sound_past_map_room">As imagens, os vídeos e os áudios deste mapa já somam %1$s. Com este áudio, passariam dos %2$s que um mapa pode levar em um compartilhamento ou backup. Escolha um mais curto ou adicione-o como endereço da web.</string>
+    <string name="data_sound_kind_refused">O Orbit guarda áudios em arquivos MP3, MP4, AAC, Ogg, Opus, WAV, FLAC ou WebM, e este é do tipo %1$s.</string>
+    <string name="data_sound_kind_unknown">O Orbit guarda áudios em arquivos MP3, MP4, AAC, Ogg, Opus, WAV, FLAC ou WebM, e este é de um tipo que ele não conhece.</string>
+    <string name="data_no_room_for_sound">Não há espaço neste dispositivo para esse áudio.</string>
+</resources>

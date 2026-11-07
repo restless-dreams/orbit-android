@@ -658,7 +658,7 @@ private fun ColumnScope.Notes(model: MapViewModel, node: MapNode?, next: MapNode
 
         Hint(playOrPause) {
             FilledTonalIconButton(
-                onClick = { model.setPlaying(!presentation.playing, seconds.coerceAtLeast(8)) },
+                onClick = { model.setPlaying(!presentation.playing, seconds) },
                 modifier = Modifier.size(IconButtonDefaults.mediumContainerSize()),
             ) {
                 Icon(if (presentation.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = playOrPause)

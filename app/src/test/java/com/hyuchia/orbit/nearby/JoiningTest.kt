@@ -405,13 +405,76 @@ class JoiningTest {
         assertEquals(setOf("Ana", "Bo"), joining.members.value.map { it.name }.toSet())
         assertEquals(ana.joined, joining.members.value.first { it.name == "Ana" }.joined)
 
-        // After half an hour away, a session is forgotten, and its browser joins again like anyone.
+        // Away for hours, as a phone in a pocket through a long talk, she's back at once, even once no one new may join.
         joining.streamOpened(bo.id)
-        now += 31 * 60_000
+        now += 3 * 60 * 60_000
         joining.tidy()
-        val left = runBlocking { joining.serve(get("/123456/status", cookie = cookie), listOf("status"), page) } as Response.Bytes
-        assertEquals("{\"state\":\"left\"}", left.body.decodeToString())
         assertEquals(listOf("Bo"), joining.members.value.map { it.name })
+        joining.change(joining.options.value.copy(open = false))
+        val back = runBlocking { joining.serve(get("/123456/status", cookie = cookie), listOf("status"), page) } as Response.Bytes
+        assertEquals("{\"state\":\"joined\"}", back.body.decodeToString())
+        assertEquals(setOf("Ana", "Bo"), joining.members.value.map { it.name }.toSet())
+        assertEquals(403, runBlocking { joining.serve(post("/123456/join", "name=Cy", from = "10.0.0.7"), listOf("join"), page) }.status)
+    }
+
+    @Test
+    fun aRoomKeepsItsSessionsUpToItsMostTheLongestAwayGoingFirst() {
+        var now = 1_000_000L
+        val joining = Joining("123456", RoomKind.Presentation, JoiningOptions(askNames = false), template = { asset("join.html") }, words = english, clock = { now })
+        val page: suspend (Member, List<String>) -> Response = { _, _ -> Response.text(200, "in") }
+
+        // Each comes in, follows a moment and goes away; the first went away first.
+        val cookies = (1..512).map { device ->
+            val joined = runBlocking { joining.serve(get("/123456/", from = "10.1.${device / 256}.${device % 256}"), emptyList(), page) } as Response.Bytes
+            now += 1_000
+            joined.headers.getValue("Set-Cookie").substringBefore(';')
+        }
+
+        now += 2 * 60_000
+        joining.tidy()
+        assertTrue(joining.members.value.isEmpty())
+
+        // One more: the room makes room by forgetting whoever has been away longest, and keeps everyone else.
+        runBlocking { joining.serve(get("/123456/", from = "10.2.0.1"), emptyList(), page) }
+        val first = runBlocking { joining.serve(get("/123456/status", from = "10.1.0.1", cookie = cookies.first()), listOf("status"), page) } as Response.Bytes
+        assertEquals("{\"state\":\"left\"}", first.body.decodeToString())
+        val second = runBlocking { joining.serve(get("/123456/status", from = "10.1.0.2", cookie = cookies[1]), listOf("status"), page) } as Response.Bytes
+        assertEquals("{\"state\":\"joined\"}", second.body.decodeToString())
+    }
+
+    @Test
+    fun wrongPinsFromAddressAfterAddressKeepEveryNewDeviceWaitingUntilANewPin() {
+        val now = 1_000_000L
+        val joining = Joining("123456", RoomKind.Presentation, JoiningOptions(askNames = false, requirePin = true), template = { asset("join.html") }, words = english, clock = { now })
+        val page: suspend (Member, List<String>) -> Response = { _, _ -> Response.text(200, "in") }
+        val pin = joining.pin.value!!
+        val wrong = if (pin == "0000") "1111" else "0000"
+
+        fun join(typed: String, from: String): Response = runBlocking { joining.serve(post("/123456/join", "pin=$typed", from = from), listOf("join"), page) }
+
+        // A room's worth of people mistyping the PIN, once each, keeps no one else waiting.
+        for (device in 1..19) {
+            assertEquals(403, join(wrong, "10.0.1.$device").status)
+        }
+
+        assertEquals(303, join(pin, "10.0.2.1").status)
+        assertEquals(0L, joining.pinLockedOut.value)
+
+        // Someone taking address after address to guess from: the twentieth wrong PIN keeps every new device waiting,
+        // with the right PIN too, and the phone hears of it.
+        val locked = join(wrong, "10.0.1.20")
+        assertEquals(429, locked.status)
+        assertTrue((locked as Response.Bytes).body.decodeToString().contains("Too many wrong PINs. Try again in a minute, with the PIN on the presenter's phone."))
+        assertEquals(429, join(pin, "10.0.3.1").status)
+        assertTrue(joining.pinLockedOut.value > 0)
+
+        // Whoever got in stays in.
+        assertEquals(listOf("Guest 1"), joining.members.value.map { it.name })
+
+        // A new PIN starts everyone over: guesses at the old one no longer count.
+        joining.replacePin()
+        assertEquals(0L, joining.pinLockedOut.value)
+        assertEquals(303, join(joining.pin.value!!, "10.0.3.1").status)
     }
 
     @Test

@@ -4,7 +4,9 @@ Each one is built the way a phone writes it, from the formats' own descriptions:
 a still and a 1.5-second video made here, put together as Google's Motion
 Photo (JPEG and HEIC), older Pixels' MicroVideo, Samsung's trailer, Huawei's
 and Honor's, an iPhone's pair (HEIC still and QuickTime movie, sharing an id),
-an older iPhone's movie (no ftyp, its sound described as lpcm), and an iPhone
+an older iPhone's movie (no ftyp, its sound described as lpcm), the iPhone's
+movie with its sound described in QuickTime's second version, four frames to a
+packet (counted a packet at a time, and a frame at a time), and an iPhone
 still that lost its id on the way. Run it from the repository root, with
 ffmpeg on the path:
 
@@ -187,6 +189,64 @@ def older_iphone_movie(movie):
     return b"".join(rewrite(kind, body) for kind, body in top if kind != b"ftyp")
 
 
+def second_version_movie(movie, packets):
+    """An iPhone's movie, from one ffmpeg wrote, with its sound described in QuickTime's second
+    version, four frames to a packet: its samples counted a packet at a time, each lasting four
+    ticks, or, as QuickTime long counted uncompressed sound, a frame at a time."""
+    frames = 4
+
+    def sound(trak):
+        media = next(body for kind, body in boxes(trak) if kind == b"mdia")
+        handler = next(body for kind, body in boxes(media) if kind == b"hdlr")
+        return handler[8:12] == b"soun"
+
+    def counted(kind, body):
+        if kind == b"stsd":
+            size, name = struct.unpack(">I4s", body[8:16])
+            fields = body[16:8 + size]
+            channels = struct.unpack(">H", fields[16:18])[0]
+            packet = frames * channels * 2
+            # The version, then after the first version's fields: frames to a packet, a packet's bytes (for a channel, and in all), a sample's.
+            second = fields[:8] + struct.pack(">H", 1) + fields[10:28] + struct.pack(">IIII", frames, packet // channels, packet, 2) + fields[28:]
+            return box(kind, body[:8] + box(name, second) + body[8 + size:])
+
+        if not packets:
+            return box(kind, body)
+
+        if kind == b"stts":
+            count = struct.unpack(">I", body[4:8])[0]
+            runs = [struct.unpack(">II", body[8 + 8 * index:16 + 8 * index]) for index in range(count)]
+            assert all(ticks == 1 and samples % frames == 0 for samples, ticks in runs)
+            return box(kind, body[:8] + b"".join(struct.pack(">II", samples // frames, frames) for samples, _ in runs))
+
+        if kind == b"stsz":
+            size, count = struct.unpack(">II", body[4:12])
+            assert size > 0 and count % frames == 0
+            return box(kind, body[:4] + struct.pack(">II", size * frames, count // frames))
+
+        if kind == b"stsc":
+            count = struct.unpack(">I", body[4:8])[0]
+            runs = [struct.unpack(">III", body[8 + 12 * index:20 + 12 * index]) for index in range(count)]
+            assert all(samples % frames == 0 for _, samples, _ in runs)
+            return box(kind, body[:8] + b"".join(struct.pack(">III", first, samples // frames, description) for first, samples, description in runs))
+
+        return box(kind, body)
+
+    def rewrite(kind, body, in_sound=False):
+        if kind == b"trak":
+            return box(kind, b"".join(rewrite(*part, in_sound=sound(body)) for part in boxes(body)))
+
+        if kind in (b"moov", b"mdia", b"minf", b"stbl"):
+            return box(kind, b"".join(rewrite(*part, in_sound=in_sound) for part in boxes(body)))
+
+        return counted(kind, body) if in_sound else box(kind, body)
+
+    # The movie comes after the media data, so where the chunks start stays as it was.
+    top = boxes(movie)
+    assert [kind for kind, _ in top].index(b"mdat") < [kind for kind, _ in top].index(b"moov")
+    return b"".join(rewrite(kind, body) for kind, body in top)
+
+
 def heic(image, xmp=None, exif=None):
     heif = pillow_heif.from_pillow(image)
     out = io.BytesIO()
@@ -238,6 +298,8 @@ def main():
         (OUT / "iphone-live.heic").write_bytes(heic(still((60, 160, 90)), exif=apple_exif(IDENTIFIER, "2022:11:19 11:14:36")))
         (OUT / "iphone-live.mov").write_bytes(mov.read_bytes())
         (OUT / "iphone-live-older.mov").write_bytes(older_iphone_movie(mov.read_bytes()))
+        (OUT / "iphone-live-packets.mov").write_bytes(second_version_movie(mov.read_bytes(), packets=True))
+        (OUT / "iphone-live-frames.mov").write_bytes(second_version_movie(mov.read_bytes(), packets=False))
         (OUT / "iphone-still.jpg").write_bytes(jpeg(still((60, 160, 90)), exif=written_exif("2022:11:19 11:14:37")))
 
 

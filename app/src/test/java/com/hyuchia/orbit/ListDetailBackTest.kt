@@ -1,20 +1,22 @@
 package com.hyuchia.orbit
 
+import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
-import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.ui.NavDisplay
@@ -30,7 +32,7 @@ import org.robolectric.annotation.Config
 
 /**
  * Back on a tablet, with Home's list beside a map, as the app's screens are
- * laid out ([rememberListDetailScenes]) and the map's screen takes Back
+ * laid out ([listAndMapDirective], [rememberListDetailScenes]) and the map's screen takes Back
  * ([BesideListBackHandler] first, then the map's own, as `MapScreen` and
  * `MapBackHandlers` add them): inside the map, Back flies up it, also after a
  * panel beside the map came and went; at its top, Back closes the map and
@@ -54,17 +56,20 @@ class ListDetailBackTest {
 
     private var flewUp = 0
 
+    /** How many times the map's page, a view as its WebView is, left the window: moved to another scene, as it was, it draws blank. */
+    private var pageDetached = 0
+
     @OptIn(ExperimentalMaterial3AdaptiveApi::class)
     private fun showScreens() {
         compose.setContent {
-            val calculated = calculatePaneScaffoldDirective(currentWindowAdaptiveInfo())
+            val window = LocalWindowInfo.current.containerDpSize
             // As the app does, a map that wants room has the window to itself.
-            val directive = calculated.copy(maxHorizontalPartitions = if (wantsRoom) 1 else calculated.maxHorizontalPartitions)
+            val directive = listAndMapDirective(currentWindowAdaptiveInfo(), window, wantsRoom)
 
             NavDisplay(
                 backStack = backStack,
                 onBack = { backStack.removeLastOrNull() },
-                sceneStrategies = listOf(rememberListDetailScenes(homeOnTop = backStack.lastOrNull() == HomeKey, roomForTwo = true, directive = directive)),
+                sceneStrategies = listOf(rememberListDetailScenes(homeOnTop = backStack.lastOrNull() == HomeKey, roomForTwo = roomForTwoPanes(window), listFits = listBesideMap(listAndMapDirective(currentWindowAdaptiveInfo(), window, mapWantsRoom = false)), directive = directive)),
                 entryProvider = entryProvider {
                     entry<HomeKey>(metadata = ListDetailSceneStrategy.listPane(detailPlaceholder = { Text("Pick a map") })) { Text("Home") }
 
@@ -72,6 +77,21 @@ class ListDetailBackTest {
                         BesideListBackHandler(listBesideMap(directive), remember { Animatable(1f) }, onClose = { backStack.remove(key) })
                         BackHandler(enabled = inAnIdea) { flewUp += 1 }
                         Text("The welcome map")
+                        AndroidView(
+                            factory = { context ->
+                                View(context).apply {
+                                    addOnAttachStateChangeListener(
+                                        object : View.OnAttachStateChangeListener {
+                                            override fun onViewAttachedToWindow(view: View) = Unit
+
+                                            override fun onViewDetachedFromWindow(view: View) {
+                                                pageDetached += 1
+                                            }
+                                        },
+                                    )
+                                }
+                            },
+                        )
                     }
                 },
             )
@@ -100,10 +120,53 @@ class ListDetailBackTest {
         compose.onNodeWithText("Pick a map").assertExists()
     }
 
+    @Test @Config(qualifiers = "w800dp-h1280dp-port-xhdpi")
+    fun `upright too, Back at the top of the map beside the list closes the map, and Orbit stays with the list`() {
+        showScreens()
+        compose.onNodeWithText("Home").assertExists()
+        compose.onNodeWithText("The welcome map").assertExists()
+
+        back()
+
+        assertEquals(listOf<NavKey>(HomeKey), backStack.toList())
+        assertFalse(compose.activity.isFinishing)
+        compose.onNodeWithText("Home").assertExists()
+        compose.onNodeWithText("Pick a map").assertExists()
+    }
+
     @Test
     fun `Back inside the map flies up it, and the map stays`() {
         inAnIdea = true
         showScreens()
+
+        back()
+
+        assertEquals(1, flewUp)
+        assertEquals(listOf<NavKey>(HomeKey, MapKey("welcome")), backStack.toList())
+    }
+
+    @Test
+    fun `the map takes the whole window and gives the list its room back without its page leaving the window`() {
+        showScreens()
+
+        // A sketch, or a panel beside the map, has the list step aside, and the map's page stays where it is.
+        wantsRoom = true
+        compose.waitForIdle()
+        compose.onNodeWithText("Home").assertDoesNotExist()
+        compose.onNodeWithText("The welcome map").assertExists()
+        wantsRoom = false
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Home").assertExists()
+        assertEquals(0, pageDetached)
+    }
+
+    @Test
+    fun `while the map has the window to itself, Back goes to what's over it, and the map stays`() {
+        inAnIdea = true
+        showScreens()
+        wantsRoom = true
+        compose.waitForIdle()
 
         back()
 

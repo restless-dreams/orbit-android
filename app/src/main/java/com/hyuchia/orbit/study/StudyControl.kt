@@ -1,11 +1,17 @@
 package com.hyuchia.orbit.study
 
+import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.map.MapUi
 import com.hyuchia.orbit.page.MapCommand
+import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.ViewMode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -18,6 +24,12 @@ import kotlinx.coroutines.launch
  * as its latest answer, here or on another device, left it. The session
  * lives in `ui`; days come from `today`, as days since 1970-01-01, and
  * answers are timed by `now`, in milliseconds.
+ *
+ * Each answer is kept as a change to that one card ([StudyChange]), written
+ * one after another in the order they were given, against the answers as
+ * they are then: never a copy of them all, which could bring back an older
+ * one. The changes are written on `writing`, which outlives the map's screen,
+ * so the last answer is kept even as the map closes ([close]).
  */
 class StudyControl(
     scope: CoroutineScope,
@@ -29,8 +41,8 @@ class StudyControl(
     /** This device's answers to the map's cards, as its details have them now. */
     private val progress: () -> Map<String, StudyCard>,
 
-    /** Keeps this device's answers, in the map's details. */
-    private val keep: suspend (Map<String, StudyCard>) -> Unit,
+    /** Makes a change to this device's answers, in the map's details as they are when it's made. */
+    private val keep: suspend (StudyChange) -> Unit,
 
     private val today: () -> Long,
 
@@ -41,6 +53,9 @@ class StudyControl(
     private val newADay: () -> Int = { NEW_CARDS_A_DAY },
 
     private val now: () -> Long = System::currentTimeMillis,
+
+    /** Where the answers are written: the app's own scope, so an answer given as the map closes is still kept. */
+    writing: CoroutineScope = scope,
 ) {
     /** This device's answers, with this session's. */
     private var mine: Map<String, StudyCard> = emptyMap()
@@ -54,13 +69,41 @@ class StudyControl(
     /** The cards whose ideas the page hides now. */
     private val hidden = LinkedHashSet<String>()
 
-    /** This device's answers to keep, the latest only, written one at a time so an older one never lands last. */
-    private val saves = Channel<Map<String, StudyCard>>(Channel.CONFLATED)
+    /** The changes to this device's answers, written one at a time in the order they were made. */
+    private val changes = Channel<StudyChange>(Channel.UNLIMITED)
+
+    /** The changes made and not written yet, oldest first: a session that begins meanwhile counts them ([start]). */
+    private val unwritten = ArrayDeque<StudyChange>()
+
+    /** How many changes were made, and how many of them are written. */
+    private var made = 0L
+
+    private val writtenCount = MutableStateFlow(0L)
 
     init {
+        writing.launch {
+            for (change in changes) {
+                try {
+                    keep(change)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failed: Exception) {
+                    // An answer that couldn't be kept is lost alone: the ones after it are still written.
+                    Logs.warn("OrbitStudy", "Couldn't keep an answer", failed)
+                } finally {
+                    synchronized(unwritten) { unwritten.removeFirst() }
+                    writtenCount.update { it + 1 }
+                }
+            }
+        }
+
+        // The map changed while it's studied, as it can only elsewhere (a session takes no edits): the cards it no longer
+        // has leave the session at once.
         scope.launch {
-            for (latest in saves) {
-                keep(latest)
+            ui.map { it.map?.nodes }.distinctUntilChanged().collect { nodes ->
+                if (nodes != null) {
+                    follow(nodes)
+                }
             }
         }
     }
@@ -71,21 +114,30 @@ class StudyControl(
      * Begins studying the cards under `start`: the ones due, then new ones,
      * or `anyway`, all of them. `moreNew` brings in that many new cards
      * past the day's. With none to study, the session opens on its summary.
+     * Answers still being written count, so a session begun again (Keep
+     * going, Study anyway) knows every answer the one before got.
      */
     fun start(start: String, anyway: Boolean = false, moreNew: Int = 0) {
         val nodes = ui.value.map?.nodes ?: return
         val ideas = nodes.mapTo(HashSet()) { it.id }
-        val kept = progress()
+
+        // Read together with the changes still to be written, so none counts twice or not at all: a change leaves
+        // `unwritten` only once the details have it.
+        val (kept, elsewhere) = synchronized(unwritten) {
+            val elsewhere = elsewhere()
+            unwritten.fold(progress()) { answers, change -> change.applyTo(answers, elsewhere) } to elsewhere
+        }
+
         // Ideas the map no longer has leave their progress behind, but only once the map was read whole, which only a
         // map that can be changed was for sure: one Orbit couldn't read all of, or a newer Orbit made, may show only
         // some of its ideas, or give them other ids, and the page says a map is in the trash, or kept by a newer
         // Orbit, in place of either. Its progress stays for when it's read whole; the session studies the ideas shown.
         mine = if (ui.value.readOnly == null) kept.filterKeys { it in ideas } else kept
-        others = elsewhere()
+        others = elsewhere
         cards = mergedProgress(mine, others).filterKeys { it in ideas }
 
         if (mine.size != kept.size) {
-            saves.trySend(mine)
+            change(StudyChange.Forget(kept.keys - mine.keys))
         }
 
         val today = today()
@@ -138,12 +190,17 @@ class StudyControl(
         start(session.start, moreNew = if (newRoom(cards, today(), perDay) > 0) 0 else perDay)
     }
 
-    /** Shows the ideas under the card on screen, and its note. */
+    /** Shows the ideas under the card on screen, and its note. A card the map no longer has leaves the session instead. */
     fun reveal() {
         val session = study ?: return
         val card = session.current ?: return
 
         if (session.revealed || session.ending != null) {
+            return
+        }
+
+        if (!stillACard(card)) {
+            ui.value.map?.nodes?.let(::follow)
             return
         }
 
@@ -154,7 +211,9 @@ class StudyControl(
     /**
      * Answers the card on screen, once it's revealed: known, or Again, which
      * brings it back later in the session. The answer is kept at once, so a
-     * session left halfway keeps what it got through.
+     * session left halfway keeps what it got through. A card the map no
+     * longer has, as it changed elsewhere, takes no answer: the session goes
+     * on without it.
      */
     fun answer(knew: Boolean) {
         val session = study ?: return
@@ -164,39 +223,45 @@ class StudyControl(
             return
         }
 
+        if (!stillACard(card)) {
+            ui.value.map?.nodes?.let(::follow)
+            return
+        }
+
         val today = today()
         val before = cards[card]
         val after = before.answered(knew, today, now())
         val last = StudyAnswer(session.copy(last = null), card, before, mine[card])
         mine = mine + (card to after)
         cards = cards + (card to after)
-        saves.trySend(mine)
-        val ideas = ui.value.nodes.keys
-        // Cards whose ideas went from the map while it was studied are skipped.
-        val answered = session.answered(knew).let { next -> next.copy(queue = next.queue.filter { it in ideas }) }
+        change(StudyChange.Answer(card, after))
+        val stillCards = mapCards(ui.value.map?.nodes.orEmpty())
+        // Cards that went from the map while it was studied are skipped.
+        val answered = session.answered(knew).let { next -> next.without(next.queue.filterTo(HashSet()) { it !in stillCards }) }.copy(last = last)
 
         if (answered.queue.isEmpty()) {
-            val branch = cardsUnder(ui.value.map?.nodes.orEmpty(), session.start)
-            revealAll()
-            send(MapCommand.Focus(session.start))
-            val newLeft = if (session.anyway) 0 else newCards(branch, cards)
-            update { answered.copy(ending = StudyEnding.Finished, last = last, nextIn = nextStudy(branch, cards, today)?.minus(today), newLeft = newLeft) }
+            finish(answered)
             return
         }
 
         val next = answered.queue.first()
         hide(listOf(next))
         send(MapCommand.Focus(next))
-        update { answered.copy(last = last, ifKnown = cards[next].daysIfKnown(today)) }
+        update { answered.copy(ifKnown = cards[next].daysIfKnown(today)) }
     }
 
     /** Takes back the last answer: its card comes back revealed, to answer again, and its progress as it was. */
     fun undo() {
         val session = study ?: return
         val last = session.last ?: return
+        val answer = mine[last.card]
         mine = if (last.mine == null) mine - last.card else mine + (last.card to last.mine)
         cards = if (last.progress == null) cards - last.card else cards + (last.card to last.progress)
-        saves.trySend(mine)
+
+        if (answer != null) {
+            change(StudyChange.Undo(last.card, answer, own = last.mine, progress = last.progress))
+        }
+
         hide(cardsUnder(ui.value.map?.nodes.orEmpty(), last.before.start).map { it.id }.filter { it != last.card })
         show(last.card)
         send(MapCommand.Focus(last.card))
@@ -224,6 +289,74 @@ class StudyControl(
         }
 
         send(MapCommand.Focus(session.current?.takeIf { session.ending == null } ?: session.start))
+    }
+
+    /** Waits until every answer given so far is written: then the folder the maps are kept in can take them. */
+    suspend fun written() {
+        val given = synchronized(unwritten) { made }
+        writtenCount.first { it >= given }
+    }
+
+    /**
+     * The map's screen is going: the answers still to be written are, in
+     * the order they were given, on the scope that outlives it, and nothing
+     * more is taken.
+     */
+    fun close() {
+        changes.close()
+    }
+
+    private fun change(change: StudyChange) {
+        synchronized(unwritten) {
+            if (changes.trySend(change).isSuccess) {
+                unwritten.addLast(change)
+                made += 1
+            }
+        }
+    }
+
+    /** Whether the map still has `card` as a card: ideas or a note under it. */
+    private fun stillACard(card: String): Boolean = ui.value.nodes[card]?.let { it.childCount > 0 || !it.note.isNullOrBlank() } == true
+
+    /**
+     * The map is `nodes` now, as it changed elsewhere while it's studied: the
+     * cards it no longer has leave the session, and the next card comes when
+     * the one on screen went. With none left, the session ends on its summary.
+     */
+    private fun follow(nodes: List<MapNode>) {
+        val session = study ?: return
+        val stillCards = mapCards(nodes)
+        val gone = (session.queue + listOfNotNull(session.last?.card)).filterTo(HashSet()) { it !in stillCards }
+
+        if (gone.isEmpty()) {
+            return
+        }
+
+        val ideas = nodes.mapTo(HashSet()) { it.id }
+        hidden.retainAll(ideas)
+        val left = session.without(gone)
+
+        when {
+            session.ending != null -> update { left }
+            left.queue.isEmpty() -> finish(left)
+            left.current != session.current -> {
+                val next = left.queue.first()
+                hide(listOf(next))
+                send(MapCommand.Focus(next))
+                update { left.copy(ifKnown = cards[next].daysIfKnown(today())) }
+            }
+            else -> update { left }
+        }
+    }
+
+    /** The session's last card is behind it: the whole branch shows again, and the summary says how it went. */
+    private fun finish(session: Study) {
+        val today = today()
+        val branch = cardsUnder(ui.value.map?.nodes.orEmpty(), session.start)
+        revealAll()
+        send(MapCommand.Focus(session.start))
+        val newLeft = if (session.anyway) 0 else newCards(branch, cards)
+        update { session.copy(ending = StudyEnding.Finished, revealed = false, nextIn = nextStudy(branch, cards, today)?.minus(today), newLeft = newLeft) }
     }
 
     private fun update(change: (Study) -> Study) {

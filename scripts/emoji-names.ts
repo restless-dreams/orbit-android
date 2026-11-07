@@ -6,8 +6,9 @@
 // writes app/src/main/assets/emoji/:
 // - emoji.txt, every emoji in Unicode's order, each with its place in Unicode's
 //   ranking of how often emoji are used, and its skin tones;
-// - en.txt and es.txt, each emoji's name and keywords in English and in
-//   Spanish (CLDR's Latin American Spanish over its Spanish).
+// - en.txt, es.txt and pt.txt, each emoji's name and keywords in English,
+//   in Spanish (CLDR's Latin American Spanish over its Spanish) and in
+//   Brazilian Portuguese (CLDR's Portuguese, which is Brazil's).
 //
 // Run it again after changing a version below. Emoji the phone can't draw
 // are left out when the app reads the list.
@@ -25,6 +26,7 @@ const CLDR = `https://raw.githubusercontent.com/unicode-org/cldr/release-${CLDR_
 const LANGUAGES: Record<string, string[]> = {
   en: ['en'],
   es: ['es', 'es_419'],
+  pt: ['pt'],
 };
 
 const NOTICE = `# From Unicode's emoji ${EMOJI_VERSION}, emoji frequency and CLDR ${CLDR_VERSION}, © Unicode, Inc., under the Unicode License v3 (https://www.unicode.org/license.txt). Made by scripts/emoji-names.ts.`;

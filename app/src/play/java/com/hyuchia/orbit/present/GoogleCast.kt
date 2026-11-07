@@ -56,6 +56,15 @@ private const val NAMESPACE = "urn:x-cast:com.hyuchia.orbit.present"
 internal const val CAST_PART_LENGTH = 12_000
 /** Pictures go to a TV at most this many pixels on their longer side: enough for the screen, quick to send. */
 private const val TV_PICTURE_SIDE = 1280
+
+/**
+ * The most a TV is sent of a map's pictures, in Base64, beside its text: a
+ * receiver takes commands of up to 128 MiB, and a phone makes this one
+ * string in memory, so a map with a gigabyte of photos sends the first that
+ * fit, and the TV shows the rest of their ideas without them.
+ */
+private const val TV_PICTURES_MOST = 48L * 1024 * 1024
+
 private const val TAG = "Cast"
 
 /** The build for Google Play casts to TVs with Google Cast, where it can; elsewhere, Android's screen casting. */
@@ -179,7 +188,7 @@ class CastAudience internal constructor(
     private val withPictures: (String) -> String,
 ) : Audience {
     constructor(session: CastSession, mapFolder: File, scope: CoroutineScope, words: PageWords, asTheyAre: () -> Set<String>) :
-        this(SessionChannel(session), scope, words, { markdown -> inlinePictures(markdown, mapFolder, TV_PICTURE_SIDE, asTheyAre()) })
+        this(SessionChannel(session), scope, words, { markdown -> inlinePictures(markdown, mapFolder, TV_PICTURE_SIDE, asTheyAre(), most = TV_PICTURES_MOST) })
 
     override val name: String? = channel.name
 

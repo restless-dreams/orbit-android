@@ -6,12 +6,16 @@ import android.graphics.ImageDecoder
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.data.OutgoingMedia
 import com.hyuchia.orbit.data.mediaType
+import com.hyuchia.orbit.data.readAtMost
+import com.hyuchia.orbit.ui.openMapExport
+import com.hyuchia.orbit.ui.openMapFile
 import com.hyuchia.orbit.ui.shareMapExport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.io.OutputStream
 import java.util.zip.CRC32
 import kotlin.math.max
 
@@ -45,8 +49,12 @@ suspend fun sharePicture(context: Context, mapId: String, file: File, label: Str
     if (copy == null) {
         Shared.NotClean
     } else {
-        val (name, bytes) = copy
-        shareMapExport(context, mapId, name, mediaType(name), label) { it.write(bytes) }
+        shareMapExport(context, mapId, copy.name, mediaType(copy.name), label) { output ->
+            // A picture can be 250 MB: it's begun only where there's room for all of it.
+            this(copy.size)
+            copy.write(output)
+        }
+
         Shared.Clean
     }
 } catch (failed: IOException) {
@@ -78,6 +86,47 @@ suspend fun shareVideoOrSound(context: Context, mapId: String, file: File, type:
 }
 
 /**
+ * Opens a video from the folder of the map `mapId` in another app, as the
+ * phone's video app, with a copy without what its file says beyond what it
+ * shows and plays ([OutgoingMedia]), as sharing it sends one. One Orbit
+ * can't read through isn't opened ([Shared.NotClean]): the person chooses
+ * whether it goes as it is ([openVideoAsItIs]). Nothing opens for a private
+ * map that locked while the copy was made, nor without room for the copy
+ * ([Shared.Failed], [openMapExport]).
+ */
+suspend fun openVideoInAnotherApp(context: Context, mapId: String, file: File): Shared = try {
+    val outgoing = withContext(Dispatchers.IO) { OutgoingMedia.of(file) }
+
+    if (outgoing == null) {
+        Shared.NotClean
+    } else {
+        openMapExport(context, mapId, file.name, videoType(file)) { output ->
+            // Not begun on a storage without room for all of it, and some to spare.
+            invoke(outgoing.size)
+            outgoing.writeTo(output)
+        }
+
+        Shared.Clean
+    }
+} catch (failed: IOException) {
+    Logs.warn("OrbitMedia", "A video couldn't be opened in another app", failed)
+    Shared.Failed
+}
+
+/**
+ * Opens a video from the folder of the map `mapId` in another app exactly
+ * as it is, with all its file says: only once the person chose to, knowing
+ * what goes with it, after Orbit couldn't take that out
+ * ([Shared.NotClean]), and while the map doesn't show locked.
+ */
+fun openVideoAsItIs(context: Context, mapId: String, file: File) {
+    openMapFile(context, mapId, file, videoType(file))
+}
+
+/** The media type a video opens in another app as: its own, as its name says, or any video's. */
+private fun videoType(file: File): String = mediaType(file.name).takeIf { it.startsWith("video/") } ?: "video/*"
+
+/**
  * Shares a file from the folder of the map `mapId` exactly as it is, with
  * all its file says: only once the person chose to, knowing what goes with
  * it, after Orbit couldn't take that out ([Shared.NotClean]), and while the
@@ -91,18 +140,28 @@ suspend fun shareAsItIs(context: Context, mapId: String, file: File, type: Strin
     }
 }
 
-/** What sharing a picture sends: its name and bytes, without what its file says beyond the picture. */
-private fun sharedCopy(file: File): Pair<String, ByteArray>? {
-    val bytes = file.readBytes()
+/** What sharing a picture sends: its name, about how big it is, and what writes it, without what its file says beyond the picture. */
+private class SharedCopy(val name: String, val size: Long, val write: (OutputStream) -> Unit)
 
-    return when (SharedPictures.kindOf(bytes)) {
-        SharedPictures.Kind.Plain -> OutgoingMedia.picture(bytes)?.let { file.name to it } ?: redrawn(file)
-        // A drawing that can't be read through can't be drawn again either: it isn't shared.
-        SharedPictures.Kind.Svg -> SharedPictures.withoutMetadata(bytes)?.let { file.name to it }
-        SharedPictures.Kind.Jpeg, SharedPictures.Kind.Png, SharedPictures.Kind.WebP, SharedPictures.Kind.Gif -> SharedPictures.withoutMetadata(bytes)?.let { file.name to it } ?: redrawn(file)
-        SharedPictures.Kind.Other -> redrawn(file)
+/**
+ * What sharing `file` sends: the picture as it leaves the phone in a zip,
+ * written from its file a piece at a time, however big it is
+ * ([OutgoingMedia]); one that can't be read through drawn again, but a
+ * drawing, which can't be drawn again either, and isn't shared.
+ */
+private fun sharedCopy(file: File): SharedCopy? {
+    OutgoingMedia.of(file)?.let { outgoing -> return SharedCopy(file.name, outgoing.size) { output -> outgoing.writeTo(output) } }
+    val start = file.inputStream().use { it.readAtMost(KIND_BYTES) }
+
+    if (SharedPictures.kindOf(start) == SharedPictures.Kind.Svg) {
+        return null
     }
+
+    return redrawn(file)?.let { (name, bytes) -> SharedCopy(name, bytes.size.toLong()) { output -> output.write(bytes) } }
 }
+
+/** How much of a picture's file tells its kind. */
+private const val KIND_BYTES = 4096
 
 /** A picture drawn again, as JPEG, or PNG when it's see-through: nothing of its file comes along. Null when it can't be drawn. */
 private fun redrawn(file: File): Pair<String, ByteArray>? {
@@ -171,19 +230,18 @@ internal object SharedPictures {
 
     /**
      * A JPEG, PNG or WebP picture's bytes with nothing but the picture: its
-     * pixels, its color profile and which way up it is. Everything else goes,
-     * EXIF and XMP (where a camera writes where the photo was taken), IPTC,
-     * comments, thumbnails and pictures stored after it. A GIF keeps its
-     * frames and looping, and an SVG what draws it ([gifWithoutMetadata],
+     * pixels, its color profile and which way up it is, and an animated
+     * PNG's or WebP's frames. Everything else goes, EXIF and XMP (where a
+     * camera writes where the photo was taken), IPTC, comments, thumbnails,
+     * pictures stored after it, and the chunks and segments apps keep their
+     * own in, which a PNG or WebP keeps only when they draw it. A GIF keeps
+     * its frames and looping, and an SVG what draws it ([gifWithoutMetadata],
      * [svgWithoutMetadata]). Null for any other kind, or a file that isn't
      * whole.
      */
     fun withoutMetadata(bytes: ByteArray): ByteArray? = try {
         when (kindOf(bytes)) {
-            Kind.Jpeg -> jpeg(bytes)
-            Kind.Png -> png(bytes)
-            Kind.WebP -> webP(bytes)
-            Kind.Gif -> gifWithoutMetadata(bytes)
+            Kind.Jpeg, Kind.Png, Kind.WebP, Kind.Gif -> plan(PictureInMemory(bytes))?.bytes(bytes)
             Kind.Svg -> svgWithoutMetadata(bytes)
             Kind.Plain, Kind.Other -> null
         }
@@ -192,7 +250,27 @@ internal object SharedPictures {
         null
     }
 
-    private fun jpeg(bytes: ByteArray): ByteArray? {
+    /**
+     * How a JPEG, PNG, WebP or GIF picture goes, as [withoutMetadata] makes
+     * it: the parts of `bytes` it keeps, with what's written in place of
+     * what goes. So a picture in its file ([PictureInFile]) goes a piece at a
+     * time, however big it is. Null for any other kind, or a file that isn't
+     * whole; reading its file can fail too, as one that changes meanwhile.
+     */
+    fun plan(bytes: PictureBytes): PicturePieces? = try {
+        when (kindOf(bytes.bytes(0, minOf(bytes.size, KIND_BYTES)))) {
+            Kind.Jpeg -> jpeg(bytes)
+            Kind.Png -> png(bytes)
+            Kind.WebP -> webP(bytes)
+            Kind.Gif -> gifWithoutMetadata(bytes)
+            Kind.Svg, Kind.Plain, Kind.Other -> null
+        }
+    } catch (malformed: RuntimeException) {
+        // A file made to trip the reader is one it can't read through, as a broken one is.
+        null
+    }
+
+    private fun jpeg(bytes: PictureBytes): PicturePieces? {
         val kept = mutableListOf<IntRange>()
         var orientation = UPRIGHT
         var position = 2
@@ -255,28 +333,30 @@ internal object SharedPictures {
     }
 
     /** The JPEG again from the parts it keeps, with which way up it is when that isn't upright: after JFIF's segment, where EXIF's goes. */
-    private fun assembleJpeg(bytes: ByteArray, kept: List<IntRange>, orientation: Int): ByteArray {
-        val output = ByteArrayOutputStream(bytes.size)
+    private fun assembleJpeg(bytes: PictureBytes, kept: List<IntRange>, orientation: Int): PicturePieces {
+        val output = PicturePieces()
         output.write(JPEG_START)
         val jfifFirst = kept.firstOrNull()?.let { bytes.byteAt(it.first + 1) == APP0 } == true
 
         kept.forEachIndexed { index, range ->
             if (index == (if (jfifFirst) 1 else 0) && orientation != UPRIGHT) {
                 val tiff = orientationTiff(orientation)
-                output.write(byteArrayOf(0xFF.toByte(), APP1.toByte()))
-                output.writeShort(2 + EXIF_HEADER.size + tiff.size, bigEndian = true)
-                output.write(EXIF_HEADER)
-                output.write(tiff)
+                val segment = ByteArrayOutputStream()
+                segment.write(byteArrayOf(0xFF.toByte(), APP1.toByte()))
+                segment.writeShort(2 + EXIF_HEADER.size + tiff.size, bigEndian = true)
+                segment.write(EXIF_HEADER)
+                segment.write(tiff)
+                output.write(segment.toByteArray())
             }
 
-            output.write(bytes, range.first, range.last - range.first + 1)
+            output.keep(range)
         }
 
-        return output.toByteArray()
+        return output
     }
 
     /** Where a scan's coded picture ends: at the next marker, past stuffed bytes and restarts. */
-    private fun scanEnd(bytes: ByteArray, from: Int): Int? {
+    private fun scanEnd(bytes: PictureBytes, from: Int): Int? {
         var position = from
 
         while (position + 1 < bytes.size) {
@@ -300,7 +380,7 @@ internal object SharedPictures {
      * color transform. Comments, and the other application segments (EXIF,
      * XMP, IPTC, thumbnails, more pictures), go.
      */
-    private fun keepsJpegSegment(marker: Int, bytes: ByteArray, data: Int): Boolean = when (marker) {
+    private fun keepsJpegSegment(marker: Int, bytes: PictureBytes, data: Int): Boolean = when (marker) {
         APP0 -> bytes.startsWith(JFIF_HEADER, at = data)
         APP2 -> bytes.startsWith(ICC_HEADER, at = data)
         APP14 -> bytes.startsWith(ADOBE_HEADER, at = data)
@@ -308,14 +388,14 @@ internal object SharedPictures {
         else -> true
     }
 
-    private fun png(bytes: ByteArray): ByteArray? {
+    private fun png(bytes: PictureBytes): PicturePieces? {
         val kept = mutableListOf<IntRange>()
         var orientation = UPRIGHT
         var position = PNG_SIGNATURE.size
 
         while (position + 8 <= bytes.size) {
             val length = bytes.intAt(position, bigEndian = true)
-            val type = String(bytes, position + 4, 4, Charsets.ISO_8859_1)
+            val type = bytes.text(position + 4, 4)
 
             // Counted in Long: a length near 2³¹ would otherwise wrap around past the check.
             if (length < 0 || position + 12L + length > bytes.size) {
@@ -328,8 +408,11 @@ internal object SharedPictures {
                 orientation = orientationOf(bytes, position + 8, position + 8 + length) ?: orientation
             }
 
-            if (type !in PNG_METADATA) {
+            if (type in PNG_PICTURE) {
                 kept += position until end
+            } else if (!type.all { it in 'A'..'Z' || it in 'a'..'z' } || type[0] in 'A'..'Z') {
+                // A chunk the picture can't be read without (its first letter says so), of a kind Orbit doesn't know, as Apple's CgBI, or no chunk at all: what it holds can't be told.
+                return null
             }
 
             if (type == "IEND") {
@@ -343,99 +426,155 @@ internal object SharedPictures {
     }
 
     /** The PNG again from the chunks it keeps, with which way up it is when that isn't upright, before its picture data as the format asks. */
-    private fun assemblePng(bytes: ByteArray, kept: List<IntRange>, orientation: Int): ByteArray {
-        val output = ByteArrayOutputStream(bytes.size)
+    private fun assemblePng(bytes: PictureBytes, kept: List<IntRange>, orientation: Int): PicturePieces {
+        val output = PicturePieces()
         output.write(PNG_SIGNATURE)
         var placed = orientation == UPRIGHT
 
         for (range in kept) {
-            val type = String(bytes, range.first + 4, 4, Charsets.ISO_8859_1)
+            val type = bytes.text(range.first + 4, 4)
 
             if (!placed && (type == "IDAT" || type == "IEND")) {
                 val tiff = orientationTiff(orientation)
                 val chunk = "eXIf".toByteArray(Charsets.ISO_8859_1) + tiff
-                output.writeInt(tiff.size, bigEndian = true)
-                output.write(chunk)
-                output.writeInt(CRC32().apply { update(chunk) }.value.toInt(), bigEndian = true)
+                val written = ByteArrayOutputStream()
+                written.writeInt(tiff.size, bigEndian = true)
+                written.write(chunk)
+                written.writeInt(CRC32().apply { update(chunk) }.value.toInt(), bigEndian = true)
+                output.write(written.toByteArray())
                 placed = true
             }
 
-            output.write(bytes, range.first, range.last - range.first + 1)
+            output.keep(range)
         }
 
-        return output.toByteArray()
+        return output
     }
 
-    private fun webP(bytes: ByteArray): ByteArray? {
-        val kept = mutableListOf<IntRange>()
-        var orientation = UPRIGHT
-        var features: Int? = null
-        var position = 12
+    /** A chunk of a WebP's RIFF: its type, where it starts, and how long what it holds is. */
+    private class WebPChunk(val type: String, val start: Int, val size: Int) {
+        val data: Int get() = start + 8
+    }
 
-        while (position + 8 <= bytes.size) {
-            val type = String(bytes, position, 4, Charsets.ISO_8859_1)
+    private fun webP(bytes: PictureBytes): PicturePieces? {
+        // The RIFF says where the file ends: what follows isn't the picture's, and stays out. One that ends past the file, but for the padding its last chunk may leave out, isn't whole.
+        val riffEnd = 8L + (bytes.intAt(4, bigEndian = false).toLong() and 0xFFFFFFFFL)
+
+        if (riffEnd > bytes.size + 1L) {
+            return null
+        }
+
+        val chunks = webPChunks(bytes, 12, minOf(riffEnd, bytes.size.toLong()).toInt()) ?: return null
+        // Which way up it is, as the last EXIF that says so does: all that stays of its EXIF.
+        val orientation = chunks.filter { it.type == "EXIF" }
+            .mapNotNull { exif -> orientationOf(bytes, exif.data + if (bytes.startsWith(EXIF_HEADER, at = exif.data)) EXIF_HEADER.size else 0, exif.data + exif.size) }
+            .lastOrNull() ?: UPRIGHT
+        val extended = chunks.any { it.type == "VP8X" }
+        val body = PicturePieces()
+
+        for (chunk in chunks) {
+            when (chunk.type) {
+                "ANMF" -> {
+                    if (!body.writeWebPFrame(bytes, chunk)) {
+                        return null
+                    }
+                }
+                // The extended format's header says which metadata the file has: none now, but which way up it is.
+                "VP8X" -> {
+                    val flags = bytes.byteAt(chunk.data) and (WEBP_HAS_EXIF or WEBP_HAS_XMP).inv()
+                    body.keep(chunk.start until chunk.data)
+                    body.write(byteArrayOf((if (orientation != UPRIGHT) flags or WEBP_HAS_EXIF else flags).toByte()))
+                    body.keep(chunk.data + 1 until chunk.data + chunk.size)
+                    body.pad(chunk.size)
+                }
+                in WEBP_PICTURE -> body.keepWebPChunk(chunk)
+            }
+        }
+
+        if (orientation != UPRIGHT && extended) {
+            val tiff = orientationTiff(orientation)
+            val chunk = ByteArrayOutputStream()
+            chunk.write("EXIF".toByteArray(Charsets.ISO_8859_1))
+            chunk.writeInt(tiff.size, bigEndian = false)
+            chunk.write(tiff)
+            body.write(chunk.toByteArray())
+        }
+
+        // Its RIFF header says how long the rest is, WEBP and its chunks.
+        val header = ByteArrayOutputStream()
+        header.write(RIFF)
+        header.writeInt((4 + body.size).toInt(), bigEndian = false)
+        header.write(WEBP)
+        val output = PicturePieces()
+        output.write(header.toByteArray())
+        output.write(body)
+        return output
+    }
+
+    /**
+     * The chunks from `from` to `until`, or null when one runs past it. The
+     * last may leave out the byte of padding that follows a chunk of an odd
+     * size; fewer bytes than a chunk's header after it aren't one, and stay
+     * out.
+     */
+    private fun webPChunks(bytes: PictureBytes, from: Int, until: Int): List<WebPChunk>? {
+        val chunks = mutableListOf<WebPChunk>()
+        var position = from
+
+        while (position + 8 <= until) {
             val size = bytes.intAt(position + 4, bigEndian = false)
 
             // Counted in Long: a size near 2³¹ would otherwise wrap around past the check.
-            if (size < 0 || position + 8L + size > bytes.size) {
+            if (size < 0 || position + 8L + size > until) {
                 return null
             }
 
-            val end = position + 8 + size + size % 2
-
-            when (type) {
-                "EXIF" -> orientationOf(bytes, position + 8 + if (bytes.startsWith(EXIF_HEADER, at = position + 8)) EXIF_HEADER.size else 0, position + 8 + size)?.let { orientation = it }
-                "XMP " -> Unit
-                else -> kept += position until minOf(end, bytes.size)
-            }
-
-            if (type == "VP8X") {
-                features = position + 8
-            }
-
-            position = end
+            chunks += WebPChunk(bytes.text(position, 4), position, size)
+            position += 8 + size + size % 2
         }
 
-        val output = ByteArrayOutputStream(bytes.size)
-        output.write(RIFF)
-        output.writeInt(0, bigEndian = false)
-        output.write(WEBP)
+        return chunks
+    }
 
-        for (range in kept) {
-            val start = output.size()
-            output.write(bytes, range.first, range.last - range.first + 1)
+    /** Keeps a chunk as it is, its header and what it holds, and a byte of padding after an odd size, written as zero. */
+    private fun PicturePieces.keepWebPChunk(chunk: WebPChunk) {
+        keep(chunk.start until chunk.data + chunk.size)
+        pad(chunk.size)
+    }
 
-            // A chunk of an odd size is followed by a byte of padding, even at the end of a file that left it out.
-            if ((range.last - range.first + 1) % 2 == 1) {
-                output.write(0)
-            }
+    /** The byte of padding a chunk of an odd `size` is followed by. */
+    private fun PicturePieces.pad(size: Int) {
+        if (size % 2 == 1) {
+            write(byteArrayOf(0))
+        }
+    }
 
-            // The extended format's header says which metadata the file has: none now, but which way up it is.
-            if (features != null && range.first + 8 == features) {
-                val flags = bytes.byteAt(features) and (WEBP_HAS_EXIF or WEBP_HAS_XMP).inv()
-                val withOrientation = if (orientation != UPRIGHT) flags or WEBP_HAS_EXIF else flags
-                output.overwrite(start + 8, withOrientation)
-            }
+    /**
+     * Writes an animation's frame with only what draws it: where it goes
+     * and for how long, its transparency and its image data. Another app's
+     * chunks inside it go too. False, writing nothing, when it can't be read
+     * through.
+     */
+    private fun PicturePieces.writeWebPFrame(bytes: PictureBytes, frame: WebPChunk): Boolean {
+        if (frame.size < WEBP_FRAME_HEADER) {
+            return false
         }
 
-        if (orientation != UPRIGHT && features != null) {
-            val tiff = orientationTiff(orientation)
-            output.write("EXIF".toByteArray(Charsets.ISO_8859_1))
-            output.writeInt(tiff.size, bigEndian = false)
-            output.write(tiff)
-        }
-
-        val result = output.toByteArray()
-        val size = result.size - 8
-        result[4] = size.toByte()
-        result[5] = (size shr 8).toByte()
-        result[6] = (size shr 16).toByte()
-        result[7] = (size shr 24).toByte()
-        return result
+        val parts = webPChunks(bytes, frame.data + WEBP_FRAME_HEADER, frame.data + frame.size)?.filter { it.type in WEBP_FRAME } ?: return false
+        val content = PicturePieces()
+        content.keep(frame.data until frame.data + WEBP_FRAME_HEADER)
+        parts.forEach { content.keepWebPChunk(it) }
+        val header = ByteArrayOutputStream()
+        header.write("ANMF".toByteArray(Charsets.ISO_8859_1))
+        header.writeInt(content.size.toInt(), bigEndian = false)
+        write(header.toByteArray())
+        write(content)
+        // A frame's content is always even: its own part is 16 bytes, and each chunk in it is padded.
+        return true
     }
 
     /** The orientation an EXIF block (TIFF, from `start` to `end`) gives its picture, 1 to 8, or null when it gives none. */
-    private fun orientationOf(bytes: ByteArray, start: Int, end: Int): Int? {
+    private fun orientationOf(bytes: PictureBytes, start: Int, end: Int): Int? {
         if (end - start < 8) {
             return null
         }
@@ -493,15 +632,6 @@ internal object SharedPictures {
 
     private fun ByteArray.byteAt(index: Int): Int = this[index].toInt() and 0xFF
 
-    private fun ByteArray.shortAt(index: Int, bigEndian: Boolean): Int =
-        if (bigEndian) (byteAt(index) shl 8) or byteAt(index + 1) else byteAt(index) or (byteAt(index + 1) shl 8)
-
-    private fun ByteArray.intAt(index: Int, bigEndian: Boolean): Int = if (bigEndian) {
-        (shortAt(index, bigEndian = true) shl 16) or shortAt(index + 2, bigEndian = true)
-    } else {
-        shortAt(index, bigEndian = false) or (shortAt(index + 2, bigEndian = false) shl 16)
-    }
-
     private fun ByteArray.startsWith(prefix: ByteArray, at: Int = 0): Boolean =
         at >= 0 && at + prefix.size <= size && prefix.indices.all { this[at + it] == prefix[it] }
 
@@ -525,13 +655,8 @@ internal object SharedPictures {
         }
     }
 
-    /** Changes the byte written at `index`. */
-    private fun ByteArrayOutputStream.overwrite(index: Int, value: Int) {
-        val bytes = toByteArray()
-        bytes[index] = value.toByte()
-        reset()
-        write(bytes)
-    }
+    /** How many of a picture's first bytes tell its kind ([kindOf]): as far as an SVG's element, after its XML declaration. */
+    private const val KIND_BYTES = 512
 
     private const val UPRIGHT = 1
     private const val ORIENTATION_TAG = 0x0112
@@ -562,6 +687,29 @@ internal object SharedPictures {
     private val ICC_HEADER = "ICC_PROFILE".toByteArray(Charsets.ISO_8859_1) + 0.toByte()
     private val ADOBE_HEADER = "Adobe".toByteArray(Charsets.ISO_8859_1)
 
-    /** A PNG's chunks that say something besides the picture: EXIF, text, and when it was made. */
-    private val PNG_METADATA = setOf("eXIf", "tEXt", "zTXt", "iTXt", "tIME")
+    /**
+     * A PNG's chunks that draw the picture: its header, palette, data and
+     * end; its transparency and background; how its colors look (cHRM,
+     * gAMA, iCCP, sBIT, sRGB, cICP, and HDR's mDCV and cLLI); how big it
+     * prints; and an animation's control and frames (acTL, fcTL, fdAT). Every
+     * other chunk goes: EXIF, text and when it was made, and the private
+     * chunks apps keep their own in, such as content credentials (caBX).
+     */
+    private val PNG_PICTURE = setOf(
+        "IHDR", "PLTE", "IDAT", "IEND", "tRNS", "bKGD", "cHRM", "gAMA", "iCCP", "sBIT", "sRGB", "cICP", "mDCV", "cLLI", "pHYs", "acTL", "fcTL", "fdAT",
+    )
+
+    /**
+     * A WebP's chunks that draw the picture: its features (VP8X), color
+     * profile, animation (ANIM, and each frame's ANMF) and image data, lossy
+     * or lossless, with its transparency. EXIF, XMP and every other app's
+     * chunk, as content credentials (C2PA), go.
+     */
+    private val WEBP_PICTURE = setOf("VP8X", "ICCP", "ANIM", "ALPH", "VP8 ", "VP8L")
+
+    /** What an animation's frame (ANMF) holds after where it goes and for how long: its transparency and image data. */
+    private val WEBP_FRAME = setOf("ALPH", "VP8 ", "VP8L")
+
+    /** How long a WebP frame's own part is, before its image data: where it goes, its size, how long it shows and how. */
+    private const val WEBP_FRAME_HEADER = 16
 }

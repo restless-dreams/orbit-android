@@ -38,7 +38,12 @@ const val AGAIN_AFTER = 3
  */
 @Serializable(with = StudyCardSerializer::class)
 data class StudyCard(
-    /** How many times in a row it was known when it was due: 0 after Again, at most one for each of [STUDY_INTERVALS]. */
+    /**
+     * How many times in a row it was known when it was due: 0 after Again, at
+     * most one for each of [STUDY_INTERVALS]. A number past them, as another
+     * version may write, counts as the last box, and one under 0 as the
+     * first, until the card is answered here ([answered]).
+     */
     val box: Int = 0,
 
     /** The day it's due. */
@@ -61,17 +66,20 @@ data class StudyCard(
 /**
  * Reads and writes a [StudyCard] as a JSON object, leaving out what's 0, and
  * keeping in [StudyCard.extras] the fields this version doesn't know or
- * can't read.
+ * can't read: a box past what a whole number holds among them.
  */
 internal object StudyCardSerializer : KSerializer<StudyCard> {
     private val numbers = listOf("box", "due", "first", "at")
 
     override val descriptor: SerialDescriptor = SerialDescriptor("com.hyuchia.orbit.study.StudyCard", JsonObject.serializer().descriptor)
 
+    /** Whether `number` can be the card's field `name`: a box is a whole number, so one past what an Int holds can't. */
+    private fun readable(name: String, number: Long): Boolean = name != "box" || number in Int.MIN_VALUE..Int.MAX_VALUE
+
     override fun deserialize(decoder: Decoder): StudyCard {
         val json = decoder as? JsonDecoder ?: throw SerializationException("A study card is read from JSON")
         val fields = json.decodeJsonElement() as? JsonObject ?: throw SerializationException("A study card is a JSON object")
-        val read = numbers.mapNotNull { name -> (fields[name] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull?.let { name to it } }.toMap()
+        val read = numbers.mapNotNull { name -> (fields[name] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull?.takeIf { readable(name, it) }?.let { name to it } }.toMap()
 
         return StudyCard(
             box = read["box"]?.toInt() ?: 0,
@@ -98,7 +106,8 @@ internal object StudyCardSerializer : KSerializer<StudyCard> {
  * box's days. Known before it's due, studying anyway, it keeps its day, and
  * stays just as it was: knowing a card early says little about how long it
  * will stay known. Again brings it back today, to start over from the first
- * box.
+ * box. A box out of the boxes' range goes on from the nearest (see
+ * [StudyCard.box]).
  */
 fun StudyCard?.answered(knew: Boolean, today: Long, at: Long = 0): StudyCard {
     val card = this ?: StudyCard(due = today, first = today)
@@ -107,7 +116,7 @@ fun StudyCard?.answered(knew: Boolean, today: Long, at: Long = 0): StudyCard {
         !knew -> StudyCard(box = 0, due = today, first = card.first, at = at)
         card.due > today -> card
         else -> {
-            val box = (card.box + 1).coerceAtMost(STUDY_INTERVALS.size)
+            val box = (card.box.coerceIn(0, STUDY_INTERVALS.size) + 1).coerceAtMost(STUDY_INTERVALS.size)
             StudyCard(box = box, due = today + STUDY_INTERVALS[box - 1], first = card.first, at = at)
         }
     }
@@ -159,6 +168,16 @@ fun cardsUnder(nodes: List<MapNode>, start: String): List<MapNode> {
     return nodes.drop(index + 1).takeWhile { it.depth > depth }.filter { it.childCount > 0 || !it.note.isNullOrBlank() }
 }
 
+/** The ids of every card in the map, as [cardsUnder] its top idea finds them: what a session from the top studies. */
+fun mapCards(nodes: List<MapNode>): Set<String> = nodes.firstOrNull()?.let { top -> cardsUnder(nodes, top.id).mapTo(HashSet()) { it.id } }.orEmpty()
+
+/**
+ * The ideas `progress` has answers for that aren't among the map's `cards`:
+ * gone from the map, or with no ideas or note under them anymore. A session
+ * never studies them, so Home doesn't count them (see `MapMetadata.studyNotCards`).
+ */
+fun notCards(progress: Map<String, StudyCard>, cards: Set<String>): Set<String> = progress.keys.filterNotTo(HashSet()) { it in cards }
+
 /**
  * The cards a session studies, in order: the ones due by `today`, the most
  * overdue first, then new ones in outline order, as many as the day has
@@ -195,7 +214,7 @@ fun newCards(cards: List<MapNode>, progress: Map<String, StudyCard>): Int = card
 fun nextStudy(cards: List<MapNode>, progress: Map<String, StudyCard>, today: Long): Long? =
     cards.minOfOrNull { card -> progress[card.id]?.due?.coerceAtLeast(today + 1) ?: (today + 1) }
 
-/** How many of the map's cards are due by `today`: what its card on Home says. */
+/** How many of the map's cards are due by `today`, given how its cards are going (`progress`): what its card on Home says. */
 fun dueCount(progress: Map<String, StudyCard>?, today: Long): Int = progress?.values?.count { it.due <= today } ?: 0
 
 /** Why a session shows its summary rather than a card. */
@@ -270,6 +289,30 @@ data class Study(
             missed = if (knew) missed else missed + card,
             revealed = false,
             ending = if (queue.isEmpty()) StudyEnding.Finished else null,
+        )
+    }
+
+    /**
+     * The session without the cards `gone`, which the map no longer has as
+     * cards (it changed elsewhere meanwhile): they leave what's still to go
+     * and the count, and the answer to take back goes with its card. A card
+     * that leaves the screen takes its reveal with it; the next one comes
+     * hidden. What's known stays known.
+     */
+    fun without(gone: Set<String>): Study {
+        val leaving = queue.filterTo(HashSet()) { it in gone }
+
+        if (leaving.isEmpty() && last?.card !in gone) {
+            return this
+        }
+
+        val queue = queue.filter { it !in gone }
+        return copy(
+            queue = queue,
+            total = total - leaving.size,
+            missed = missed - leaving,
+            revealed = revealed && queue.firstOrNull() == current,
+            last = last?.takeIf { it.card !in gone }?.let { it.copy(before = it.before.without(gone)) },
         )
     }
 }

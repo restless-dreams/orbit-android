@@ -349,7 +349,8 @@ fun PrivateMapCover(onBack: () -> Unit, open: Boolean = false, ask: Boolean = tr
     }
 
     Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
-        EscapeCloses(onBack)
+        // Over everything, in a window of its own, the lock keeps the keys: no screen's shortcut reaches through it.
+        EscapeCloses(shortcuts = false, onDismiss = onBack)
 
         BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
             val back = stringResource(R.string.private_back_to_your_maps)

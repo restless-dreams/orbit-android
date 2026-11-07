@@ -44,13 +44,17 @@ class MapPictures(private val pool: PagePool, cache: File, private val orbit: St
     private val thumbnails = File(cache, "thumbnails")
     private val drawing = Mutex()
 
-    /** The thumbnail for a map as its text and the app's colors are now, if it was drawn before. */
-    fun cachedThumbnail(id: String, contentKey: String, style: String?, theme: AppTheme): File? =
-        thumbnailFile(id, contentKey, style, theme).takeIf { it.isFile }
+    /**
+     * The thumbnail for a map as it is now, by `key`, which changes whenever
+     * its picture would ([com.hyuchia.orbit.data.MapSummary.pictureKey]), and
+     * the app's colors, if it was drawn before.
+     */
+    fun cachedThumbnail(id: String, key: String, style: String?, theme: AppTheme): File? =
+        thumbnailFile(id, key, style, theme).takeIf { it.isFile }
 
-    /** The thumbnail for a map, drawn now if needed. Null when the page couldn't draw it. */
-    suspend fun thumbnail(id: String, contentKey: String, style: String?, theme: AppTheme, markdown: suspend () -> String): File? {
-        val file = thumbnailFile(id, contentKey, style, theme)
+    /** The thumbnail for a map as it is now, by `key` ([cachedThumbnail]), drawn now if needed. Null when the page couldn't draw it. */
+    suspend fun thumbnail(id: String, key: String, style: String?, theme: AppTheme, markdown: suspend () -> String): File? {
+        val file = thumbnailFile(id, key, style, theme)
 
         if (file.isFile) {
             return file
@@ -128,10 +132,10 @@ class MapPictures(private val pool: PagePool, cache: File, private val orbit: St
         thumbnails.listFiles { old -> old.name.startsWith("$id~") }?.forEach { it.delete() }
     }
 
-    private fun thumbnailFile(id: String, contentKey: String, style: String?, theme: AppTheme): File {
+    private fun thumbnailFile(id: String, key: String, style: String?, theme: AppTheme): File {
         // A map in its own style looks the same in any app colors.
         val looks = style ?: digest("${theme.dark}${theme.tokens.toSortedMap()}")
-        return File(thumbnails, "$id~$contentKey~${digest("$orbit~$looks")}.webp")
+        return File(thumbnails, "$id~$key~${digest("$orbit~$looks")}.webp")
     }
 }
 

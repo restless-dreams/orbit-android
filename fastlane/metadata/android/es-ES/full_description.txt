@@ -6,7 +6,7 @@ Preséntalo. Orbit muestra tu mapa en pantalla completa, paso a paso por el reco
 
 Estúdialo. Orbit convierte un mapa en tarjetas: las ideas debajo de cada una quedan ocultas hasta que las revelas, y cada tarjeta vuelve cuando toca.
 
-Tus mapas son tuyos. Cada uno es un archivo markdown sencillo que cualquier editor de texto puede abrir. Guárdalos en una carpeta que elijas y se mantendrán sincronizados con tus otras apps y dispositivos; cuando Orbit guarda un archivo, cambia solo lo que editaste y deja el resto como lo escribiste. Cada mapa tiene un historial de versiones, y los mapas eliminados esperan 30 días en la papelera. También puedes hacer privado un mapa, bloqueado con tu huella, tu rostro o tu bloqueo de pantalla. Importa mapas de OPML, FreeMind, Freeplane y XMind, expórtalos como OPML, o imprímelos y guárdalos como PDF con su esquema y sus notas.
+Tus mapas son tuyos. Cada uno es un archivo markdown sencillo que cualquier editor de texto puede abrir. Guárdalos en una carpeta que elijas y se mantendrán sincronizados con tus otras apps y dispositivos; cuando Orbit guarda un archivo, cambia solo lo que editaste y deja el resto como lo escribiste, aunque un mapa escrito en YAML se guarda como markdown en cuanto lo editas. Cada mapa tiene un historial de versiones, y los mapas eliminados esperan 30 días en la papelera. También puedes hacer privado un mapa, bloqueado con tu huella, tu rostro o tu bloqueo de pantalla. Importa mapas de OPML, FreeMind, Freeplane y XMind, expórtalos como OPML, o imprímelos y guárdalos como PDF con su esquema y sus notas.
 
 Envía un mapa a tu tablet o a otro teléfono cercano sin necesidad de cuenta, ábrelo en un navegador de tu computadora o compártelo como una página web que cualquiera puede recorrer.
 
@@ -14,4 +14,4 @@ Orbit funciona con o sin los servicios de Google, en teléfonos, tablets y Chrom
 
 Sin anuncios, sin cuentas, sin rastreo. Orbit es software libre bajo la licencia GNU GPL, y su código fuente es público.
 
-Orbit está en español y en inglés.
+Orbit está en español, en inglés y en portugués de Brasil.

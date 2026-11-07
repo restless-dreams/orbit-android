@@ -2,6 +2,7 @@ package com.hyuchia.orbit.data
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import java.io.File
 
 /**
@@ -113,8 +114,9 @@ internal class StorageLayout(
     /**
      * Each map's history, from its folder (`maps/<map>/history/`) to its own
      * (`history/<map>/`). A version already there stays; one only in the map's
-     * folder moves. Safe to run again after a crash midway. So does the
-     * history a map brought back from the trash left in its folder
+     * folder moves, and so does one there by a name the history has for
+     * another text, beside it. Safe to run again after a crash midway. So
+     * does the history a map brought back from the trash left in its folder
      * (`.history/`) when it couldn't be moved then.
      */
     fun moveHistoryOutOfMaps() {
@@ -124,7 +126,13 @@ internal class StorageLayout(
         }
     }
 
-    /** Moves the versions in `old` into the history of map `id`. */
+    /**
+     * Moves the versions in `old` into the history of map `id`, and joins
+     * the reasons kept for them to the history's own ([moveReasons]). Each
+     * file is copied whole or not at all, and leaves `old` only once it's
+     * whole in the history, so a move cut short at any point, here or by an
+     * earlier release, leaves every version whole somewhere ([moveHistoryFile]).
+     */
     private fun moveHistory(old: File, id: String) {
         if (!old.isDirectory) {
             return
@@ -141,20 +149,91 @@ internal class StorageLayout(
         }
 
         target.mkdirs()
+        val files = old.listFiles().orEmpty()
+        val renamed = mutableMapOf<String, String>()
 
-        old.listFiles().orEmpty().forEach { version ->
-            val moved = File(target, version.name)
-
-            if (moved.exists()) {
-                version.delete()
-            } else if (!version.renameTo(moved)) {
-                version.copyTo(moved)
-                version.delete()
-            }
+        for (file in files.filter { it.name != REASONS_FILE }) {
+            moveHistoryFile(file, target)?.takeIf { it != file.name }?.let { renamed[file.name] = it }
         }
 
+        files.firstOrNull { it.name == REASONS_FILE }?.let { moveReasons(it, File(target, REASONS_FILE), renamed) }
         old.delete()
     }
+
+    /**
+     * Moves one of an old history's files into `target`, whole, and deletes
+     * it from where it was only once it's there. Where the history has a
+     * file by its name already, the same one is only deleted; a version
+     * that's another text, or whatever a copy cut short by an earlier
+     * release left in its place, keeps its place, and this one goes in
+     * beside it under a time of its own, so neither is lost. Returns its
+     * name in `target`, or null when it stays where it was: a file of
+     * another kind by a name the history has.
+     */
+    private fun moveHistoryFile(file: File, target: File): String? {
+        val moved = File(target, file.name)
+
+        if (!moved.exists()) {
+            if (file.renameTo(moved)) {
+                return moved.name
+            }
+
+            if (!file.isFile) {
+                return null
+            }
+
+            copyWhole(file, moved)
+            file.delete()
+            return moved.name
+        }
+
+        if (file.isFile && sameBytes(file, moved)) {
+            file.delete()
+            return moved.name
+        }
+
+        return moveUnderTimeOfItsOwn(file, target)
+    }
+
+    /** Moves a version into `target` under a time a millisecond on from its own that no version there has; null, leaving it, for a file that isn't a version. */
+    private fun moveUnderTimeOfItsOwn(file: File, target: File): String? {
+        val time = VERSION_NAME.matchEntire(file.name)?.groupValues?.get(1)?.takeIf { file.isFile } ?: return null
+        val kind = file.name.removePrefix(time)
+        val free = generateSequence((time.toLongOrNull() ?: return null) + 1) { it + 1 }.map { File(target, "$it$kind") }.first { !it.exists() }
+        copyWhole(file, free)
+        file.delete()
+        return free.name
+    }
+
+    /**
+     * Joins an old history's reasons file (`old`) into the history's own
+     * (`into`): its entries go in, under the names their versions moved in
+     * under ([moveHistoryFile]), but for those the history has already, and
+     * whatever else either holds stays. One that can't be read now throws,
+     * staying where it is for the next start; one that isn't a reasons file
+     * at all reads as none, as the history reads it ([MapHistory.reasonEntries]).
+     */
+    private fun moveReasons(old: File, into: File, renamed: Map<String, String>) {
+        val oldFields = reasonsFields(old)
+        val intoFields = reasonsFields(into)
+        val oldEntries = (oldFields["versions"] as? JsonObject).orEmpty().mapKeys { (name, _) -> renamed[name] ?: name }
+        val intoEntries = (intoFields["versions"] as? JsonObject).orEmpty()
+        writeAtomically(into, JsonObject(oldFields + intoFields + ("versions" to JsonObject(oldEntries + intoEntries))).toString())
+        old.delete()
+    }
+
+    /** A reasons file's fields: none when it isn't there or isn't JSON's object. Throws [java.io.IOException] when it's there but can't be read now. */
+    private fun reasonsFields(file: File): JsonObject {
+        if (!file.isFile) {
+            return JsonObject(emptyMap())
+        }
+
+        val text = file.readTextSafely()
+        return runCatching { mapsJson.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: JsonObject(emptyMap())
+    }
+
+    /** Copies `from` to `to` whole or not at all, a little at a time. */
+    private fun copyWhole(from: File, to: File) = writeAtomically(to) { output -> from.inputStream().use { it.copyTo(output) } }
 
     /**
      * A copy of every map's text, details and history before the layout

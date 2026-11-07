@@ -23,9 +23,16 @@ class Request(
      * answered, unless the handler moves it somewhere of its own.
      */
     val bodyFile: File? = null,
+
+    /**
+     * A body streamed to the handler as it arrives, straight from the
+     * connection, as a map sent here is ([Admission.Read.streamed]): it can
+     * be read once, and ends where the request says it does.
+     */
+    private val bodyInput: InputStream? = null,
 ) {
     /** The body, wherever it is. */
-    fun bodyStream(): InputStream = bodyFile?.inputStream() ?: body.inputStream()
+    fun bodyStream(): InputStream = bodyInput ?: bodyFile?.inputStream() ?: body.inputStream()
 
     /** Every value the request's cookies give `name`. */
     fun cookies(name: String): List<String> =
@@ -49,8 +56,14 @@ class RequestHead(
 
 /** What the server does with a request before reading its body. */
 sealed interface Admission {
-    /** Reads the body and answers the request; `release` runs once it's done with, whether or not the body arrived whole. */
-    class Read(val release: () -> Unit = {}) : Admission
+    /**
+     * Reads the body and answers the request; `release` runs once it's done
+     * with, whether or not the body arrived whole. A `streamed` body isn't
+     * read first: the handler reads it from the connection as it arrives,
+     * never in memory or a file of the server's, within the time a body of
+     * its length has.
+     */
+    class Read(val streamed: Boolean = false, val release: () -> Unit = {}) : Admission
 
     /** Answers at once, without reading any of the body. */
     class Refuse(val response: Response) : Admission
@@ -74,7 +87,20 @@ sealed interface Response {
 
     companion object {
         fun text(status: Int, text: String, type: String = "text/plain; charset=utf-8") = Bytes(status, type, text.toByteArray())
+
+        /** A small page, made in memory; its content policy is made from its scripts as it's sent. */
         fun page(status: Int, html: String, headers: Map<String, String> = emptyMap()) = Bytes(status, "text/html; charset=utf-8", html.toByteArray(), headers)
+
+        /**
+         * A page in a file, as a map's web page is, with its pictures and
+         * sounds inside: sent as it's read, never whole in memory, with
+         * `policy`, its content policy (see [pagePolicy]), in place of the
+         * policy files go with, which runs nothing. A `temporary` one goes
+         * once it's sent, as [FromFile]'s do.
+         */
+        fun pageFile(file: File, policy: String, headers: Map<String, String> = emptyMap(), temporary: Boolean = false) =
+            FromFile("text/html; charset=utf-8", file, headers + ("Content-Security-Policy" to policy), temporary)
+
         fun json(status: Int, json: String) = Bytes(status, "application/json", json.toByteArray())
         fun notFound() = text(404, "Not found")
         fun redirect(location: String) = Bytes(302, "text/plain; charset=utf-8", "Moved to $location".toByteArray(), mapOf("Location" to location))

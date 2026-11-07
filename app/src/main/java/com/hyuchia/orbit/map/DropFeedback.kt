@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Notes
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.FileOpen
 import androidx.compose.material.icons.outlined.GraphicEq
@@ -102,7 +103,8 @@ fun DropFeedback(drops: MapDrops, ui: MapUi, top: Dp, bottom: Dp, modifier: Modi
     }
 
     val untitled = stringResource(R.string.common_untitled)
-    val shownCopy = copy?.takeIf { copyShown }
+    // While the person is asked about big videos, nothing is being copied yet.
+    val shownCopy = copy?.takeIf { copyShown && !it.asking }
 
     val feedback: Feedback? = when {
         shownCopy != null -> Feedback.Copy(shownCopy, ui.nodes[shownCopy.target]?.label(untitled) ?: untitled)
@@ -207,6 +209,7 @@ private fun CopyRow(feedback: Feedback.Copy, onStop: () -> Unit) {
     val text = when {
         copy.total > 1 -> pluralStringResource(R.plurals.drop_adding_some_to, copy.total, copy.done, copy.total, feedback.target)
         // Whole percents, rounded down, as the copy goes, as the editor says them.
+        copy.video && copy.smaller && progress != null -> stringResource(R.string.drop_making_the_video_smaller_for, feedback.target, NumberFormat.getPercentInstance(locale).format((progress * 100).toInt() / 100.0))
         copy.video && progress != null -> stringResource(R.string.drop_adding_the_video_to, feedback.target, NumberFormat.getPercentInstance(locale).format((progress * 100).toInt() / 100.0))
         copy.sound && progress != null -> stringResource(R.string.drop_adding_the_sound_to, feedback.target, NumberFormat.getPercentInstance(locale).format((progress * 100).toInt() / 100.0))
         else -> stringResource(R.string.drop_adding_to, feedback.target)
@@ -241,6 +244,7 @@ private fun DropOffer.icon(): ImageVector = when (this) {
     DropOffer.Videos -> Icons.Outlined.Movie
     DropOffer.Sounds -> Icons.Outlined.GraphicEq
     DropOffer.Maps -> Icons.Outlined.FileOpen
+    DropOffer.Files -> Icons.Outlined.AttachFile
     DropOffer.Move -> Icons.Outlined.OpenWith
 }
 

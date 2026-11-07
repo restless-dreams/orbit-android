@@ -13,6 +13,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** How long each idea stays up when a presentation is played by itself without a pace chosen in Settings, in seconds. */
+const val PLAY_SECONDS = 8
+
 /**
  * A presentation as it goes: it steps through its ideas on the presenter's
  * word, and by itself while it plays; it shows the audience an idea's
@@ -131,12 +134,19 @@ class PresentationControl(
         retime()
     }
 
-    /** Plays the presentation by itself, each idea up for `seconds`, or stops it from going on alone. */
+    /**
+     * Plays the presentation by itself, each idea up for `seconds`, the pace
+     * chosen in Settings, or stops it from going on alone. With none chosen
+     * (0), it plays at the pace it played at before, or [PLAY_SECONDS]: a
+     * pause never changes the pace it goes on at.
+     */
     fun setPlaying(playing: Boolean, seconds: Int) {
         presentation ?: return
 
         if (seconds > 0) {
             this.seconds = seconds
+        } else if (playing && this.seconds <= 0) {
+            this.seconds = PLAY_SECONDS
         }
 
         update { it.copy(playing = playing) }

@@ -1,0 +1,17 @@
+O Orbit transforma suas ideias em um mapa que você percorre voando. Toque em uma ideia e o mapa se aproxima para mostrar o que há ao redor dela, dê um impulso em uma órbita para fazê-la girar e se afaste para ver tudo de uma vez.
+
+Monte seu mapa no próprio mapa. Adicione ideias em volta da que está no centro, digite os nomes delas ali mesmo, arraste cada uma para onde ela pertence e dê a cada uma uma cor, um status, uma nota, uma imagem, um áudio ou um link. Ou mantenha o botão + pressionado e fale suas ideias em vez de digitar.
+
+Apresente. O Orbit mostra seu mapa em tela cheia, passo a passo, pelo roteiro que você escolher, com a visão de quem apresenta no seu celular enquanto todo mundo vê o mapa em uma segunda tela, em uma TV ou em qualquer navegador da sala. Ensaie com um cronômetro que avisa quando você está atrasado.
+
+Estude. O Orbit transforma um mapa em cartões: as ideias embaixo de cada um ficam escondidas até você revelá-las, e cada cartão volta na hora certa.
+
+Seus mapas são seus. Cada um é um arquivo markdown simples que qualquer editor de texto abre. Guarde-os em uma pasta da sua escolha e eles ficam sincronizados com seus outros apps e dispositivos; quando o Orbit salva um arquivo, ele altera só o que você editou e deixa o resto como você escreveu, mas um mapa escrito em YAML é salvo como markdown assim que você o edita. Cada mapa tem um histórico de versões, e os mapas excluídos esperam 30 dias na lixeira. Você também pode tornar um mapa privado, bloqueado com sua impressão digital, seu rosto ou seu bloqueio de tela. Importe mapas de OPML, FreeMind, Freeplane e XMind, exporte-os como OPML, ou imprima e salve como PDF, com os tópicos e as notas.
+
+Envie um mapa para seu tablet ou para outro celular por perto sem precisar de conta, abra no navegador do seu computador ou compartilhe como uma página da web que qualquer pessoa pode percorrer voando.
+
+O Orbit funciona com ou sem os serviços do Google, em celulares, tablets e Chromebooks, e também com teclado e mouse. Os estilos vão de papel e noite a plano, Material e vidro líquido, e “Cores do app” segue as cores do seu plano de fundo.
+
+Sem anúncios, sem contas, sem rastreamento. O Orbit é software livre sob a licença GNU GPL, e o código-fonte dele é público.
+
+O Orbit está em português do Brasil, em inglês e em espanhol.

@@ -29,13 +29,15 @@ data class VersionChanges(
          * rename (a branch that kept most of its ideas, or an idea in the same
          * place among its siblings); then an idea found elsewhere by its name
          * has moved, and the rest were added or removed. Linear in the ideas,
-         * for maps of thousands.
+         * for maps of thousands. A center Orbit made up compares as
+         * [sameCenters] has it.
          */
         fun between(before: List<TextIdea>, after: List<TextIdea>, textChanged: Boolean): VersionChanges {
-            val old = Outline(before)
-            val new = Outline(after)
-            val partner = IntArray(before.size) { -1 }
-            val taken = BooleanArray(after.size)
+            val (earlier, later) = sameCenters(before, after)
+            val old = Outline(earlier)
+            val new = Outline(later)
+            val partner = IntArray(earlier.size) { -1 }
+            val taken = BooleanArray(later.size)
             val renamed = mutableListOf<Pair<String, String>>()
             val moved = mutableListOf<String>()
             val pending = ArrayDeque<Int>()
@@ -44,7 +46,8 @@ data class VersionChanges(
                 partner[from] = to
                 taken[to] = true
 
-                if (old.names[from] != new.names[to]) {
+                // A center made up without a title is named in the reader's language: no one renamed it.
+                if (old.names[from] != new.names[to] && !old.untitled[from] && !new.untitled[to]) {
                     renamed += old.names[from] to new.names[to]
                 }
 
@@ -64,9 +67,9 @@ data class VersionChanges(
 
             // An idea that left its branch and turns up in another, by its name: it moved, with what's under it.
             val elsewhere = HashMap<String, ArrayDeque<Int>>()
-            after.indices.filterNot { taken[it] }.forEach { elsewhere.getOrPut(new.names[it]) { ArrayDeque() }.addLast(it) }
+            later.indices.filterNot { taken[it] }.forEach { elsewhere.getOrPut(new.names[it]) { ArrayDeque() }.addLast(it) }
 
-            for (from in before.indices) {
+            for (from in earlier.indices) {
                 if (partner[from] >= 0) {
                     continue
                 }
@@ -77,11 +80,57 @@ data class VersionChanges(
                 descend()
             }
 
-            val removed = topFirst(before.indices.filter { partner[it] < 0 }, old) { partner[it] >= 0 }
-            val added = topFirst(after.indices.filter { !taken[it] }, new) { taken[it] }
+            val removed = topFirst(earlier.indices.filter { partner[it] < 0 }, old) { partner[it] >= 0 }
+            val added = topFirst(later.indices.filter { !taken[it] }, new) { taken[it] }
             val changed = added.isNotEmpty() || removed.isNotEmpty() || renamed.isNotEmpty() || moved.isNotEmpty()
             return VersionChanges(added.map(new.names::get), removed.map(old.names::get), renamed, moved, details = textChanged && !changed)
         }
+
+        /**
+         * `before` and `after`, with centers that compare. A YAML map with
+         * several ideas at its top, or none, has a center Orbit made up, and
+         * one with a single idea there has that idea for its center: when one
+         * version's center is made up and the other's was written, and that
+         * written one is one of the ideas at the made-up one's top (or there
+         * are none), it goes under a center made up the same way. So a map that
+         * gained a second idea at its top added that idea, rather than renamed
+         * its center and moved what was under it ([fitsUnder] tells which).
+         */
+        private fun sameCenters(before: List<TextIdea>, after: List<TextIdea>): Pair<List<TextIdea>, List<TextIdea>> {
+            val madeUpBefore = before.firstOrNull()?.takeIf { it.madeUp }
+            val madeUpAfter = after.firstOrNull()?.takeIf { it.madeUp }
+
+            return when {
+                madeUpBefore != null && madeUpAfter == null && fitsUnder(after, before) -> before to under(madeUpBefore, after)
+                madeUpAfter != null && madeUpBefore == null && fitsUnder(before, after) -> under(madeUpAfter, before) to after
+                else -> before to after
+            }
+        }
+
+        /**
+         * Whether the center of `written` is one of the ideas at the top of
+         * `madeUp`, whose center Orbit made up, rather than that made-up center
+         * written down, as markdown writes it, often under the same name as one
+         * of those ideas (both named by the map's title): it holds what that
+         * idea holds at least as much as it holds the ideas at the top. Either
+         * version without ideas fits.
+         */
+        private fun fitsUnder(written: List<TextIdea>, madeUp: List<TextIdea>): Boolean {
+            val top = madeUp.indices.filter { madeUp[it].parent == 0 }
+            val center = written.indexOfFirst { it.parent == null }
+
+            if (center < 0 || top.isEmpty()) {
+                return true
+            }
+
+            val under = written.filter { it.parent == center }.mapTo(HashSet()) { it.name }
+            val asCenter = top.count { madeUp[it].name in under }
+            val asIdea = top.filter { madeUp[it].name == written[center].name }.maxOfOrNull { idea -> madeUp.count { it.parent == idea && it.name in under } } ?: return false
+            return asIdea >= asCenter
+        }
+
+        /** `ideas` under `center`, made up as another version's is. */
+        private fun under(center: TextIdea, ideas: List<TextIdea>): List<TextIdea> = listOf(center) + ideas.map { it.copy(parent = it.parent?.plus(1) ?: 0) }
 
         /**
          * Pairs the ideas under two matched ideas: the same name first, in
@@ -155,6 +204,10 @@ data class VersionChanges(
 /** A version's ideas as a tree: each one's name, its parent, and the ideas under it, in order. */
 private class Outline(ideas: List<TextIdea>) {
     val names: List<String> = ideas.map { it.name }
+
+    /** Whether each is a center Orbit made up for a map without a title, which it names in the reader's language. */
+    val untitled: List<Boolean> = ideas.map { it.madeUp && it.name.isEmpty() }
+
     val parents: List<Int?> = ideas.map { it.parent }
     val children: List<MutableList<Int>> = List(ideas.size) { mutableListOf() }
     val roots = mutableListOf<Int>()

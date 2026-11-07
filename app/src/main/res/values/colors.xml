@@ -4,4 +4,6 @@
     <color name="splash_background">#FCF8FF</color>
     <color name="splash_background_light">#FCF8FF</color>
     <color name="splash_background_dark">#12131A</color>
+    <!-- A reminder's notification: the app's own blue, which Android tints its icon and name with. -->
+    <color name="reminder">#3D5BA9</color>
 </resources>

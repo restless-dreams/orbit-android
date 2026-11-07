@@ -2,25 +2,36 @@ package com.hyuchia.orbit.data
 
 import com.hyuchia.orbit.BuildConfig
 import com.hyuchia.orbit.FileWords
+import com.hyuchia.orbit.nearby.DeviceReads
+import com.hyuchia.orbit.sketch.Sketch
+import com.hyuchia.orbit.sketch.SketchStroke
+import com.hyuchia.orbit.sketch.SketchSvg
+import com.hyuchia.orbit.sketch.StrokeOutline
+import com.hyuchia.orbit.sketch.StrokePoint
 import com.hyuchia.orbit.study.StudyCard
+import com.hyuchia.orbit.study.StudyChange
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Assume.assumeFalse
 import org.junit.Test
 import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.file.Files
@@ -141,6 +152,50 @@ class MapRepositoryTest {
 
         // The map's own still on its way keeps its name for when it comes.
         assertFalse(File(maps, "$to/media/IMG_1234.jpg").exists())
+    }
+
+    @Test
+    fun `ideas pasted into another map whose files can't all be copied, as on a full disk, leave none of them behind`() = runTest {
+        val repository = loaded()
+        val from = repository.add("# Trip\n")
+        val to = repository.add("# Plans\n")
+        File(maps, "$from/media").mkdirs()
+        File(maps, "$from/media/picture-1.jpg").writeBytes(ByteArray(1_000) { 1 })
+        val unreadable = File(maps, "$from/media/picture-2.jpg").apply { writeBytes(ByteArray(1_000) { 2 }) }
+        unreadable.setReadable(false)
+        // The second can't be read, as a failing card's: never so where the tests run with every permission.
+        assumeFalse(unreadable.canRead())
+
+        try {
+            repository.copyMedia(from, to, "- ![](media/picture-1.jpg)\n- ![](media/picture-2.jpg)\n")
+            fail("The copy should have failed")
+        } catch (failed: IOException) {
+            // Nothing pastes: the picture copied before it goes too.
+        }
+
+        assertEquals(emptyList<String>(), File(maps, "$to/media").list().orEmpty().toList())
+    }
+
+    @Test
+    fun `ideas pasted into another map without room on the device for their files are refused before any is copied`() = runTest {
+        // A device with 10 MB to spare: less than a paste always leaves free.
+        val repository = MapRepository(maps, File(files, "trash"), starters, words, clock = { now }, room = { 10_000_000L })
+        repository.load()
+        val from = repository.add("# Trip\n")
+        val to = repository.add("# Plans\n")
+        File(maps, "$from/media").mkdirs()
+        File(maps, "$from/media/picture-1.jpg").writeBytes(ByteArray(1_000) { 1 })
+
+        try {
+            repository.copyMedia(from, to, "- ![](media/picture-1.jpg)\n")
+            fail("The paste should have been refused")
+        } catch (refused: MediaRefusedException) {
+            assertEquals("There isn't room on this device for the pictures, videos and sounds of those ideas.", refused.message)
+        }
+
+        assertFalse(File(maps, "$to/media/picture-1.jpg").exists())
+        // Text without files of the map's needs no room.
+        assertEquals("- Seeds\n", repository.copyMedia(from, to, "- Seeds\n"))
     }
 
     @Test
@@ -463,6 +518,83 @@ class MapRepositoryTest {
     }
 
     @Test
+    fun `a map in the trash whose files don't all delete stays there, private as it was, and says so`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Journal\n- Today ![](media/picture-1.jpg)\n")
+        repository.addMediaFile(id, "picture-1.jpg") { it.write(byteArrayOf(1)); true }
+        repository.setPrivate(id, true)
+        val trashed = repository.delete(id)!!
+        // Its pictures won't go, as on storage that fails.
+        val media = File(trashed.folder, "media")
+        media.setWritable(false)
+
+        try {
+            assertFalse(repository.deleteForever(trashed))
+            // Its text and details are the last to go: it's still in the trash, private, to delete again.
+            assertEquals(listOf("Journal" to true), repository.trash.value.map { it.title to it.isPrivate })
+            assertEquals(listOf("Journal" to true), loaded().trash.value.map { it.title to it.isPrivate })
+        } finally {
+            media.setWritable(true)
+        }
+
+        assertTrue(repository.deleteForever(repository.trash.value.single()))
+        assertEquals(emptyList<TrashedMap>(), repository.trash.value)
+        assertFalse(trashed.folder.exists())
+    }
+
+    @Test
+    fun `emptying the trash says how many maps stayed, their files not all deleting, and the trash still lists them`() = runTest {
+        val repository = loaded()
+        val stuck = repository.add("# Trip\n- Beach ![](media/picture-1.jpg)\n")
+        repository.addMediaFile(stuck, "picture-1.jpg") { it.write(byteArrayOf(1)); true }
+        repository.delete(stuck)
+        repository.delete(repository.add("# Groceries\n- Bread\n"))
+        val media = File(repository.trash.value.first { it.title == "Trip" }.folder, "media")
+        media.setWritable(false)
+
+        try {
+            assertEquals(1, repository.emptyTrash())
+            assertEquals(listOf("Trip"), repository.trash.value.map { it.title })
+            assertEquals(listOf("Trip"), loaded().trash.value.map { it.title })
+
+            // One past its days that won't go waits, whole, for the next start.
+            now += (TRASH_DAYS + 1) * day
+            loaded()
+            now += day
+            assertEquals(listOf("Trip"), loaded().trash.value.map { it.title })
+        } finally {
+            media.setWritable(true)
+        }
+
+        assertEquals(0, repository.emptyTrash())
+        assertEquals(emptyList<TrashedMap>(), repository.trash.value)
+        assertEquals(emptyList<TrashedMap>(), loaded().trash.value)
+    }
+
+    @Test
+    fun `a map the folder sent to the trash waits there while its details can't be read, or say so in a way this version can't`() = runTest {
+        val repository = loaded()
+        val unreadable = repository.delete(repository.add("# Unreadable\n"), byFolder = true)!!
+        val damaged = repository.delete(repository.add("# Damaged\n"), byFolder = true)!!
+        val reshaped = repository.delete(repository.add("# Reshaped\n"), byFolder = true)!!
+        repository.delete(repository.add("# Deleted here\n"))
+        File(damaged.folder, "meta.json").writeText("{ not json")
+        File(reshaped.folder, "meta.json").writeText("""{"removedByFolder":{"since":1}}""")
+        val meta = File(unreadable.folder, "meta.json")
+        meta.setReadable(false)
+
+        try {
+            now += (TRASH_DAYS + 1) * day
+            loaded()
+            now += day
+            // Seen past its days a day apart, the map deleted here goes; the ones that may be waiting for their note stay.
+            assertEquals(setOf("Unreadable", "Damaged", "Reshaped"), loaded().trash.value.map { it.title }.toSet())
+        } finally {
+            meta.setReadable(true)
+        }
+    }
+
+    @Test
     fun `a map deleted with the clock wrong keeps its thirty days in the trash`() = runTest {
         val repository = loaded()
         val installed = now
@@ -634,6 +766,120 @@ class MapRepositoryTest {
     }
 
     @Test
+    fun `a big change's reason is the latest version's when that version holds the map as it was already`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Plan\n- A\n")
+        // The visit's first edit keeps the map as it was opened; an undo brings that back, written without a version.
+        repository.write(id, "# Plan\n- A\n- B\n", checkpoint = Checkpoint.Always, reason = VersionReason.Opened)
+        now += minute
+        repository.write(id, "# Plan\n- A\n")
+        now += minute
+
+        // An idea removed with the ones under it: the map as it was before is that version, which says so from now on.
+        repository.write(id, "# Plan\n- C\n", checkpoint = Checkpoint.Always, reason = VersionReason.Removing("A", 2))
+
+        val kept = repository.versions(id).single()
+        assertEquals(VersionReason.Removing("A", 2), kept.reason)
+        assertEquals("# Plan\n- A\n", repository.readVersion(id, kept.time))
+
+        // Thinning keeps it over the newer ones of its stretch, as a version before a big change.
+        val folder = File(history, id)
+
+        repeat(60) { step ->
+            now += minute
+            File(folder, "$now.md").writeText("# Plan\n- Step $step\n")
+        }
+
+        now += minute
+        repository.write(id, "# Plan\n- D\n", checkpoint = Checkpoint.Always, reason = VersionReason.Text)
+        now += 2 * 24 * 60 * minute
+        repository.write(id, "# Plan\n- E\n", checkpoint = Checkpoint.Always, reason = VersionReason.Text)
+        assertTrue(repository.versions(id).any { it.time == kept.time })
+    }
+
+    @Test
+    fun `a version kept before a big change, or for a reason a newer Orbit wrote, keeps its own when the text comes again`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Plan\n- A\n")
+        repository.write(id, "# Plan\n- B\n", checkpoint = Checkpoint.Always, reason = VersionReason.Removing("A", 2))
+        now += minute
+        repository.write(id, "# Plan\n- A\n")
+        now += minute
+        repository.write(id, "# Plan\n- C\n", checkpoint = Checkpoint.Always, reason = VersionReason.Text)
+        assertEquals(listOf<VersionReason?>(VersionReason.Removing("A", 2)), repository.versions(id).map { it.reason })
+
+        // A newer Orbit's reason, which this one can't read, stays as it is; beside one it reads, what it added stays too.
+        val other = repository.add("# Trip\n- A\n")
+        repository.write(other, "# Trip\n- B\n", checkpoint = Checkpoint.Always, reason = VersionReason.Opened)
+        val kept = repository.versions(other).single().time
+        val reasons = File(history, "$other/reasons.json")
+        reasons.writeText("""{"versions":{"$kept.md":{"why":"dreamt","dream":"flying"}}}""")
+        now += minute
+        repository.write(other, "# Trip\n- A\n")
+        now += minute
+        repository.write(other, "# Trip\n- C\n", checkpoint = Checkpoint.Always, reason = VersionReason.Text)
+        assertEquals(listOf<VersionReason?>(null), repository.versions(other).map { it.reason })
+        assertTrue(""""dream":"flying"""" in reasons.readText())
+
+        reasons.writeText("""{"versions":{"$kept.md":{"why":"opened","mood":"calm"}}}""")
+        now += minute
+        repository.write(other, "# Trip\n- A\n")
+        now += minute
+        repository.write(other, "# Trip\n- D\n", checkpoint = Checkpoint.Always, reason = VersionReason.Text)
+        assertEquals(listOf<VersionReason?>(VersionReason.Text), repository.versions(other).map { it.reason })
+        assertTrue(""""mood":"calm"""" in reasons.readText())
+    }
+
+    @Test
+    fun `an idea's new id keeps its study answers as a rename always has, on the map and from Home alike`() = runTest {
+        val repository = loaded()
+        // This device's answer, a later one on another device, and a card already under the new id.
+        val here = StudyCard(box = 2, due = 20_003, first = 20_000, at = 1_000)
+        val tablet = StudyCard(box = 4, due = 20_010, first = 19_990, at = 2_000)
+        val taken = StudyCard(box = 1, due = 20_001, first = 20_000, at = 500)
+        val text = "# Verbs\n\n## Ser\n\n- soy\n"
+
+        suspend fun studied(): String {
+            val id = repository.add(text)
+            repository.savePath(id, listOf("verbs", "ser"))
+            repository.saveRehearsal(id, mapOf("ser" to 12))
+            repository.saveStudy(id, mapOf("ser" to here, "ser-to-be" to taken, "soy" to here))
+            repository.saveStudyElsewhere(id, mapOf("tablet" to mapOf("ser" to tablet)))
+            repository.setStudyCards(id, setOf("ser"))
+            return id
+        }
+
+        // How a rename on the map has always kept them, written out.
+        fun renamed(metadata: MapMetadata, from: String, to: String): MapMetadata {
+            val card = metadata.studyProgress[from]
+
+            return metadata.copy(
+                path = metadata.path?.map { if (it == from) to else it },
+                rehearsal = metadata.rehearsal?.mapKeys { (idea, _) -> if (idea == from) to else idea },
+                study = if (card != null) metadata.study.orEmpty() - from + (to to card) else metadata.study,
+            )
+        }
+
+        val onMap = studied()
+        val expected = renamed(repository.summary(onMap)!!.metadata, "ser", "ser-to-be")
+        repository.renameIdea(onMap, "ser", "ser-to-be")
+        val fromHome = studied()
+        assertEquals(WriteResult.Written, repository.change(fromHome, "# Verbs\n\n## Ser to be\n\n- soy\n", base = text, reason = VersionReason.Renaming, renamed = mapOf("ser" to "ser-to-be")))
+
+        for (id in listOf(onMap, fromHome)) {
+            val metadata = repository.summary(id)!!.metadata
+            assertEquals(expected.path, metadata.path)
+            assertEquals(expected.rehearsal, metadata.rehearsal)
+            assertEquals(expected.study, metadata.study)
+            assertEquals(expected.studyElsewhere, metadata.studyElsewhere)
+            assertEquals(expected.studyNotCards, metadata.studyNotCards)
+        }
+
+        // The card goes on as its latest answer on any device left it: the tablet's.
+        assertEquals(tablet, repository.summary(fromHome)!!.metadata.study?.get("ser-to-be"))
+    }
+
+    @Test
     fun `a reasons file that can't be read leaves every version without one, and is written afresh`() = runTest {
         val repository = loaded()
         val id = repository.add("# Plan\n")
@@ -722,6 +968,63 @@ class MapRepositoryTest {
         assertEquals(mapOf("ser-to-be" to known), metadata?.study)
         // The other devices' answers stay as their records in the folder say, until they say otherwise.
         assertEquals(mapOf("tablet" to tablet), metadata?.studyElsewhere)
+    }
+
+    @Test
+    fun `an answer is written against this device's answers as they are then, the other devices' folded in as the folder was left`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Verbs\n## Ser\n- soy\n## Estar\n- estoy\n")
+        val tablet = StudyCard(box = 2, due = 20_003, first = 19_990, at = 2_000)
+        repository.saveStudy(id, mapOf("ser" to StudyCard(box = 1, due = 20_000, first = 19_990, at = 1_000)))
+        repository.saveStudyElsewhere(id, mapOf("tablet" to mapOf("estar" to tablet)))
+
+        // An answer given before the folder was left lands after: the tablet's answers stay this map's.
+        repository.keepStudyHere()
+        val known = StudyCard(box = 2, due = 20_003, first = 19_990, at = 3_000)
+        repository.changeStudy(id, StudyChange.Answer("ser", known))
+        assertEquals(mapOf("ser" to known, "estar" to tablet), loaded().summary(id)?.metadata?.study)
+    }
+
+    @Test
+    fun `a map that comes to another folder takes the other devices' answers beside one given since the maps were listed`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Verbs\n## Ser\n- soy\n## Estar\n- estoy\n")
+        val tablet = StudyCard(box = 2, due = 20_003, first = 19_990, at = 2_000)
+        repository.saveStudyElsewhere(id, mapOf("tablet" to mapOf("estar" to tablet)))
+        // The sync listed the maps, then an answer was kept.
+        val listed = repository.summary(id)!!.metadata
+        val known = StudyCard(box = 1, due = 20_001, first = 20_000, at = 3_000)
+        repository.changeStudy(id, StudyChange.Answer("ser", known))
+
+        assertEquals(mapOf("estar" to tablet), listed.studyProgress)
+        assertEquals(mapOf("ser" to known, "estar" to tablet), repository.takeStudyElsewhere(id))
+        assertEquals(mapOf("ser" to known, "estar" to tablet), repository.summary(id)?.metadata?.study)
+        assertNull(repository.takeStudyElsewhere("gone"))
+    }
+
+    @Test
+    fun `the ideas with answers that aren't cards are noted, and a change that changes nothing writes nothing`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Verbs\n## Ser\n- soy\n")
+        val due = StudyCard(box = 1, due = 20_000)
+        repository.saveStudy(id, mapOf("ser" to due, "soy" to due))
+        repository.saveStudyElsewhere(id, mapOf("tablet" to mapOf("ir" to due)))
+
+        repository.setStudyCards(id, setOf("ser"))
+        assertEquals(listOf("ir", "soy"), loaded().summary(id)?.metadata?.studyNotCards)
+        assertEquals(mapOf("ser" to due), repository.summary(id)?.metadata?.studyCounted)
+
+        // Noting the same again, or taking back an answer that isn't there anymore, leaves the details as they are.
+        val meta = File(File(maps, id), "meta.json")
+        val details = meta.readText()
+        val summary = repository.summary(id)
+        repository.setStudyCards(id, setOf("ser"))
+        repository.changeStudy(id, StudyChange.Undo("ser", StudyCard(box = 4, due = 20_016), own = null, progress = null))
+        assertEquals(details, meta.readText())
+        assertSame(summary, repository.summary(id))
+
+        repository.setStudyCards(id, setOf("ser", "soy", "ir"))
+        assertNull(loaded().summary(id)?.metadata?.studyNotCards)
     }
 
     @Test
@@ -869,6 +1172,55 @@ class MapRepositoryTest {
         assertEquals(true, private["Journal"])
         assertEquals(true, private["Letters"])
         assertEquals(false, private["Trip"])
+        // The details it can't read are kept aside, as a map's own are when they're written afresh.
+        val journal = File(maps, repository.maps.value!!.first { it.title == "Journal" }.id)
+        assertEquals(listOf("{ not json"), journal.listFiles { file -> UNREADABLE_METADATA.matches(file.name) }!!.map { it.readText() })
+    }
+
+    @Test
+    fun `details kept aside unread go out with Export all, and come back with Import maps`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Journal\n- Today\n")
+        // Details an earlier version couldn't read at all, kept aside as it wrote new ones.
+        val aside = File(maps, "$id/meta.json.unreadable-123")
+        aside.writeText("{ what a newer Orbit wrote")
+        val archive = ByteArrayOutputStream().also { repository.exportAll(it) }.toByteArray()
+
+        // To another phone, as a map of its own.
+        val other = MapRepository(File(files, "other/maps"), File(files, "other/trash"), starters, words, clock = { now }).also { it.load() }
+        other.importAll(ByteArrayInputStream(archive))
+        val there = other.maps.value!!.first { it.title == "Journal" }.id
+        assertEquals("{ what a newer Orbit wrote", File(files, "other/maps/$there/meta.json.unreadable-123").readText())
+
+        // Back here, to the map without them: they're among what it was missing, though no picture, video, sound or version to count.
+        aside.delete()
+        val imported = repository.importAll(ByteArrayInputStream(archive))
+        assertEquals(0, imported.added)
+        assertEquals(0, imported.filledIn)
+        assertEquals("{ what a newer Orbit wrote", aside.readText())
+    }
+
+    @Test
+    fun `a map's versions from a zip keep why each was kept as it was written, what this version reads of it or not`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Plan\n")
+        val removing = """{"why":"removing","idea":"Old","under":2,"by":{"device":"tablet"}}"""
+        val newer = """{"why":"dreaming","about":"a reason a newer version keeps"}"""
+
+        val zip = zip(
+            "plan/map.md" to "# Plan\n".toByteArray(),
+            "plan/history/456.md" to "# Plan, older\n".toByteArray(),
+            "plan/history/789.md" to "# Plan, later\n".toByteArray(),
+            "plan/history/reasons.json" to """{"versions":{"456.md":$removing,"789.md":$newer}}""".toByteArray(),
+        )
+
+        assertEquals(ImportedMaps(added = 0, alreadyHere = 1, filledIn = 2), repository.importAll(ByteArrayInputStream(zip)))
+        val entries = Json.parseToJsonElement(File(history, "$id/reasons.json").readText()).jsonObject["versions"]!!.jsonObject
+        assertEquals(Json.parseToJsonElement(removing), entries["456.md"])
+        assertEquals(Json.parseToJsonElement(newer), entries["789.md"])
+        val versions = repository.versions(id).associate { it.time to it.reason }
+        assertEquals(VersionReason.Removing("Old", 2), versions[456L])
+        assertNull(versions[789L])
     }
 
     @Test
@@ -910,6 +1262,44 @@ class MapRepositoryTest {
         assertEquals("# Plan, older\n", File(history, "$id/456.md").readText())
         assertFalse(File(maps, "$id/.history").exists())
         assertEquals(1, reloaded.versions(id).size)
+    }
+
+    @Test
+    fun `a move of the history cut short never costs a version its whole text`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Plan\n")
+        val whole = "# Plan, older\n- Lisbon\n- Porto\n"
+        // An earlier release was copying a version over when it stopped: part of it in the history, all of it still in the map's folder.
+        File(maps, "$id/history").mkdirs()
+        File(maps, "$id/history/456.md").writeText(whole)
+        File(history, id).mkdirs()
+        File(history, "$id/456.md").writeText(whole.take(12))
+        // And one it had copied whole before it stopped, still in both.
+        File(maps, "$id/history/789.md").writeText("# Plan, later\n")
+        File(history, "$id/789.md").writeText("# Plan, later\n")
+
+        val reloaded = loaded()
+        val texts = reloaded.versions(id).map { reloaded.readVersion(id, it.time) }
+        assertTrue(whole in texts)
+        assertEquals(1, texts.count { it == "# Plan, later\n" })
+        assertFalse(File(maps, "$id/history").exists())
+    }
+
+    @Test
+    fun `history a map back from the trash left in its folder keeps why its versions were kept`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Plan\n")
+        repository.write(id, "# Plan\n- A\n", checkpoint = Checkpoint.Always, reason = VersionReason.Text)
+        // The trash's history couldn't come back with it: its versions and their reasons stayed in the map's folder.
+        File(maps, "$id/.history").mkdirs()
+        File(maps, "$id/.history/456.md").writeText("# Plan, older\n")
+        File(maps, "$id/.history/reasons.json").writeText("""{"versions":{"456.md":{"why":"removing","idea":"Old","under":2}},"note":"a newer version's"}""")
+
+        val reasons = loaded().versions(id).associate { it.time to it.reason }
+        assertEquals(VersionReason.Removing("Old", 2), reasons[456L])
+        assertEquals(VersionReason.Text, reasons[now])
+        assertTrue(File(history, "$id/reasons.json").readText().contains("a newer version's"))
+        assertFalse(File(maps, "$id/.history").exists())
     }
 
     @Test
@@ -1276,11 +1666,62 @@ class MapRepositoryTest {
         }
     }.toByteArray()
 
+    /** A zip of a map with `markdown` and files of zeros, each as big as it says, written a piece at a time: zeros pack small. */
+    private fun zipOfZeros(markdown: String, files: List<Pair<String, Long>>): ByteArray = ByteArrayOutputStream().also { output ->
+        ZipOutputStream(output).use { zip ->
+            zip.putNextEntry(ZipEntry("map.md"))
+            zip.write(markdown.toByteArray())
+            zip.closeEntry()
+            val zeros = ByteArray(1024 * 1024)
+
+            for ((name, size) in files) {
+                zip.putNextEntry(ZipEntry(name))
+                var left = size
+
+                while (left > 0) {
+                    val count = minOf(left, zeros.size.toLong()).toInt()
+                    zip.write(zeros, 0, count)
+                    left -= count
+                }
+
+                zip.closeEntry()
+            }
+        }
+    }.toByteArray()
+
     private suspend fun refused(read: suspend () -> Unit): String? = try {
         read()
         null
     } catch (refused: RefusedZipException) {
         refused.message
+    }
+
+    @Test
+    fun `a sketch is kept as a new file each time, goes in a map's zip as it is, and comes back to draw on`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Trip\n")
+        val sketch = Sketch(0xFF6750A4.toInt(), listOf(SketchStroke(0xFF1C1B1F.toInt(), StrokeOutline.pathData(listOf(StrokePoint(200f, 500f, 20f), StrokePoint(800f, 500f, 20f))))))
+        val svg = SketchSvg.write(sketch).toByteArray()
+
+        val first = repository.addSketch(id, svg)
+        now += 1
+        val second = repository.addSketch(id, svg)
+
+        assertTrue(first, first.matches(Regex("""media/sketch-[0-9a-z]+\.svg""")))
+        assertTrue(first != second)
+        assertEquals(SketchSvg.write(sketch), File(repository.folder(id), first).readText())
+
+        repository.write(id, "# Trip\n\n![A sun over the sea]($second)\n")
+        // It goes clean as it is, nothing to ask about, and the other side reads the same sketch from it.
+        assertTrue(repository.uncleaned(id).isEmpty)
+        val zipped = unzipped(ByteArrayOutputStream().also { repository.writeZip(id, it) }.toByteArray()).toMap()
+        val carried = SketchSvg.read(zipped.getValue(second))!!
+        assertEquals(sketch.paper, carried.paper)
+        assertEquals(sketch.strokes.map { it.color to it.outline }, carried.strokes.map { it.color to it.outline })
+        // Every release from 0.3.0 keeps and carries SVG pictures: an earlier Orbit takes the sketch as one.
+        assertTrue("svg" in carriedMediaTypes())
+        assertTrue("svg" in DeviceReads.RELEASE_0_3_0.mediaTypes)
+        assertTrue(isMediaName(second.removePrefix("media/")))
     }
 
     @Test
@@ -1399,7 +1840,52 @@ class MapRepositoryTest {
         File(maps, "$id/media/video-mf2k1x.mp4").writeBytes(TestMedia.movie(100))
 
         assertEquals(MediaSummary(videos = 1, audio = 1, bytes = 200), repository.mediaSummary(id))
-        assertEquals(1, repository.soundsInPage(id))
+        assertEquals(setOf("memo-mf2k1x.mp4"), repository.soundsInPage(id))
+    }
+
+    @Test
+    fun `a map's zip says the most it may come to before any of it is written, and starts nowhere without room`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Trip\n![Beach](media/beach.jpg)\n## Fado <!-- orbit audio: media/memo-mf2k1x.mp4 -->\n")
+        File(maps, "$id/media").mkdirs()
+        File(maps, "$id/media/beach.jpg").writeBytes(TestMedia.picture(64, 48, noise = 3))
+        File(maps, "$id/media/memo-mf2k1x.mp4").writeBytes(TestMedia.movie(20_000))
+        val output = ByteArrayOutputStream()
+        var most = 0L
+        var writtenFirst = -1
+
+        repository.writeZip(id, output) { size ->
+            most = size
+            writtenFirst = output.size()
+        }
+
+        assertEquals(0, writtenFirst)
+        assertTrue("${output.size()} of $most", output.size() in 1..most)
+
+        // A storage without room for it: nothing of the zip is written.
+        val none = ByteArrayOutputStream()
+        val full = runCatching { repository.writeZip(id, none) { size -> requireRoom(maps, size + Long.MAX_VALUE / 4) } }
+        assertTrue(full.exceptionOrNull().toString(), full.exceptionOrNull() is OutputFailed)
+        assertEquals(0, none.size())
+        // While there's room, nothing stops it.
+        requireRoom(maps, 0)
+    }
+
+    @Test
+    fun `a YAML map's voice memos count as sounds too, and go inside its page`() = runTest {
+        val repository = loaded()
+        val yaml = "title: Trip\nnodes:\n  - text: Trip\n    children:\n      - text: Fado\n        audio: media/memo-mf2k1x.mp4\n      - text: Tram\n        video: media/video-mf2k1x.mp4\n"
+        val id = repository.add(yaml)
+        File(maps, "$id/media").mkdirs()
+        File(maps, "$id/media/memo-mf2k1x.mp4").writeBytes(TestMedia.movie(100))
+        File(maps, "$id/media/video-mf2k1x.mp4").writeBytes(TestMedia.movie(100))
+        // A memo that can't go clean is named as the sound it is.
+        File(maps, "$id/media/memo-mf2k1x.mp4").writeBytes(TestMedia.movie(100).copyOfRange(0, 60))
+
+        assertEquals(yaml, repository.read(id))
+        assertEquals(MediaSummary(videos = 1, audio = 1, bytes = 160), repository.mediaSummary(id))
+        assertEquals(Uncleaned(sounds = setOf("memo-mf2k1x.mp4")), repository.uncleaned(id))
+        assertEquals(setOf("memo-mf2k1x.mp4"), repository.soundsInPage(id, asTheyAre = setOf("memo-mf2k1x.mp4")))
     }
 
     @Test
@@ -1445,19 +1931,73 @@ class MapRepositoryTest {
     @Test
     fun `a zip that unpacks to more than a map holds is refused`() = runTest {
         val repository = loaded()
-        // Zeros pack small: two of these weigh little, and unpack to more than a map may.
-        val big = ByteArray(50 * 1024 * 1024)
-        val bomb = zip("map.md" to "# Trip\n".toByteArray(), "media/one.jpg" to big, "media/two.jpg" to big)
-        assertTrue(bomb.size < 1024 * 1024)
-        assertEquals("That zip unpacks to more than maps hold.", refused { repository.readBundle(ByteArrayInputStream(bomb)) })
-        // Only counting pictures counts what they unpack to all the same.
+        // Zeros pack small: five videos of them weigh little, and unpack to more than a map may, its gigabyte and its text.
+        val bomb = zipOfZeros("# Trip\n", List(5) { "media/video-$it.mp4" to MEDIA_FILE_LIMIT })
+        assertTrue(bomb.size < 4 * 1024 * 1024)
+        // Only counting pictures counts what they unpack to all the same, and writes nothing.
         assertEquals("That zip unpacks to more than maps hold.", refused { repository.readBundle(ByteArrayInputStream(bomb), withPictures = false) })
+        assertEquals(emptyList<String>(), File(files, "unpacking").list().orEmpty().toList())
 
         val crowded = zip(*Array(4_001) { "media/picture-$it.jpg" to ByteArray(1) })
         assertEquals("That zip holds too many files to be maps.", refused { repository.readBundle(ByteArrayInputStream(crowded)) })
 
         val longText = zip("map.md" to ByteArray(9 * 1024 * 1024) { 'a'.code.toByte() })
         assertEquals("A file in that zip is too big to be part of a map.", refused { repository.readBundle(ByteArrayInputStream(longText)) })
+    }
+
+    @Test
+    fun `a map's zip unpacks only while there's room for it, and one refused partway leaves nothing behind`() = runTest {
+        val repository = loaded()
+        val video = ByteArray(3_000_000) { it.toByte() }
+        val zip = zip("map.md" to "# Trip\n- Waves ![](media/waves.mp4)\n".toByteArray(), "media/waves.mp4" to video, "media/more.mp4" to video)
+        // The storage fills as the second video unpacks: a megabyte past the first, it has less room than it keeps free.
+        var unpacked = 0L
+        val filling = { (ROOM_LEFT_FREE + 4_000_000 - unpacked).also { unpacked += 1024 * 1024 } }
+
+        assertEquals("There isn't room on this device for the map in that zip.", refused { repository.readBundle(ByteArrayInputStream(zip), room = filling) })
+        assertEquals(emptyList<String>(), File(files, "unpacking").list().orEmpty().toList())
+
+        // With room, the same zip comes in whole.
+        val bundle = repository.readBundle(ByteArrayInputStream(zip), room = { Long.MAX_VALUE })!!
+        assertArrayEquals(video, bundle.pictures.getValue("waves.mp4").readBytes())
+
+        // Declined, what it unpacked to goes at once.
+        repository.discard(bundle)
+        assertEquals(emptyList<String>(), File(files, "unpacking").list().orEmpty().toList())
+    }
+
+    @Test
+    fun `a map's zip past what older versions of Orbit open is known, by all its files and by its biggest`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Trip\n- Waves ![](media/waves.mp4)\n- Beach ![](media/beach.jpg)\n- Talk <!-- orbit audio: media/sound-1.mp3 -->\n")
+        val media = File(repository.folder(id), MEDIA_DIRECTORY).apply { mkdirs() }
+
+        fun sized(name: String, size: Long) = RandomAccessFile(File(media, name), "rw").use { it.setLength(size) }
+
+        sized("waves.mp4", 50_000_000)
+        sized("beach.jpg", 1_000)
+        sized("sound-1.mp3", 40_000_000)
+        assertFalse(repository.pastOlderZips(id))
+
+        // Older versions take a zip of up to 96 MiB unpacked...
+        sized("sound-1.mp3", 52_000_000)
+        assertTrue(repository.pastOlderZips(id))
+
+        // ...and no file in it over 64 MiB.
+        sized("sound-1.mp3", 1_000)
+        sized("waves.mp4", 68_000_000)
+        assertTrue(repository.pastOlderZips(id))
+    }
+
+    @Test
+    fun `a map's zip there isn't room for is refused before any of it is read, saying what it takes and what's free`() = runTest {
+        val repository = loaded()
+        val free = File(files, "unpacking").apply { mkdirs() }.usableSpace
+
+        assertNull(repository.noRoomForBundle(maxOf(0L, free - ROOM_LEFT_FREE - 500_000_000)))
+        val refusal = repository.noRoomForBundle(free + 1_000_000_000)!!
+        assertTrue(refusal, refusal.startsWith("There isn't room on this device for the map in that zip: it takes about "))
+        assertTrue(refusal, refusal.endsWith(" is free."))
     }
 
     @Test
@@ -1625,6 +2165,31 @@ class MapRepositoryTest {
     }
 
     @Test
+    fun `a map's picture is keyed by the media it has, as it arrives from the folder or a zip, and its text's key stays`() = runTest {
+        val repository = loaded()
+        val text = "# Trip\n- Beach ![](media/picture-1.jpg)\n- Lake ![](media/picture-2.jpg)\n"
+        val id = repository.add(text)
+        val missing = repository.summary(id)!!
+        assertEquals(setOf("picture-1.jpg", "picture-2.jpg"), missing.missingMedia)
+
+        // From the folder maps are kept in, as its sync brings it.
+        repository.addMediaFile(id, "picture-1.jpg") { it.write(byteArrayOf(1)); true }
+        val one = repository.summary(id)!!
+        assertEquals(setOf("picture-2.jpg"), one.missingMedia)
+        assertNotEquals(missing.pictureKey, one.pictureKey)
+        assertEquals(missing.contentKey, one.contentKey)
+
+        // From a zip of every map, filling the map in.
+        repository.importAll(ByteArrayInputStream(zip("trip/map.md" to text.toByteArray(), "trip/media/picture-2.jpg" to byteArrayOf(2))))
+        val whole = repository.summary(id)!!
+        assertEquals(emptySet<String>(), whole.missingMedia)
+        assertNotEquals(one.pictureKey, whole.pictureKey)
+        // With all it points at, it's keyed by its text alone, as every map's picture was: none is drawn again for the update.
+        assertEquals(whole.contentKey, whole.pictureKey)
+        assertEquals(whole.pictureKey, loaded().summary(id)!!.pictureKey)
+    }
+
+    @Test
     fun `a new picture is kept even before the text pointing at it is saved`() = runTest {
         val repository = loaded()
         val id = repository.add("# Plan\n")
@@ -1737,6 +2302,29 @@ class MapRepositoryTest {
             version.setReadable(true)
         }
 
+        assertNotNull(repository.picture(id, "picture-before.jpg"))
+    }
+
+    @Test
+    fun `a history that can't be listed keeps every picture`() = runTest {
+        val repository = loaded()
+        val id = repository.add("# Trip\n")
+        repository.addMediaFile(id, "picture-before.jpg") { it.write(byteArrayOf(1)); true }
+        File(maps, "$id/media/picture-before.jpg").setLastModified(now - 11 * minute)
+        val versions = File(history, id).apply { mkdirs() }
+        File(versions, "${now - 60 * minute}.md").writeText("# Trip\n- Beach ![](media/picture-before.jpg)\n")
+        // Its versions point at the picture, but can't be listed now: that's no history without them.
+        versions.setReadable(false)
+
+        try {
+            repository.removeUnusedPictures(id)
+        } finally {
+            versions.setReadable(true)
+        }
+
+        assertNotNull(repository.picture(id, "picture-before.jpg"))
+        // Listed again, its versions keep it as ever.
+        repository.removeUnusedPictures(id)
         assertNotNull(repository.picture(id, "picture-before.jpg"))
     }
 

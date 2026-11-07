@@ -5,8 +5,10 @@ import com.hyuchia.orbit.page.MapNode
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StudyTest {
@@ -168,6 +170,80 @@ class StudyTest {
             """{"pinned":true,"study":{"ser":{"ease":2.5,"box":1,"due":20001,"first":20000,"at":5}},"studyElsewhere":{"tablet":{"estar":{"due":20002}}}}""",
             MetadataFile.encode(metadata),
         )
+    }
+
+    @Test
+    fun `a box out of the boxes' range is kept as it was written, and an answer goes on from the nearest box`() {
+        val json = Json { ignoreUnknownKeys = true }
+
+        for ((written, nearest) in listOf(-1 to 0, Int.MIN_VALUE to 0, 8 to STUDY_INTERVALS.size, Int.MAX_VALUE to STUDY_INTERVALS.size)) {
+            val card = json.decodeFromString(StudyCard.serializer(), """{"box":$written,"due":$today,"first":${today - 9}}""")
+            assertEquals(written, card.box)
+            assertEquals("""{"box":$written,"due":$today,"first":${today - 9}}""", json.encodeToString(StudyCard.serializer(), card))
+
+            // Known, it moves on from the nearest box; Again starts it over; known early, it stays just as it was.
+            val box = (nearest + 1).coerceAtMost(STUDY_INTERVALS.size)
+            assertEquals(StudyCard(box = box, due = today + STUDY_INTERVALS[box - 1], first = today - 9, at = 5), card.answered(knew = true, today, at = 5))
+            assertEquals(STUDY_INTERVALS[box - 1].toLong(), card.daysIfKnown(today))
+            assertEquals(StudyCard(box = 0, due = today, first = today - 9, at = 5), card.answered(knew = false, today, at = 5))
+            val early = card.copy(due = today + 2)
+            assertSame(early, early.answered(knew = true, today))
+        }
+
+        // A box past what a whole number holds can't be read: it stays as it was written, beside the card's other fields.
+        val huge = json.decodeFromString(StudyCard.serializer(), """{"box":4294967297,"due":$today}""")
+        assertEquals(0, huge.box)
+        assertEquals("""{"box":4294967297,"due":$today}""", json.encodeToString(StudyCard.serializer(), huge))
+        assertEquals(StudyCard(box = 1, due = today + 1, at = 5), huge.answered(knew = true, today, at = 5))
+    }
+
+    @Test
+    fun `the map's cards are its ideas with ideas or a note under them, but its top one`() {
+        assertEquals(setOf("light", "photosystem-i", "calvin", "inputs"), mapCards(nodes))
+        assertEquals(emptySet<String>(), mapCards(emptyList()))
+        val progress = mapOf("light" to StudyCard(due = today), "photosystem-ii" to StudyCard(due = today), "gone" to StudyCard(due = today))
+        assertEquals(setOf("photosystem-ii", "gone"), notCards(progress, mapCards(nodes)))
+    }
+
+    @Test
+    fun `a session without cards the map no longer has drops them from what's to go and its count, and from what Undo brings back`() {
+        val before = Study(start = "top", queue = listOf("a", "b", "c"), total = 4, known = 1, revealed = true)
+        val session = Study(start = "top", queue = listOf("b", "c", "a"), total = 4, known = 1, missed = setOf("a"), last = StudyAnswer(before, "a", null))
+
+        // B, on screen, went: C comes, hidden, and A stays, still missed.
+        val left = session.copy(revealed = true).without(setOf("b"))
+        assertEquals(listOf("c", "a"), left.queue)
+        assertEquals(3, left.total)
+        assertFalse(left.revealed)
+        assertEquals(setOf("a"), left.missed)
+        assertEquals(listOf("a", "c"), left.last?.before?.queue)
+
+        // A went: it's no longer missed or to take back, and the card on screen stays as it was.
+        val withoutA = session.copy(revealed = true).without(setOf("a"))
+        assertEquals(listOf("b", "c"), withoutA.queue)
+        assertEquals(emptySet<String>(), withoutA.missed)
+        assertNull(withoutA.last)
+        assertTrue(withoutA.revealed)
+        assertSame(session, session.without(setOf("elsewhere")))
+    }
+
+    @Test
+    fun `an answer is kept as a change to its card, against this device's answers as they are when it's written`() {
+        val ser = StudyCard(box = 1, due = today + 1, first = today, at = 5)
+        val estar = StudyCard(box = 2, due = today + 3, first = today - 9, at = 4)
+        val tablet = mapOf("tablet" to mapOf("estar" to estar))
+        assertEquals(mapOf("estar" to estar, "ser" to ser), StudyChange.Answer("ser", ser).applyTo(mapOf("estar" to estar), emptyMap()))
+        assertEquals(mapOf("estar" to estar), StudyChange.Forget(setOf("ser", "gone")).applyTo(mapOf("estar" to estar, "ser" to ser), emptyMap()))
+
+        // Taken back, this device's own answer before comes back beside the tablet's, or none.
+        val again = StudyCard(box = 0, due = today, first = today - 9, at = 9)
+        assertEquals(emptyMap<String, StudyCard>(), StudyChange.Undo("estar", again, own = null, progress = estar).applyTo(mapOf("estar" to again), tablet))
+        assertEquals(mapOf("estar" to ser), StudyChange.Undo("estar", again, own = ser, progress = estar).applyTo(mapOf("estar" to again), tablet))
+        // Once the tablet's answers were folded into this device's, how the card was going comes back.
+        assertEquals(mapOf("estar" to estar), StudyChange.Undo("estar", again, own = null, progress = estar).applyTo(mapOf("estar" to again), emptyMap()))
+        // A later answer the folder brought in stays.
+        val later = again.copy(at = 10)
+        assertEquals(mapOf("estar" to later), StudyChange.Undo("estar", again, own = null, progress = estar).applyTo(mapOf("estar" to later), emptyMap()))
     }
 
     @Test

@@ -101,9 +101,9 @@
         <item quantity="other">Se vaciaron en la carpeta, así que Orbit conservó sus ideas y las volvió a escribir: %1$s.</item>
     </plurals>
     <plurals name="settings_folder_too_big">
-        <item quantity="one">Es demasiado grande para un mapa, así que solo está en la carpeta: %1$s. Un mapa admite videos de hasta %2$s y hasta %3$s de imágenes y videos en total, para que siempre quepa en su archivo zip.</item>
-        <item quantity="many">Son demasiado grandes para un mapa, así que solo están en la carpeta: %1$s. Un mapa admite videos de hasta %2$s y hasta %3$s de imágenes y videos en total, para que siempre quepa en su archivo zip.</item>
-        <item quantity="other">Son demasiado grandes para un mapa, así que solo están en la carpeta: %1$s. Un mapa admite videos de hasta %2$s y hasta %3$s de imágenes y videos en total, para que siempre quepa en su archivo zip.</item>
+        <item quantity="one">Es demasiado grande para un mapa, así que solo está en la carpeta: %1$s. Un mapa admite archivos de hasta %2$s y hasta %3$s de imágenes, videos y audios en total, para que siempre quepa en su archivo zip.</item>
+        <item quantity="many">Son demasiado grandes para un mapa, así que solo están en la carpeta: %1$s. Un mapa admite archivos de hasta %2$s y hasta %3$s de imágenes, videos y audios en total, para que siempre quepa en su archivo zip.</item>
+        <item quantity="other">Son demasiado grandes para un mapa, así que solo están en la carpeta: %1$s. Un mapa admite archivos de hasta %2$s y hasta %3$s de imágenes, videos y audios en total, para que siempre quepa en su archivo zip.</item>
     </plurals>
     <plurals name="settings_folder_too_large">
         <item quantity="one">Es demasiado grande para ser un mapa, así que solo está en la carpeta: %1$s. El texto de un mapa puede tener hasta %2$s.</item>
@@ -168,10 +168,16 @@
     <string name="settings_delete_for_good_body">No volverá, y su historial tampoco.</string>
     <string name="settings_delete_for_good">Eliminar para siempre</string>
     <string name="settings_deleted_for_good">Se eliminó “%1$s” para siempre</string>
+    <string name="settings_could_not_delete_for_good">Orbit no pudo eliminar “%1$s” para siempre. Sigue en la papelera.</string>
     <plurals name="settings_trash_emptied">
         <item quantity="one">Se eliminó %1$d mapa para siempre</item>
         <item quantity="many">Se eliminaron %1$d mapas para siempre</item>
         <item quantity="other">Se eliminaron %1$d mapas para siempre</item>
+    </plurals>
+    <plurals name="settings_trash_not_emptied">
+        <item quantity="one">Orbit no pudo eliminar %1$d mapa para siempre. Sigue en la papelera.</item>
+        <item quantity="many">Orbit no pudo eliminar %1$d mapas para siempre. Siguen en la papelera.</item>
+        <item quantity="other">Orbit no pudo eliminar %1$d mapas para siempre. Siguen en la papelera.</item>
     </plurals>
     <string name="settings_empty_the_trash_question">¿Vaciar la papelera?</string>
     <plurals name="settings_empty_trash_body">

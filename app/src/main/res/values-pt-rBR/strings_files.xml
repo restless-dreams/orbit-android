@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Files on ideas: PDFs, documents, spreadsheets, any file an idea holds, opened in another app. See TRANSLATING.md. -->
+<resources>
+    <string name="files_title">Arquivos</string>
+    <string name="files_add">Adicionar arquivos</string>
+    <string name="files_add_a_file">Adicionar um arquivo</string>
+    <string name="files_open_in_another_app">Abrir em outro app</string>
+    <string name="files_remove">Remover %1$s</string>
+    <string name="files_removed">“%1$s” removido</string>
+    <!-- Never 0: files are added one or more at a time. -->
+    <plurals name="files_added">
+        <item quantity="one">%2$d arquivo adicionado a “%1$s”</item>
+        <item quantity="many">%2$d arquivos adicionados a “%1$s”</item>
+        <item quantity="other">%2$d arquivos adicionados a “%1$s”</item>
+    </plurals>
+    <string name="files_copying">Copiando %1$s…</string>
+    <!-- Never 0: only while more files follow. -->
+    <plurals name="files_left">
+        <item quantity="one">Mais %1$d depois deste</item>
+        <item quantity="many">Mais %1$d depois deste</item>
+        <item quantity="other">Mais %1$d depois deste</item>
+    </plurals>
+
+    <string name="files_open_title">Abrir “%1$s” em outro app?</string>
+    <string name="files_open_text">Ele vai para esse app como está. O Orbit não consegue tirar o que um arquivo assim pode dizer além do que mostra, como quem o fez, quando e onde.</string>
+    <string name="files_open_text_private">Ele vai para esse app como está. O Orbit não consegue tirar o que um arquivo assim pode dizer além do que mostra, como quem o fez, quando e onde. A cópia que esse app lê é excluída quando este mapa privado é bloqueado.</string>
+    <string name="files_open">Abrir</string>
+    <string name="files_no_app">Nenhum app deste dispositivo abre um arquivo assim (%1$s).</string>
+    <string name="files_open_failed">Não foi possível abrir esse arquivo.</string>
+    <string name="files_missing">Esse arquivo não está neste dispositivo.</string>
+    <string name="files_not_here">Não está neste dispositivo</string>
+    <string name="files_unreadable">Não foi possível copiar esse arquivo.</string>
+
+    <string name="files_kind_pdf">PDF</string>
+    <string name="files_kind_document">Documento</string>
+    <string name="files_kind_spreadsheet">Planilha</string>
+    <string name="files_kind_presentation">Apresentação</string>
+    <string name="files_kind_picture">Imagem</string>
+    <string name="files_kind_video">Vídeo</string>
+    <string name="files_kind_sound">Áudio</string>
+    <string name="files_kind_archive">Arquivo compactado</string>
+    <string name="files_kind_text">Texto</string>
+    <string name="files_kind_other">Arquivo</string>
+
+    <string name="data_file_too_big">Esse arquivo tem %1$s, e um mapa guarda arquivos de até %2$s para ainda poder ir para seus outros dispositivos.</string>
+    <string name="data_file_past_limit">Esse arquivo tem mais de %1$s, o máximo que um mapa guarda para ainda poder ir para seus outros dispositivos.</string>
+    <string name="data_file_past_map_room">As imagens, os vídeos, os áudios e os arquivos deste mapa já somam %1$s. Com este arquivo, passariam dos %2$s que um mapa pode levar ao ser compartilhado ou ter backup.</string>
+    <string name="data_no_room_for_file">Não há espaço neste dispositivo para esse arquivo.</string>
+</resources>

@@ -94,15 +94,26 @@ internal fun mapIdOf(baseUrl: String?): String? {
 internal class MapFiles(directory: File, private val stills: FirstFrames? = null) {
     private val root: File by lazy { directory.canonicalFile }
 
-    /** The answer to a request for `url`, with the Range header `range` if it has one: the file, part of it, or not found. */
-    fun answer(url: Uri, range: String?, mayRead: (String) -> Boolean): WebResourceResponse {
+    /**
+     * The answer to a request for `url`, with the Range header `range` if it
+     * has one: the file, part of it, or not found. WebView asks on a thread
+     * of its own, where an exception would stop the app: a file that can't
+     * be found or read, whatever the reason, is missing instead.
+     */
+    fun answer(url: Uri, range: String?, mayRead: (String) -> Boolean): WebResourceResponse = try {
+        found(url, range, mayRead)
+    } catch (unreadable: IOException) {
+        notFound()
+    }
+
+    private fun found(url: Uri, range: String?, mayRead: (String) -> Boolean): WebResourceResponse {
         val found = file(url, mayRead) ?: return notFound()
-        val still = stills?.of(found)
-        val file = still ?: found
-        val length = file.length()
-        val type = mediaType(file.name)
+        // An animation as its first frame, a HEIC picture as a JPEG; any other file as it is.
+        val sent = stills?.standIn(found) ?: StandIn.kept(found)
+        val length = sent.length
+        val type = mediaType(sent.name)
         val part = byteRange(range, length)
-        val input = if (part is ByteRange.Unsatisfiable) ByteArrayInputStream(ByteArray(0)) else openMedia(file) ?: return notFound()
+        val input = if (part is ByteRange.Unsatisfiable) ByteArrayInputStream(ByteArray(0)) else sent.open() ?: return notFound()
 
         return when (part) {
             ByteRange.Whole -> WebResourceResponse(type, null, 200, "OK", MAP_FILE_HEADERS + ("Accept-Ranges" to "bytes"), input)

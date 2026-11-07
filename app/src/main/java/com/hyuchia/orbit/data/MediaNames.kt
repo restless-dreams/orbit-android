@@ -69,10 +69,11 @@ object MediaNames {
 
     /**
      * Each place `markdown` points at one of its map's files, but those in a
-     * web address. Both come in the text's order, so each address is looked
-     * at once, however many there are.
+     * web address: the whole of `./media/<name>` or `media/<name>`, its name
+     * the second group. Both come in the text's order, so each address is
+     * looked at once, however many there are.
      */
-    private fun places(markdown: String): Sequence<MatchResult> {
+    fun places(markdown: String): Sequence<MatchResult> {
         val addresses = WEB_ADDRESS.findAll(markdown).map { it.range }.iterator()
         var address = IntRange.EMPTY
 

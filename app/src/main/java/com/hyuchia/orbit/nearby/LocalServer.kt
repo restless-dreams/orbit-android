@@ -3,6 +3,8 @@ package com.hyuchia.orbit.nearby
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -235,9 +237,13 @@ class LocalServer(
     /** Where a connection is: its clocks run differently in each. */
     private enum class Phase { Head, Body, Answering, Streaming }
 
-    /** One start of the server: its sockets, threads and connections, all ended together. */
+    /** One start of the server: its sockets, threads, connections and the work its handlers do, all ended together. */
     private inner class Running(val sockets: List<ServerSocket>, val addresses: List<InetAddress>?) {
         private val name = "Orbit server ${sockets.first().localPort}"
+
+        /** What the handlers are doing: cancelled as the server stops, so a big answer still being made stops with it. */
+        private val work = SupervisorJob()
+
         private val workers = ThreadPoolExecutor(
             0,
             limits.connections + SPARE_THREADS,
@@ -263,13 +269,15 @@ class LocalServer(
         }
 
         /**
-         * Stops taking connections, and ends the ones it has. A socket closed
-         * while a thread waits on it is let go of only once that thread is out,
-         * and until then its port still takes connections: so stopping waits
-         * for them, and nothing listens once it's done.
+         * Stops taking connections, ends the ones it has, and cancels what
+         * their handlers are still doing. A socket closed while a thread waits
+         * on it is let go of only once that thread is out, and until then its
+         * port still takes connections: so stopping waits for them, and nothing
+         * listens once it's done.
          */
         fun stop() {
             sockets.forEach { runCatching { it.close() } }
+            work.cancel()
             // One deadline for them all: stopping can run on the main thread, which mustn't wait long.
             val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(ACCEPT_EXIT_MILLISECONDS)
 
@@ -435,12 +443,17 @@ class LocalServer(
                         return
                     }
 
+                    var streamed = false
+
                     when (val admission = admit(RequestHead(parsed.method, parsed.path, parsed.headers, address, length))) {
                         is Admission.Refuse -> {
                             write(admission.response)
                             return
                         }
-                        is Admission.Read -> release = admission.release
+                        is Admission.Read -> {
+                            release = admission.release
+                            streamed = admission.streamed
+                        }
                     }
 
                     if (length > bodyLimit(parsed.method, parsed.path)) {
@@ -449,7 +462,13 @@ class LocalServer(
 
                     bodyTime = timings.body + length * timings.bodyPerMegabyte / 1_000_000
                     moveTo(Phase.Body)
-                    request = readBody(input, parsed, address, length, spool)
+
+                    request = if (streamed) {
+                        // Read by its handler as it arrives: the body's time goes on until the handler has answered.
+                        Request(parsed.method, parsed.path, parsed.query, parsed.headers, ByteArray(0), address, bodyInput = BodyInput(input, length))
+                    } else {
+                        readBody(input, parsed, address, length, spool)
+                    }
 
                     if (request == null) {
                         write(Response.text(400, "Bad request"))
@@ -457,16 +476,26 @@ class LocalServer(
                     }
 
                     val asked = request
-                    moveTo(Phase.Answering)
+
+                    if (!streamed) {
+                        moveTo(Phase.Answering)
+                    }
 
                     val response = try {
-                        runBlocking { handle(asked) }
+                        // A child of the server's work: stopping the server cancels it.
+                        runBlocking(work) { handle(asked) }
                     } catch (failure: Exception) {
+                        // The server stopped while it was being answered: there's no one left to answer.
+                        if (failure is CancellationException && !work.isActive) {
+                            return
+                        }
+
                         Logs.warn(TAG, "Couldn't answer a request", failure)
                         Response.text(500, "Something went wrong")
                     }
 
                     answer = response
+                    moveTo(Phase.Answering)
 
                     if (response is Response.Events) {
                         streaming = stream(response.stream)

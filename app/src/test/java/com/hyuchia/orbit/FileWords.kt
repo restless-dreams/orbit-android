@@ -18,7 +18,7 @@ class FileWords(private val locale: Locale) : Words {
     private val plurals = mutableMapOf<String, Map<String, String>>()
 
     init {
-        for (folder in listOf("values", "values-${locale.language}")) {
+        for (folder in listOfNotNull("values", folderFor(locale))) {
             val read = FOLDERS.getOrPut(folder) { readFolder(File(RESOURCES, folder)) }
             strings += read.strings
             plurals += read.plurals
@@ -42,7 +42,20 @@ class FileWords(private val locale: Locale) : Words {
         return String.format(locale, forms[quantity(count)] ?: forms.getValue("other"), *arguments)
     }
 
-    /** The plural a count takes in the language: in English `one` for 1; in Spanish `many` for whole millions too. */
+    /**
+     * The folder Android takes `locale`'s strings from, over the English ones: its region's
+     * (`values-pt-rBR` for pt-BR), else its language's (`values-es` for es-MX), else another
+     * region's of its language (`values-pt-rBR` for pt or pt-PT), as Android falls back.
+     */
+    private fun folderFor(locale: Locale): String? {
+        val folders = RESOURCES.list().orEmpty().toSet()
+        val language = locale.language
+
+        return listOf("values-$language-r${locale.country}", "values-$language").firstOrNull { it in folders }
+            ?: folders.filter { it.startsWith("values-$language-r") }.minOrNull()
+    }
+
+    /** The plural a count takes in the language: in English `one` for 1; in Spanish `many` for whole millions too; in Brazilian Portuguese `one` for 0 too. */
     private fun quantity(count: Int): String = PluralRules.forLocale(locale).select(count.toDouble())
 
     /** A folder's strings and plurals, by name. */

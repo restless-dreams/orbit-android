@@ -35,6 +35,7 @@ import androidx.compose.material.icons.outlined.Polyline
 import androidx.compose.material.icons.outlined.Print
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -71,6 +72,7 @@ import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.container
 import com.hyuchia.orbit.data.MediaSummary
 import com.hyuchia.orbit.data.OutgoingMedia
+import com.hyuchia.orbit.data.OutputFailed
 import com.hyuchia.orbit.data.Uncleaned
 import com.hyuchia.orbit.page.MapPrinter
 import com.hyuchia.orbit.page.PictureRequest
@@ -86,15 +88,18 @@ import com.hyuchia.orbit.ui.ListRow
 import com.hyuchia.orbit.ui.MediaWords
 import com.hyuchia.orbit.ui.WhatGoes
 import com.hyuchia.orbit.ui.exportName
+import com.hyuchia.orbit.ui.forgetExport
+import com.hyuchia.orbit.ui.makeExport
 import com.hyuchia.orbit.ui.rememberAsTheyAre
-import com.hyuchia.orbit.ui.shareMapExport
+import com.hyuchia.orbit.ui.shareMapFile
 import com.hyuchia.orbit.ui.thisDeviceIcon
 import com.hyuchia.orbit.ui.uncleanedLines
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
+import java.io.OutputStream
 
 /**
  * The system's save screen, with the type Android knows for the name's
@@ -110,7 +115,7 @@ private class SaveDocument : ActivityResultContracts.CreateDocument("application
 private fun savedType(extension: String): String = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase()) ?: "application/octet-stream"
 
 /** A way to take the map out of the app; `named` is how a sentence names it, after Save, Share or Copy ("Save the web page"). */
-private enum class Format(@StringRes val label: Int, @StringRes val description: Int, @StringRes val named: Int, val extension: String, val mimeType: String, val icon: ImageVector) {
+internal enum class Format(@StringRes val label: Int, @StringRes val description: Int, @StringRes val named: Int, val extension: String, val mimeType: String, val icon: ImageVector) {
     WebPage(R.string.common_web_page, R.string.export_web_page_description, R.string.export_web_page_named, "html", "text/html", Icons.Outlined.Language),
 
     /** Printed through Android's print dialog, which saves it as a PDF too: it has no file of its own to save or share. */
@@ -125,7 +130,7 @@ private enum class Format(@StringRes val label: Int, @StringRes val description:
 }
 
 /** Which part of the map a picture shows. */
-private enum class Framing(@StringRes val label: Int) {
+internal enum class Framing(@StringRes val label: Int) {
     View(R.string.export_this_view),
     Whole(R.string.export_whole_map),
     Opening(R.string.export_as_it_opens),
@@ -140,7 +145,9 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
     var framing by rememberSaveable { mutableStateOf(Framing.View) }
     var background by rememberSaveable { mutableStateOf(true) }
     var working by remember { mutableStateOf<Format?>(null) }
-    var saving by remember { mutableStateOf<Pair<Format, ByteArray>?>(null) }
+    // A file made to save while the save screen is open, in the cache: its format, and where it is. Kept as the window
+    // is made again, as it is when the phone turns while the save screen is open.
+    var saving by rememberSaveable { mutableStateOf<Pair<Format, String>?>(null) }
     // Why the last file in a format couldn't be made, saved or copied, said in its row until the next try.
     var problem by rememberSaveable { mutableStateOf<Pair<Format, Int>?>(null) }
     // The format last copied, said in its row before Android 13, which says so itself from then on.
@@ -158,52 +165,79 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
     val uncleaned by produceState(Uncleaned(), ui.revision) { value = model.uncleaned() }
     val media by produceState(MediaSummary(), ui.revision, uncleaned, chosen) { value = model.mediaSummary(leavingOut = uncleaned.names - chosen) }
     val clean by produceState(MediaSummary(), ui.revision, uncleaned) { value = model.mediaSummary(leavingOut = uncleaned.names) }
-    val soundsInPage by produceState(0, ui.revision, chosen) { value = model.soundsInPage(chosen) }
-    val motionsInPage by produceState(0, ui.revision, chosen) { value = model.motionsInPage(chosen) }
+    // The sounds and live photos' motions a web page of the map carries inside, with those of `chosen`: the rest stay here.
+    val soundsInPage by produceState(emptySet<String>(), ui.revision, chosen) { value = model.soundsInPage(chosen) }
+    val motionsInPage by produceState(emptySet<String>(), ui.revision, chosen) { value = model.motionsInPage(chosen) }
+    // A zip past what older versions of Orbit open says to update Orbit wherever it's opened.
+    val pastOlderZips by produceState(false, ui.revision) { value = model.pastOlderZips() }
+    // A web page carries up to 100 MiB of the map's pictures: the rest stay here, as its sounds and motions past theirs do.
+    val picturesOutOfPage by produceState(0, ui.revision) { value = model.picturesOutOfPage() }
+    // A YAML map's own text is its YAML, and its markdown is Orbit's writing of it.
+    val yaml by produceState(false, ui.revision) { value = model.isYaml() }
 
-    suspend fun bytes(format: Format, names: Set<String>): ByteArray? = when (format) {
-        Format.Png, Format.Svg -> {
-            val markdown = if (framing == Framing.View) null else model.currentMarkdown()
-            val drawn = model.picture(
-                PictureRequest(
-                    markdown = markdown,
-                    format = format.extension,
-                    width = if (framing == Framing.Whole) 1600 else 1200,
-                    height = if (framing == Framing.Whole) 1100 else 1200,
-                    scale = if (framing == Framing.View) 3.0 else 2.0,
-                    transparent = !background,
-                    view = if (framing == Framing.Whole) ViewMode.OVERVIEW else ViewMode.FOCUS,
-                ),
-            )
+    /** A picture or a drawing of the map, as the chips choose; a drawing's pictures that can't go clean go only when `names` has any. */
+    suspend fun picture(format: Format, names: Set<String>): ByteArray? {
+        val markdown = if (framing == Framing.View) null else model.currentMarkdown()
+        val drawn = model.picture(
+            PictureRequest(
+                markdown = markdown,
+                format = format.extension,
+                width = if (framing == Framing.Whole) 1600 else 1200,
+                height = if (framing == Framing.Whole) 1100 else 1200,
+                scale = if (framing == Framing.View) 3.0 else 2.0,
+                transparent = !background,
+                view = framedView(framing, opensIn = ui.map?.options?.view),
+            ),
+        )
 
-            // A drawing carries its pictures inside it, so they go as they would in a zip.
-            if (format == Format.Svg && drawn != null) {
-                withContext(Dispatchers.Default) { OutgoingMedia.drawing(drawn.decodeToString(), names.isNotEmpty()).toByteArray() }
-            } else {
-                drawn
-            }
+        // A drawing carries its pictures inside it, so they go as they would in a zip.
+        return if (format == Format.Svg && drawn != null) {
+            withContext(Dispatchers.Default) { OutgoingMedia.drawing(drawn.decodeToString(), names.isNotEmpty()).toByteArray() }
+        } else {
+            drawn
         }
-        Format.WebPage -> model.webPage(context, names)?.toByteArray()
-        Format.Pdf -> null
-        Format.Markdown -> model.currentMarkdown().toByteArray()
-        Format.Yaml -> model.yaml()?.toByteArray()
-        Format.Opml -> model.opml()?.toByteArray()
-        Format.Zip -> withContext(Dispatchers.IO) {
-            val output = ByteArrayOutputStream()
-            model.writeZip(output, names)
-            output.toByteArray()
+    }
+
+    /** The map as text in `format`, to copy, save or share: markdown, YAML or OPML; null when it can't be written so. */
+    suspend fun text(format: Format): String? = when (format) {
+        Format.Markdown -> model.markdownText()
+        Format.Yaml -> model.yaml()
+        Format.Opml -> model.opml()
+        else -> null
+    }
+
+    /**
+     * Writes the map in `format` to `output`, with those of the map's files
+     * that can't go clean that are in `names` going as they are; false when
+     * it couldn't be made. A web page and a zip are written as they're made,
+     * a piece at a time, once `room` has room for the most they may come to:
+     * either can be bigger than the map's files together.
+     */
+    suspend fun write(format: Format, names: Set<String>, output: OutputStream, room: (Long) -> Unit): Boolean = when (format) {
+        Format.Png, Format.Svg -> picture(format, names)?.also(output::write) != null
+        Format.WebPage -> model.writeWebPage(context, output, names, room)
+        Format.Pdf -> false
+        Format.Markdown, Format.Yaml, Format.Opml -> text(format)?.toByteArray()?.also(output::write) != null
+        Format.Zip -> {
+            model.writeZip(output, names, room)
+            true
         }
     }
 
     /**
-     * The map in `format`, or null, with its row saying so, when it couldn't
-     * be made: a picture or video that went as it was read, a file that
-     * can't be read, a page that couldn't convert it. Those of the map's
+     * The map in `format`, in a file of its own among the cache's exports,
+     * or null, with its row saying so, when it couldn't be made: a picture or
+     * video that went as it was read, a file that can't be read, a page that
+     * couldn't convert it, a storage too full for it. Those of the map's
      * files that can't go clean that are in `names` go as they are.
      */
-    suspend fun made(format: Format, names: Set<String> = emptySet()): ByteArray? {
-        val data = try {
-            bytes(format, names)
+    suspend fun made(format: Format, names: Set<String>): File? {
+        val file = try {
+            makeExport(context, exportName(context, title, format.extension)) { output -> write(format, names, output, room = this) }
+        } catch (full: OutputFailed) {
+            Logs.warn("OrbitExport", "No room for the map's ${format.extension}", full)
+            problem = format to R.string.export_no_room
+            return null
         } catch (failed: IOException) {
             Logs.warn("OrbitExport", "Couldn't make the map's ${format.extension}", failed)
             problem = format to R.string.export_could_not_make
@@ -211,22 +245,29 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
         }
 
         // A picture that couldn't be drawn says so itself.
-        if (data == null && format != Format.Png && format != Format.Svg) {
-            problem = format to couldNotMake(format, ui.readOnly)
+        if (file == null && format != Format.Png && format != Format.Svg) {
+            problem = format to couldNotMake(format, ui.readOnly, yaml)
         }
 
-        return data
+        return file
     }
 
     val saver = rememberLauncherForActivityResult(SaveDocument()) { uri: Uri? ->
-        val (format, data) = saving ?: return@rememberLauncherForActivityResult
+        val (format, path) = saving ?: return@rememberLauncherForActivityResult
         saving = null
+        val file = File(path)
 
-        if (uri != null) {
-            scope.launch {
-                if (!withContext(Dispatchers.IO) { save(context, uri, data) }) {
-                    problem = format to R.string.export_could_not_save
+        scope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                try {
+                    uri == null || save(context, uri, file)
+                } finally {
+                    forgetExport(file)
                 }
+            }
+
+            if (!saved) {
+                problem = format to R.string.export_could_not_save
             }
         }
     }
@@ -236,24 +277,25 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
             problem = null
             copied = null
             working = format
-            val data = made(format, names)
+            val file = made(format, names)
             working = null
-            data ?: return@launch
-            val name = exportName(context, title, format.extension)
+            file ?: return@launch
 
             if (share) {
-                // The app it goes to reads it from the phone's storage, which may have no room for it. A private map that
-                // locked while its file was made opens nothing.
+                // A private map that locked while its file was made opens nothing, and its file goes.
                 try {
-                    shareMapExport(context, model.id, name, format.mimeType, title) { it.write(data) }
+                    shareMapFile(context, model.id, file, format.mimeType, title)
                 } catch (failed: IOException) {
-                    Logs.warn("OrbitExport", "Couldn't keep the ${format.extension} to share", failed)
-                    problem = format to R.string.export_no_room_to_share
+                    Logs.warn("OrbitExport", "Couldn't share the ${format.extension}", failed)
+                    forgetExport(file)
+                    problem = format to R.string.export_could_not_make
                 }
             } else if (!context.container.privateMaps.hidesNow(model.id)) {
                 // The save screen shows the file's name, the map's: not for a private map that locked while its file was made.
-                saving = format to data
-                saver.launch(name)
+                saving = format to file.path
+                saver.launch(file.name)
+            } else {
+                forgetExport(file)
             }
         }
     }
@@ -274,6 +316,7 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
             val goes = { !context.container.privateMaps.hidesNow(model.id) }
 
             if (!goes()) {
+                page.delete()
                 working = null
                 return@launch
             }
@@ -291,13 +334,7 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
     /** Lays the map out for paper, with the picture the chips choose, and opens Android's print dialog. */
     fun print() {
         val activity = context.findActivity() ?: return
-
-        val request = when (framing) {
-            Framing.View -> PrintRequest(view = ui.mode, focus = ui.map?.path?.lastOrNull())
-            Framing.Whole -> PrintRequest(view = ViewMode.OVERVIEW)
-            Framing.Opening -> PrintRequest(view = ViewMode.FOCUS)
-        }
-
+        val request = printRequest(framing, ui.mode, focus = ui.map?.path?.lastOrNull(), opensIn = ui.map?.options?.view)
         asTheyAre.then(uncleaned.carried(Format.Pdf)) { names -> startPrinting(activity, request, names) }
     }
 
@@ -306,12 +343,25 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
             problem = null
             copied = null
             working = format
-            val data = made(format)
+
+            val copying = try {
+                text(format)
+            } catch (failed: IOException) {
+                Logs.warn("OrbitExport", "Couldn't make the map's ${format.extension} to copy", failed)
+                working = null
+                problem = format to R.string.export_could_not_make
+                return@launch
+            }
+
             working = null
-            data ?: return@launch
+
+            if (copying == null) {
+                problem = format to couldNotMake(format, ui.readOnly, yaml)
+                return@launch
+            }
 
             // A private map's text is marked sensitive, as its ideas are when they're copied.
-            if (!context.container.clipboard.copyText(title, data.decodeToString(), sensitive = model.isPrivate())) {
+            if (!context.container.clipboard.copyText(title, copying, sensitive = model.isPrivate())) {
                 problem = format to R.string.export_too_much_to_copy
             } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
                 copied = format
@@ -355,8 +405,14 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
                     supporting = {
                         Column {
                             Text(stringResource(format.description))
-                            carries(format, media, !uncleaned.isEmpty, soundsInPage, motionsInPage, words, device).forEach { line -> WhatGoes(line.text, line.icon, line.goes, Modifier.padding(top = 4.dp)) }
-                            uncleanedLines(uncleaned.carried(format), chosen, words, device).forEach { line -> WhatGoes(line.text, line.icon, line.goes, Modifier.padding(top = 4.dp)) }
+
+                            carries(format, media, !uncleaned.isEmpty, PageCarries(soundsInPage.size, motionsInPage.size, picturesOutOfPage, files = clean.files + uncleaned.files.size), words, device, pastOlderZips).forEach { line ->
+                                WhatGoes(line.text, line.icon, line.goes, Modifier.padding(top = 4.dp))
+                            }
+
+                            uncleanedLines(uncleaned.named(format, chosen, soundsInPage, motionsInPage), chosen, words, device).forEach { line ->
+                                WhatGoes(line.text, line.icon, line.goes, Modifier.padding(top = 4.dp))
+                            }
 
                             // What the last try came to, under what the format is: why it didn't work, or that it was copied.
                             val said = failure ?: R.string.export_copied.takeIf { copied == format }
@@ -477,6 +533,49 @@ private fun Uncleaned.carried(format: Format): Uncleaned = when (format) {
 }
 
 /**
+ * The files that can't go clean that a way out's row names ([uncleanedLines]):
+ * those it would carry ([carried]), but a sound or a live photo's motion
+ * that was chosen to go as it is (`chosen`) and is past a page's room. A page
+ * carries `sounds` and `motions`, those that fit, so one past its room goes
+ * no more than the map's other sounds and motions past it: it's counted with
+ * what stays on this device rather than named as going.
+ */
+internal fun Uncleaned.named(format: Format, chosen: Set<String>, sounds: Set<String>, motions: Set<String>): Uncleaned {
+    val carried = carried(format)
+
+    if (format != Format.WebPage) {
+        return carried
+    }
+
+    return carried.copy(
+        sounds = carried.sounds.filterTo(HashSet()) { it !in chosen || it in sounds },
+        motions = carried.motions.filterTo(HashSet()) { it !in chosen || it in motions },
+    )
+}
+
+/**
+ * The view a picture of the map shows for `framing`, beyond this view, which
+ * the map's page draws as it is: the whole map, or the map as it opens, which
+ * is the whole map when it opens on it (`opensIn`, its own `view`), or else
+ * its center with the ideas around it.
+ */
+internal fun framedView(framing: Framing, opensIn: String?): String = when (framing) {
+    Framing.Whole -> ViewMode.OVERVIEW
+    Framing.Opening -> if (opensIn == ViewMode.OVERVIEW) ViewMode.OVERVIEW else ViewMode.FOCUS
+    Framing.View -> ViewMode.FOCUS
+}
+
+/**
+ * What a printed map's picture shows for `framing`: this view, `mode` on
+ * the idea in focus, `focus`, or as [framedView] says, for the whole map or
+ * the map as it opens (`opensIn`, its own `view`).
+ */
+internal fun printRequest(framing: Framing, mode: String, focus: String?, opensIn: String?): PrintRequest = when (framing) {
+    Framing.View -> PrintRequest(view = mode, focus = focus)
+    Framing.Whole, Framing.Opening -> PrintRequest(view = framedView(framing, opensIn))
+}
+
+/**
  * What goes with the map in `format`, beyond its description, when it has
  * pictures, videos or audio of its own: all of it in a zip; in a page, the
  * pictures, with the live photos' motions (`motionsInPage`) and the sounds
@@ -484,39 +583,65 @@ private fun Uncleaned.carried(format: Format): Uncleaned = when (format) {
  * markdown, YAML and OPML. `media` counts what goes clean or as it is; the
  * map's other files (`uncleaned`) have lines of their own.
  */
-private fun carries(format: Format, media: MediaSummary, uncleaned: Boolean, soundsInPage: Int, motionsInPage: Int, words: Words, device: ImageVector): List<Carried> {
+/**
+ * What a web page of the map carries of what goes with it: how many of its
+ * sounds and motions go inside, and how many of its pictures stay out. Its
+ * ideas' `files` all stay out, as they do of a print: the page and the
+ * paper name them, without them.
+ */
+private class PageCarries(val sounds: Int, val motions: Int, val picturesOut: Int, val files: Int = 0)
+
+private fun carries(format: Format, media: MediaSummary, uncleaned: Boolean, page: PageCarries, words: Words, device: ImageVector, pastOlderZips: Boolean): List<Carried> {
     if (media.isEmpty && !uncleaned) {
         return emptyList()
     }
 
     return when (format) {
-        Format.Zip -> listOfNotNull(MediaWords.with(media, words)?.let { Carried(it, goes = true, Icons.Outlined.AttachFile) })
-        Format.WebPage -> listOfNotNull(
-            MediaWords.inside(media.copy(videos = 0, audio = soundsInPage, motions = motionsInPage.coerceAtMost(media.motions)), words)?.let { Carried(it, goes = true, Icons.Outlined.AttachFile) },
-            MediaWords.staysHere(media.copy(pictures = 0, motions = 0, audio = media.audio - soundsInPage), words, motions = (media.motions - motionsInPage).coerceAtLeast(0))?.let { Carried(it, goes = false, device) },
+        Format.Zip -> listOfNotNull(
+            MediaWords.with(media, words)?.let { Carried(it, goes = true, Icons.Outlined.AttachFile) },
+            Carried(words.string(R.string.sharing_zip_past_older_orbits), goes = false, Icons.Outlined.SystemUpdate).takeIf { pastOlderZips },
         )
-        Format.Pdf -> listOfNotNull(MediaWords.printed(media, words)?.let { Carried(it, goes = true, Icons.Outlined.AttachFile) })
+        Format.WebPage -> {
+            val picturesOut = page.picturesOut.coerceIn(0, media.pictures)
+            // A live photo whose picture stays out takes its motion with it: the motions left are among the pictures that go.
+            val motions = page.motions.coerceAtMost(media.motions)
+
+            listOfNotNull(
+                MediaWords.inside(media.copy(pictures = media.pictures - picturesOut, videos = 0, audio = page.sounds, motions = motions), words)?.let { Carried(it, goes = true, Icons.Outlined.AttachFile) },
+                MediaWords.staysHere(media.copy(pictures = picturesOut, motions = 0, audio = media.audio - page.sounds, files = page.files), words, motions = (media.motions - motions).coerceAtLeast(0))?.let { Carried(it, goes = false, device) },
+            )
+        }
+        Format.Pdf -> listOfNotNull(
+            MediaWords.printed(media, words)?.let { Carried(it, goes = true, Icons.Outlined.AttachFile) },
+            MediaWords.staysHere(MediaSummary(files = page.files), words)?.let { Carried(it, goes = false, device) },
+        )
         Format.Markdown, Format.Yaml, Format.Opml -> listOf(Carried(words.string(R.string.sharing_just_the_text), goes = false, Icons.AutoMirrored.Outlined.Notes))
         Format.Png, Format.Svg -> emptyList()
     }
 }
 
 /**
- * Why a file in `format` couldn't be made. YAML and OPML are the map written
- * anew, which Orbit doesn't do for a map it couldn't read all of, or that a
- * newer version made: it would lose what it didn't read or doesn't know.
+ * Why a file in `format` couldn't be made. OPML, and YAML from a markdown map
+ * or markdown from a YAML one (`yaml`), are the map written anew, which
+ * Orbit doesn't do for a map it couldn't read all of, or that a newer
+ * version made: it would lose what it didn't read or doesn't know. Its own
+ * text can always be exported, and the words say so.
  */
 @StringRes
-private fun couldNotMake(format: Format, readOnly: ReadOnly?): Int = when {
-    format != Format.Yaml && format != Format.Opml -> R.string.export_could_not_make
-    readOnly == ReadOnly.Newer -> R.string.export_newer_map_not_written
-    readOnly == ReadOnly.Unreadable -> R.string.export_unreadable_map_not_written
-    else -> R.string.export_could_not_make
+private fun couldNotMake(format: Format, readOnly: ReadOnly?, yaml: Boolean): Int {
+    val writtenAnew = format == Format.Opml || format == (if (yaml) Format.Markdown else Format.Yaml)
+
+    return when {
+        !writtenAnew -> R.string.export_could_not_make
+        readOnly == ReadOnly.Newer -> if (yaml) R.string.export_newer_yaml_map_not_written else R.string.export_newer_map_not_written
+        readOnly == ReadOnly.Unreadable -> if (yaml) R.string.export_unreadable_yaml_map_not_written else R.string.export_unreadable_map_not_written
+        else -> R.string.export_could_not_make
+    }
 }
 
-/** Writes `data` where the person chose to save it; false when it couldn't go there (a card that's full or gone, a place Orbit may not write to). */
-private fun save(context: Context, uri: Uri, data: ByteArray): Boolean = try {
-    context.contentResolver.openOutputStream(uri)?.use { it.write(data) } != null
+/** Copies `file` where the person chose to save it; false when it couldn't go there (a card that's full or gone, a place Orbit may not write to). */
+private fun save(context: Context, uri: Uri, file: File): Boolean = try {
+    context.contentResolver.openOutputStream(uri)?.use { output -> file.inputStream().use { it.copyTo(output) } } != null
 } catch (failed: IOException) {
     Logs.warn("OrbitExport", "Couldn't save an export", failed)
     false

@@ -87,7 +87,6 @@ import androidx.compose.material.icons.outlined.SdCardAlert
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Slideshow
 import androidx.compose.material.icons.outlined.Timer
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -218,8 +217,6 @@ private val ToolbarMargin = 16.dp
 private val ToolbarSize = 80.dp
 /** The breadcrumbs' row, which floats over the map's top edge: as tall as a chip's touch target. */
 private val BreadcrumbsHeight = 48.dp
-/** A device this wide or more either way (dp) is a tablet, and one narrower a phone. */
-private const val TABLET_SMALLEST_WIDTH = 600
 /** The map keeps this much room clear above the toolbar or a sheet. */
 private val Clearance = 8.dp
 /** Between the talk's panel and the toolbar under it, or the map above or beside it. */
@@ -234,7 +231,7 @@ private const val MostSheetRoom = 0.6f
 /**
  * A map, with the screen around it in the map's own style. `onWantsRoom`
  * hears whether it wants the whole window, beside the list on a tablet: for
- * a panel beside the map, its text, a presentation or studying. `present`
+ * a panel beside the map, its text, a presentation, studying or a sketch. `present`
  * starts presenting the map from the top as soon as it's drawn, and `study`
  * studying it. `start` is a presentation or study session a map's card
  * asks of the map once it's open already: it starts from whatever the map
@@ -299,6 +296,18 @@ private fun UnlockedMapScreen(
         model.drops.openedMaps.collect { onImported(it) }
     }
 
+    // Files shared to Orbit while this map is open join its idea in focus, with Undo.
+    val resolver = LocalContext.current.contentResolver
+    val sharedFiles = LocalContext.current.container.sharedFiles
+
+    LaunchedEffect(model) {
+        sharedFiles.collect { shared ->
+            if (shared.mapId == id) {
+                model.addSharedFiles(shared.uris, resolver)
+            }
+        }
+    }
+
     LaunchedEffect(start, ui.ready) {
         if (start != null && ui.ready) {
             onStarted()
@@ -320,7 +329,8 @@ private fun UnlockedMapScreen(
         }
     }
 
-    val wantsRoom = ui.panel.showsBeside() || ui.source != null || ui.presentation != null || ui.study != null
+    // A sketch takes the whole window too: a bigger canvas, and no list beside it whose maps would close it.
+    val wantsRoom = ui.panel.showsBeside() || ui.source != null || ui.presentation != null || ui.study != null || ui.sketching
     LaunchedEffect(wantsRoom) { onWantsRoom(wantsRoom) }
     DisposableEffect(Unit) { onDispose { onWantsRoom(false) } }
     // Maps without a style of their own take the app's colors, from the app's theme.
@@ -449,13 +459,8 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
         }
     }
 
-    // A presentation or a study session has the map and the microphone to itself: a talk still going ends as it starts, the idea being said left out.
-    LaunchedEffect(ui.presentation != null || ui.study != null) {
-        if (ui.presentation != null || ui.study != null) {
-            talk.cancel()
-        }
-    }
-
+    // A presentation, a study session, the recorder or the map's lock ends a talk still going as it starts, the idea being
+    // said left out: rememberTalk follows MapViewModel.talkable.
     LaunchedEffect(model) {
         model.effects.collect { effect ->
             when (effect) {
@@ -526,7 +531,7 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
     val title = ui.map?.title?.takeIf { it.isNotBlank() } ?: model.summary()?.title.orEmpty()
 
     // With nothing over it, the map holds the keyboard's focus, so its keys work as it opens and once a panel closes.
-    val mapClear = ui.ready && ui.panel == null && ui.source == null && ui.presentation == null && ui.study == null
+    val mapClear = ui.ready && ui.panel == null && ui.source == null && ui.presentation == null && ui.study == null && !ui.sketching
 
     // The keyboard: the map's shortcuts, or while presenting, the presentation's own keys, listed. Under a private
     // map's lock, none: the keyboard can't reach the map.
@@ -537,6 +542,7 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
             coveredByLock -> emptyList()
             ui.presentation != null -> presentingShortcuts()
             ui.study != null -> studyShortcuts()
+            ui.sketching -> sketchShortcuts(model, back = { backDispatcher?.onBackPressed() })
             else -> mapShortcuts(
                 model,
                 ui,
@@ -567,7 +573,8 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
         val layoutDirection = LocalLayoutDirection.current
         val idea = ui.sun.takeIf { ui.focused }
         val onDetails = idea?.takeIf { ui.hasDetails(it) }?.let { node -> { model.show(Panel.Details(node.id)) } }
-        val onEdit = idea?.let { node -> { model.show(Panel.Editor(node.id)) } }
+        // A map that can only be looked at has no editor to open: its ideas' details, pictures and sounds stay.
+        val onEdit = idea?.takeIf { ui.readOnly == null }?.let { node -> { model.show(Panel.Editor(node.id)) } }
 
         val onMedia = idea?.takeIf { it.image != null || it.video != null }?.let { node ->
             { if (node.image != null) model.view(node.id, MediaKind.Picture) else model.play(node.id) }
@@ -672,50 +679,67 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
             talkingBefore = talking
         }
 
+        // A planet sketched on is held in the room the sketch's toolbar leaves: under it, or beside it on a short screen.
+        val sketchRoom = when {
+            !short -> MapInsets(bottom = toolbarRoom.value)
+            railAtLeft -> MapInsets(left = railRoom.value, bottom = navigation)
+            else -> MapInsets(right = railRoom.value, bottom = navigation)
+        }
+
+        LaunchedEffect(sketchRoom) {
+            model.sketchRoom(sketchRoom)
+        }
+
         Scaffold(
             containerColor = background,
             contentColor = colors.onBackground,
             topBar = {
-                if (ui.source != null) {
-                    SourceTopBar(model, ui.source, background)
-                } else if (ui.pathMaking) {
-                    PathTopBar(ui, background, onSearch = { model.show(Panel.Search) }, onClear = model::clearPath, onDone = model::finishPath)
-                } else {
-                    MapTopBar(
-                        title = title,
-                        ui = ui,
-                        background = background,
-                        // What's being typed is kept before the map closes, as Back keeps it.
-                        onBack = { scope.launch { model.finishEditing(); onClose() } },
-                        onUndo = model::undo,
-                        onRedo = model::redo,
-                        onRename = if (ui.readOnly == null) ({ dialogs.renamingMap = true }) else null,
-                        onTags = if (ui.readOnly == null) ({ dialogs.taggingMap = true }) else null,
-                        isPrivate = isPrivate,
-                        onPrivate = { private -> model.summary()?.let { map -> makePrivate(map, private) } },
-                        cover = cover,
-                        onCover = if (isPrivate) ({ dialogs.coveringMap = true }) else null,
-                        onLockNow = if (isPrivate) model::lockPrivateMapsNow else null,
-                        onSource = model::openSource,
-                        onPresent = { model.startPresentation(app.presentationSeconds) },
-                        onPath = model::startPath,
-                        onRehearse = { model.startPresentation(0, fromStart = true, rehearse = true) },
-                        onStudy = { model.startStudy() },
-                        onHistory = model::openHistory,
-                        onExport = { model.show(Panel.Export) },
-                        onSend = { dialogs.sending = true },
-                        onDelete = { dialogs.deletingMap = true },
-                        onFocus = { model.focus(it.id) },
-                        onStyle = if (showStyle || ui.readOnly != null) null else ({ model.show(Panel.Style) }),
-                        compact = short,
-                        idea = idea,
-                        onMedia = if (short) onMedia else null,
-                        onDetails = if (short) onDetails else null,
-                        onEdit = if (short) onEdit else null,
-                        labeledPresent = layout.labeledPresent,
-                        onSound = if (short) onSound else null,
-                        soundPlaying = soundPlaying,
-                    )
+                // The bars dim with the map while a planet is sketched on, and screen readers pass them by.
+                Box(if (ui.sketching) Modifier.clearAndSetSemantics {} else Modifier) {
+                    if (ui.source != null) {
+                        SourceTopBar(model, ui.source, background)
+                    } else if (ui.pathMaking) {
+                        PathTopBar(ui, background, onSearch = { model.show(Panel.Search) }, onClear = model::clearPath, onDone = model::finishPath)
+                    } else {
+                        MapTopBar(
+                            title = title,
+                            ui = ui,
+                            background = background,
+                            // What's being typed is kept before the map closes, as Back keeps it.
+                            onBack = { scope.launch { model.finishEditing(); onClose() } },
+                            onUndo = model::undo,
+                            onRedo = model::redo,
+                            onRename = if (ui.readOnly == null) ({ dialogs.renamingMap = true }) else null,
+                            onTags = if (ui.readOnly == null) ({ dialogs.taggingMap = true }) else null,
+                            isPrivate = isPrivate,
+                            onPrivate = { private -> model.summary()?.let { map -> makePrivate(map, private) } },
+                            cover = cover,
+                            onCover = if (isPrivate) ({ dialogs.coveringMap = true }) else null,
+                            onLockNow = if (isPrivate) model::lockPrivateMapsNow else null,
+                            onSource = model::openSource,
+                            onPresent = { model.startPresentation(app.presentationSeconds) },
+                            onPath = model::startPath,
+                            onRehearse = { model.startPresentation(0, fromStart = true, rehearse = true) },
+                            onStudy = { model.startStudy() },
+                            onHistory = model::openHistory,
+                            onExport = { model.show(Panel.Export) },
+                            onSend = { dialogs.sending = true },
+                            onDelete = { dialogs.deletingMap = true },
+                            onFocus = { model.focus(it.id) },
+                            onStyle = if (showStyle || ui.readOnly != null) null else ({ model.show(Panel.Style) }),
+                            compact = short,
+                            idea = idea,
+                            onMedia = if (short) onMedia else null,
+                            onDetails = if (short) onDetails else null,
+                            onEdit = if (short) onEdit else null,
+                            labeledPresent = layout.labeledPresent,
+                            roomy = layout.roomyTopBar,
+                            onSound = if (short) onSound else null,
+                            soundPlaying = soundPlaying,
+                        )
+                    }
+
+                    SketchScrim(ui)
                 }
             },
             snackbarHost = {
@@ -747,13 +771,16 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                     label = "clearOfBeside",
                 )
 
-                OrbitSnackbarHost(
-                    snackbars,
-                    Modifier
-                        // The glide's spring may overshoot on its way back to nothing.
-                        .padding(bottom = lift, end = clearOfBeside.coerceAtLeast(0.dp))
-                        .windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets.navigationBars)),
-                )
+                // While a sheet is over the map, it shows them over itself (LocalSheetMessages): here, they'd be under it.
+                if (sheetTop == null || layout.panelBeside) {
+                    OrbitSnackbarHost(
+                        snackbars,
+                        Modifier
+                            // The glide's spring may overshoot on its way back to nothing.
+                            .padding(bottom = lift, end = clearOfBeside.coerceAtLeast(0.dp))
+                            .windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets.navigationBars)),
+                    )
+                }
             },
         ) { padding ->
             Row(
@@ -767,16 +794,18 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
 
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     Column(Modifier.fillMaxSize()) {
-                        // The map makes room for the keyboard at once, so the field being typed in stays above it.
+                        // The map makes room for the keyboard at once, so the field being typed in stays above it. A planet
+                        // sketched on stays where it is, the sketch's description riding over the keyboard instead.
                         Box(
                             Modifier
                                 .weight(if (ui.source != null && !wide) 0.42f else 1f)
                                 .fillMaxWidth()
-                                .then(if (ui.source == null) Modifier.windowInsetsPadding(WindowInsets.imeAnimationTarget) else Modifier),
+                                .then(if (ui.source == null && !ui.sketching) Modifier.windowInsetsPadding(WindowInsets.imeAnimationTarget) else Modifier),
                         ) {
                             MapCanvas(
                                 model,
                                 keyboardFocus = mapClear,
+                                heard = !ui.sketching,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .onGloballyPositioned { coordinates ->
@@ -789,7 +818,16 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                                         scaleY = backScale.value
                                     },
                             )
-                            MapOverlays(model, ui, { node, action -> actOnIdea(model, ui, dialogs, node, action) }, hint = !talk.active, onBannerHeight = { readOnlyBannerHeight = it })
+                            MapOverlays(
+                                model,
+                                ui,
+                                { node, action -> actOnIdea(model, ui, dialogs, node, action) },
+                                hint = !talk.active,
+                                clearOfBars = clearOfBars,
+                                onBannerHeight = { readOnlyBannerHeight = it },
+                            )
+                            // A planet sketched on, its canvas and the sketch's tools, over the map.
+                            SketchOverlay(model, ui, short = short, clearOfBars = clearOfBars)
                             // What a drag from another app would do: under the breadcrumbs, or above the toolbar while the finger is high.
                             DropFeedback(
                                 model.drops,
@@ -799,10 +837,14 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                                 modifier = Modifier.padding(horizontal = 16.dp),
                             )
 
+                            // Big videos coming in, chosen in the editor or let go on the map: made smaller on the phone, or kept as they are.
+                            val smallerOffer by model.smallerOffers.offer.collectAsStateWithLifecycle()
+                            smallerOffer?.let { offer -> SmallerOfferDialog(offer, onAnswer = model.smallerOffers::answer) }
+
                             // On a short screen the breadcrumbs are in the top bar instead, unless it's the path's.
                             if (crumbsOver && ui.source == null) {
                                 androidx.compose.animation.AnimatedVisibility(
-                                    visible = ui.path.size > 1 && ui.focused,
+                                    visible = ui.path.size > 1 && ui.focused && !ui.sketching,
                                     enter = fadeIn() + slideInVertically(),
                                     exit = fadeOut() + slideOutVertically(),
                                     modifier = Modifier.align(Alignment.TopStart),
@@ -866,8 +908,9 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                             },
                     )
 
+                    // A planet sketched on keeps the player's room, so the map doesn't move under the canvas.
                     androidx.compose.animation.AnimatedVisibility(
-                        visible = soundBar,
+                        visible = soundBar && !ui.sketching,
                         enter = fadeIn() + slideInVertically { it / 2 },
                         exit = fadeOut() + slideOutVertically { it / 2 },
                         modifier = Modifier
@@ -896,7 +939,7 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                     if (ui.source == null) {
                         MapToolbar(
                             ui = ui,
-                            visible = !ui.editing && ui.ready && !ui.pathMaking && ui.panel !is Panel.History,
+                            visible = !ui.editing && ui.ready && !ui.pathMaking && ui.panel !is Panel.History && !ui.sketching,
                             vertical = short,
                             idea = idea,
                             onOutline = { model.show(Panel.Outline) },
@@ -907,7 +950,7 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                             onSound = if (short) null else onSound,
                             soundPlaying = soundPlaying,
                             onDetails = if (short) null else onDetails,
-                            onEdit = if (short || ui.readOnly != null) null else onEdit,
+                            onEdit = if (short) null else onEdit,
                             onAdd = if (ui.readOnly == null) ({ model.addIdea() }) else null,
                             talk = talk,
                             onHold = { view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS) },
@@ -933,7 +976,7 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
                 if (sourceBeside != null) {
                     VerticalDivider()
 
-                    Box(Modifier.width(SidePanelWidth + SourceExtraWidth).fillMaxHeight().background(colors.surfaceContainerLow)) {
+                    Box(Modifier.width(layout.sourceWidth).fillMaxHeight().background(colors.surfaceContainerLow)) {
                         SourceEditor(model, sourceBeside, ui.readOnly, Modifier.fillMaxSize().padding(end = besideEdge), clearOfBars.calculateBottomPadding())
                     }
                 } else if (layout.panelBeside) {
@@ -941,16 +984,20 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
 
                     Surface(color = colors.surfaceContainerLow, modifier = Modifier.width(SidePanelWidth).fillMaxHeight()) {
                         Box(Modifier.padding(end = besideEdge, bottom = clearOfBars.calculateBottomPadding())) {
-                            MapPanels(model, ui, sheet = false, onPickIcon = { dialogs.pickingIcon = it }, onPickColor = { dialogs.pickingColor = it })
+                            MapPanels(model, ui, sheet = false, onPickIcon = { dialogs.pickingIcon = it }, onPickColor = { dialogs.pickingColor = it }, onPickDate = { dialogs.pickingDate = it })
                         }
                     }
                 }
             }
         }
 
+        // The sketch's description, over the whole window: above the keyboard, which on a phone on its side leaves it less
+        // room than the map has under the top bar.
+        SketchDescription(model, ui, short = short)
+
         if (!layout.panelBeside) {
-            CompositionLocalProvider(LocalSheetRest provides onSheetRest) {
-                MapPanels(model, ui, sheet = true, onPickIcon = { dialogs.pickingIcon = it }, onPickColor = { dialogs.pickingColor = it })
+            CompositionLocalProvider(LocalSheetRest provides onSheetRest, LocalSheetMessages provides snackbars) {
+                MapPanels(model, ui, sheet = true, onPickIcon = { dialogs.pickingIcon = it }, onPickColor = { dialogs.pickingColor = it }, onPickDate = { dialogs.pickingDate = it })
             }
         }
     }
@@ -963,14 +1010,18 @@ private fun MapScreenContent(model: MapViewModel, ui: MapUi, onClose: () -> Unit
 @Composable
 fun ShownText.text(): String = text(LocalResources.current)
 
-/** Over the map: the long-press menu, the first idea's hint where `hint` allows it, problems, and the way back after the page stopped. */
+/**
+ * Over the map: the long-press menu, the first idea's hint where `hint`
+ * allows it, problems, and the way back after the page stopped or didn't
+ * load, which keeps `clearOfBars`, as the map reaches under the bars.
+ */
 @Composable
-private fun MapOverlays(model: MapViewModel, ui: MapUi, act: (MapNode, NodeAction) -> Unit, hint: Boolean, onBannerHeight: (Int) -> Unit) {
+private fun MapOverlays(model: MapViewModel, ui: MapUi, act: (MapNode, NodeAction) -> Unit, hint: Boolean, clearOfBars: PaddingValues, onBannerHeight: (Int) -> Unit) {
     val colors = MaterialTheme.colorScheme
     val sound by model.sound.collectAsStateWithLifecycle()
 
     Box(Modifier.fillMaxSize()) {
-        if (!(ui.ready && ui.drawn) && !ui.stopped && ui.error == null) {
+        if (!(ui.ready && ui.drawn) && ui.pageProblem == null && ui.error == null) {
             LoadingIndicator(Modifier.align(Alignment.Center).size(56.dp))
         }
 
@@ -1011,21 +1062,8 @@ private fun MapOverlays(model: MapViewModel, ui: MapUi, act: (MapNode, NodeActio
             )
         }
 
-        if (ui.stopped) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(32.dp),
-            ) {
-                Text(
-                    stringResource(R.string.map_stopped),
-                    style = MaterialTheme.typography.bodyLarge,
-                    textAlign = TextAlign.Center,
-                )
-                Button(onClick = model::reload) { Text(stringResource(R.string.map_load_it_again)) }
-            }
+        ui.pageProblem?.let { problem ->
+            PageProblemNotice(problem, onLoadAgain = model::reload, modifier = Modifier.align(Alignment.Center).padding(clearOfBars))
         }
 
         val banner = Modifier
@@ -1202,12 +1240,11 @@ private fun MapTopBar(
     onDetails: (() -> Unit)?,
     onEdit: (() -> Unit)?,
     labeledPresent: Boolean,
+    roomy: Boolean,
     onSound: (() -> Unit)?,
     soundPlaying: Boolean,
 ) {
     val crumbs = ui.path.size > 1 && ui.focused
-    // A phone either way up: its top bar is short of room for the map's name.
-    val phone = LocalConfiguration.current.smallestScreenWidthDp < TABLET_SMALLEST_WIDTH
     TopAppBar(
         title = {
             // On a short screen the way to the idea takes the title's place, rather than a row of its own.
@@ -1230,7 +1267,7 @@ private fun MapTopBar(
             }
         },
         actions = {
-            if (idea != null && onEdit != null) {
+            if (idea != null && (onEdit != null || onMedia != null || onSound != null || onDetails != null)) {
                 AnimatedVisibility(onMedia != null, enter = fadeIn() + expandHorizontally(), exit = fadeOut() + shrinkHorizontally()) {
                     MediaButton(idea, onClick = { onMedia?.invoke() })
                 }
@@ -1249,10 +1286,12 @@ private fun MapTopBar(
                     }
                 }
 
-                val edit = stringResource(R.string.map_edit_the_idea, idea.text)
+                onEdit?.let { edit ->
+                    val editIdea = stringResource(R.string.map_edit_the_idea, idea.text)
 
-                Hint(edit, MapKeys.Edit) {
-                    IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, contentDescription = edit) }
+                    Hint(editIdea, MapKeys.Edit) {
+                        IconButton(onClick = edit) { Icon(Icons.Outlined.Edit, contentDescription = editIdea) }
+                    }
                 }
 
                 VerticalDivider(Modifier.padding(horizontal = 6.dp).height(24.dp))
@@ -1266,15 +1305,16 @@ private fun MapTopBar(
 
             val redo = stringResource(R.string.common_redo)
 
-            // On a phone, Redo leaves its room to the map's name until something has been undone. Undo stays.
-            AnimatedVisibility(ui.canRedo || !phone, enter = fadeIn() + expandHorizontally(), exit = fadeOut() + shrinkHorizontally()) {
+            // On a phone, or a phone's width of map beside the list, Redo leaves its room to the map's name until something
+            // has been undone. Undo stays.
+            AnimatedVisibility(ui.canRedo || roomy, enter = fadeIn() + expandHorizontally(), exit = fadeOut() + shrinkHorizontally()) {
                 Hint(redo, MapKeys.Redo) {
                     IconButton(onClick = onRedo, enabled = ui.canRedo) { Icon(Icons.AutoMirrored.Outlined.Redo, contentDescription = redo) }
                 }
             }
 
             // A private map locks at once from here on tablets, where the bar has room; on a phone, from the menu.
-            if (onLockNow != null && !phone) {
+            if (onLockNow != null && roomy) {
                 LockNowButton(onLockNow)
             }
 
@@ -1568,11 +1608,7 @@ private fun MapToolbar(
         val buttons = @Composable { ToolbarButtons(ui, vertical, idea, onOutline, onSearch, onToggleView, onStyle, onMedia, onSound, soundPlaying, onDetails, onEdit) }
 
         if (onAdd == null) {
-            if (vertical) {
-                VerticalFloatingToolbar(expanded = true, colors = FloatingToolbarDefaults.vibrantFloatingToolbarColors()) { buttons() }
-            } else {
-                HorizontalFloatingToolbar(expanded = true, colors = FloatingToolbarDefaults.vibrantFloatingToolbarColors()) { buttons() }
-            }
+            ToolbarWithoutAdd(vertical, buttons)
         } else if (vertical) {
             VerticalFloatingToolbar(expanded = true, floatingActionButton = add, colors = FloatingToolbarDefaults.vibrantFloatingToolbarColors()) {
                 buttons()
@@ -1582,6 +1618,23 @@ private fun MapToolbar(
                 buttons()
             }
         }
+    }
+}
+
+/**
+ * Material's floating toolbar without a + (on a map that can only be looked
+ * at), in a row or a `vertical` column. Without a +, it evens out its padding
+ * by what it holds, read from alignment lines as it measures, and that throws
+ * in the lookahead pass as a panel opens beside the map on a tablet, closing
+ * Orbit. Ends of nothing on both sides leave its padding as it is, so it
+ * reads none.
+ */
+@Composable
+internal fun ToolbarWithoutAdd(vertical: Boolean, buttons: @Composable () -> Unit) {
+    if (vertical) {
+        VerticalFloatingToolbar(expanded = true, colors = FloatingToolbarDefaults.vibrantFloatingToolbarColors(), leadingContent = {}, trailingContent = {}) { buttons() }
+    } else {
+        HorizontalFloatingToolbar(expanded = true, colors = FloatingToolbarDefaults.vibrantFloatingToolbarColors(), leadingContent = {}, trailingContent = {}) { buttons() }
     }
 }
 
@@ -1635,7 +1688,7 @@ private fun ToolbarButtons(
         }
     }
 
-    if (idea != null && onEdit != null) {
+    if (idea != null && (onEdit != null || onMedia != null || onSound != null || onDetails != null)) {
         val divider = LocalContentColor.current.copy(alpha = 0.32f)
 
         if (vertical) {
@@ -1674,10 +1727,12 @@ private fun ToolbarButtons(
             }
         }
 
-        val edit = stringResource(R.string.map_edit_the_idea, idea.text)
+        onEdit?.let { edit ->
+            val editIdea = stringResource(R.string.map_edit_the_idea, idea.text)
 
-        Hint(edit, MapKeys.Edit) {
-            IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, contentDescription = edit) }
+            Hint(editIdea, MapKeys.Edit) {
+                IconButton(onClick = edit) { Icon(Icons.Outlined.Edit, contentDescription = editIdea) }
+            }
         }
     }
 }

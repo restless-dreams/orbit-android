@@ -42,7 +42,8 @@ import com.hyuchia.orbit.ui.rememberAsTheyAre
 
 /**
  * Before a map with pictures, videos or audio goes to Android's share sheet:
- * what goes with it, and the choice of sending just its text. All its own
+ * what goes with it, and the choice of sending just its text, a markdown
+ * file, or a YAML one for a map whose text is YAML (`yaml`). All its own
  * files are `media`; the zip carries those that go `clean`, and asks before
  * it carries those that can't (`uncleaned`) as they are. `onShare` says
  * which way, with its files or not, and those of them that go as they are.
@@ -56,6 +57,7 @@ fun ShareMapSheet(
     uncleaned: Uncleaned,
     onShare: (withFiles: Boolean, asTheyAre: Set<String>) -> Unit,
     onDismiss: () -> Unit,
+    yaml: Boolean = false,
 ) {
     val words = rememberWords()
     val asTheyAre = rememberAsTheyAre()
@@ -93,7 +95,7 @@ fun ShareMapSheet(
             ShareChoice(
                 icon = Icons.Outlined.Description,
                 headline = stringResource(R.string.sharing_just_the_text),
-                supporting = listOfNotNull(stringResource(R.string.sharing_markdown_file), MediaWords.staysHere(media, words)),
+                supporting = listOfNotNull(stringResource(if (yaml) R.string.sharing_yaml_file else R.string.sharing_markdown_file), MediaWords.staysHere(media, words)),
                 container = MaterialTheme.colorScheme.surfaceContainerHigh,
                 content = MaterialTheme.colorScheme.onSurface,
             ) { onShare(false, emptySet()) }

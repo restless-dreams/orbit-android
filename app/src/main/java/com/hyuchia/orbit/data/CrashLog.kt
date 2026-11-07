@@ -51,19 +51,28 @@ class CrashLog(
     private val hidden: () -> Collection<String> = { emptyList() },
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    /** Writes a report of every crash from now on, then lets the app end as it would have. */
+    /**
+     * Writes a report of every crash from now on, then lets the app end as
+     * it would have. Android's own handler writes what it's given to the
+     * phone's log and hands it to the system's crash reports, which can
+     * leave the phone: it gets the crash as the report has it, never a map's
+     * path or name ([passedOn]).
+     */
     fun install() {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
 
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            val masked = runCatching { hidden() }.getOrDefault(emptyList())
+
             try {
-                record(thread.name, error)
+                record(thread.name, error, masked)
             } catch (ignored: Throwable) {
                 // Nothing more to do: the crash goes on as it would have.
             }
 
             if (previous != null) {
-                previous.uncaughtException(thread, error)
+                // Should making its copy fail, as out of memory, what failed goes on instead: it says nothing of the maps either.
+                previous.uncaughtException(thread, runCatching { passedOn(error, masked) }.getOrElse { it })
             } else {
                 // Only a plain JVM gets here, such as the unit tests': Android always has a handler before this one. The
                 // process would end without a word, so the error goes to its standard error first, past any test runner
@@ -77,9 +86,10 @@ class CrashLog(
     }
 
     /** Keeps a report of `error`, which ended the thread `thread`, and lets the oldest go past the last few. */
-    fun record(thread: String, error: Throwable): File {
+    fun record(thread: String, error: Throwable): File = record(thread, error, runCatching { hidden() }.getOrDefault(emptyList()))
+
+    private fun record(thread: String, error: Throwable, masked: Collection<String>): File {
         val time = clock()
-        val masked = runCatching { hidden() }.getOrDefault(emptyList())
 
         val report = buildString {
             append("Orbit crash report\n")
@@ -154,11 +164,60 @@ class CrashLog(
         return maskMessage(message, masked)
     }
 
+    /**
+     * `error` as it goes on to Android once its report is kept: itself while
+     * each exception in it says no more than the report does, and otherwise
+     * a copy that prints as it does, each exception's kind, stack, causes and
+     * suppressed exceptions as they were, with the messages the report has.
+     */
+    internal fun passedOn(error: Throwable, masked: Collection<String>): Throwable {
+        val messages = IdentityHashMap<Throwable, String?>()
+
+        fun mask(each: Throwable): String? = messages.getOrPut(each) { runCatching { message(each, masked) }.getOrNull() }
+
+        return try {
+            if (chain(error).all { each -> each.toString() == shown(each.javaClass.name, mask(each)) }) error else copy(error, ::mask, IdentityHashMap())
+        } catch (failed: Throwable) {
+            // Whatever goes wrong copying it, nothing of the maps goes on: the kind of crash, where it happened, and no words.
+            MaskedThrowable(error.javaClass.name, null).also { it.stackTrace = error.stackTrace }
+        }
+    }
+
+    /** `error` and every exception it holds: its causes, and those suppressed by it and by them. */
+    private fun chain(error: Throwable): Collection<Throwable> {
+        val found = IdentityHashMap<Throwable, Unit>()
+        val waiting = ArrayDeque(listOf(error))
+
+        while (waiting.isNotEmpty()) {
+            val each = waiting.removeFirst()
+
+            if (found.put(each, Unit) == null) {
+                each.cause?.let(waiting::add)
+                waiting.addAll(each.suppressed)
+            }
+        }
+
+        return found.keys
+    }
+
+    /** A copy of `error`, as [passedOn] makes it, with each message from `message`; `copies` keeps loops of causes looping. */
+    private fun copy(error: Throwable, message: (Throwable) -> String?, copies: IdentityHashMap<Throwable, Throwable>): Throwable {
+        copies[error]?.let { return it }
+        val copied = MaskedThrowable(error.javaClass.name, message(error))
+        copies[error] = copied
+        copied.stackTrace = error.stackTrace
+        error.cause?.let { copied.initCause(copy(it, message, copies)) }
+        error.suppressed.forEach { copied.addSuppressed(copy(it, message, copies)) }
+        return copied
+    }
+
     companion object {
         /**
          * A platform exception's message without what could be someone's:
          * links, paths, quoted text, and each of `masked` (maps' names and
-         * titles) are replaced with "…".
+         * titles) are replaced with "…": one of three letters or more
+         * wherever it is, and a shorter one where it stands as a word, so a
+         * map called "Al" goes without taking every "al" in the message.
          */
         fun maskMessage(message: String, masked: Collection<String>): String {
             // What a parser read follows "JSON input": whatever quotes it has, it's left out whole.
@@ -166,11 +225,27 @@ class CrashLog(
             text = PATH.replace(text, "…")
             text = QUOTED.replace(text, "\"…\"")
 
-            masked.filter { it.length >= 3 }.sortedByDescending { it.length }.forEach { word ->
-                text = text.replace(word, "…", ignoreCase = true)
+            masked.filter { it.isNotBlank() }.sortedByDescending { it.length }.forEach { word ->
+                text = if (word.length >= 3) {
+                    text.replace(word, "…", ignoreCase = true)
+                } else {
+                    text.replace(Regex("""(?<![\p{L}\p{N}])${Regex.escape(word)}(?![\p{L}\p{N}])""", RegexOption.IGNORE_CASE), "…")
+                }
             }
 
             return text.take(500)
         }
     }
+}
+
+/** How an exception prints itself: its kind, then its message, if it has one. */
+private fun shown(kind: String, message: String?): String = message?.let { "$kind: $it" } ?: kind
+
+/**
+ * An exception as Orbit passes it on to Android ([CrashLog.passedOn]): it
+ * prints as the one it stands for, of the kind `kind`, with only `message`,
+ * the words the crash report has of that one's message.
+ */
+private class MaskedThrowable(private val kind: String, message: String?) : Throwable(message) {
+    override fun toString(): String = shown(kind, message)
 }

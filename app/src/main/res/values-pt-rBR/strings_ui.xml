@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Partes das telas do app usadas em muitos lugares: teclas, cores, compartilhamento, avisos. Veja TRANSLATING.md. -->
+<resources>
+    <string name="ui_map_deleted">Este mapa foi excluído</string>
+    <string name="ui_share_named">Compartilhar “%1$s”</string>
+    <string name="ui_no_icon">Sem ícone</string>
+    <string name="ui_tags_for">Etiquetas de %1$s</string>
+    <string name="ui_new_tag">Nova etiqueta</string>
+    <string name="ui_add_tag">Adicionar</string>
+    <string name="ui_tags_help">As etiquetas agrupam seus mapas do jeito que você pensa neles, como Trabalho ou Viagem ao Japão. Um mapa pode ter várias. Digite uma para adicioná-la.</string>
+    <string name="ui_tags_list">Etiquetas: %1$s</string>
+    <string name="ui_search_emoji">Pesquisar emoji</string>
+    <string name="ui_clear_the_search">Limpar a pesquisa</string>
+    <string name="ui_no_emoji_found">Nenhum emoji para “%1$s”</string>
+    <string name="ui_choose_a_skin_tone">Escolher um tom de pele</string>
+
+    <string name="ui_web_view_update_to_see_maps">Atualize o %1$s para ver seus mapas</string>
+    <string name="ui_web_view_too_old">O Orbit desenha os mapas com o %1$s, e o deste dispositivo é antigo demais: Chromium %2$d, e o Orbit precisa da versão %3$d ou mais recente. Atualize-o pela loja de apps ou com uma atualização do sistema, e seus mapas vão aparecer. Eles continuam todos aqui.</string>
+    <string name="ui_web_view_update">Atualizar o %1$s</string>
+
+    <string name="ui_hint_with_keys">%1$s (%2$s)</string>
+    <string name="ui_keys_or">ou</string>
+    <string name="ui_keys_either">%1$s ou %2$s</string>
+    <!-- Os nomes impressos nas teclas dos teclados brasileiros, que na maioria ficam em inglês. -->
+    <string name="ui_key_control">Ctrl</string>
+    <string name="ui_key_alt">Alt</string>
+    <string name="ui_key_shift">Shift</string>
+    <string name="ui_key_enter">Enter</string>
+    <string name="ui_key_space">Espaço</string>
+    <string name="ui_key_escape">Esc</string>
+    <string name="ui_key_backspace">Backspace</string>
+    <string name="ui_key_delete">Delete</string>
+    <string name="ui_key_tab">Tab</string>
+    <string name="ui_key_insert">Insert</string>
+    <string name="ui_key_menu">Menu</string>
+    <string name="ui_key_page_up">Page Up</string>
+    <string name="ui_key_page_down">Page Down</string>
+    <string name="ui_key_home">Home</string>
+    <string name="ui_key_end">End</string>
+    <string name="ui_key_play">Reproduzir</string>
+
+    <!-- As cores que uma ideia pode ter, como os leitores de tela as chamam. -->
+    <string name="ui_color_automatic">Automática: a cor do ramo</string>
+    <string name="ui_color_coral">Coral</string>
+    <string name="ui_color_mint">Menta</string>
+    <string name="ui_color_sky">Céu</string>
+    <string name="ui_color_lilac">Lilás</string>
+    <string name="ui_color_apricot">Damasco</string>
+    <string name="ui_color_pink">Rosa</string>
+    <string name="ui_color_teal">Turquesa</string>
+    <string name="ui_color_red">Vermelho</string>
+    <string name="ui_color_orange">Laranja</string>
+    <string name="ui_color_amber">Âmbar</string>
+    <string name="ui_color_green">Verde</string>
+    <string name="ui_color_blue">Azul</string>
+    <string name="ui_color_violet">Violeta</string>
+    <string name="ui_color_gray">Cinza</string>
+    <string name="ui_color_numbered">Cor %1$d</string>
+
+    <!-- Escolher qualquer cor: a amostra que abre o seletor, e as cores do próprio mapa, nomeadas por alto para os leitores de tela. -->
+    <string name="ui_color_custom">Cor personalizada</string>
+    <string name="ui_color_custom_named">Cor personalizada: %1$s</string>
+    <string name="ui_color_family_red">vermelho</string>
+    <string name="ui_color_family_orange">laranja</string>
+    <string name="ui_color_family_yellow">amarelo</string>
+    <string name="ui_color_family_green">verde</string>
+    <string name="ui_color_family_teal">turquesa</string>
+    <string name="ui_color_family_blue">azul</string>
+    <string name="ui_color_family_purple">roxo</string>
+    <string name="ui_color_family_pink">rosa</string>
+    <string name="ui_color_family_brown">marrom</string>
+    <string name="ui_color_family_gray">cinza</string>
+    <string name="ui_color_family_black">preto</string>
+    <string name="ui_color_family_white">branco</string>
+    <string name="ui_color_light">%1$s-claro</string>
+    <string name="ui_color_dark">%1$s-escuro</string>
+    <!-- O seletor de cores: um controle deslizante para o matiz, uma área para a saturação e o brilho, e o código hexadecimal da cor. -->
+    <string name="ui_color_hue">Matiz</string>
+    <string name="ui_color_saturation_and_brightness">Saturação e brilho</string>
+    <string name="ui_color_saturation_and_brightness_now">Saturação %1$s, brilho %2$s</string>
+    <string name="ui_color_more_vivid">Mais intensa</string>
+    <string name="ui_color_less_vivid">Menos intensa</string>
+    <string name="ui_color_brighter">Mais clara</string>
+    <string name="ui_color_darker">Mais escura</string>
+    <string name="ui_color_hex_code">Código hexadecimal</string>
+    <string name="ui_color_hex_code_help">6 dígitos, de 0 a 9 e de A até F</string>
+</resources>

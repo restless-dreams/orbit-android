@@ -28,11 +28,14 @@ internal const val FILE_POLICY = "default-src 'none'; style-src 'unsafe-inline';
  * the page can run; pictures, videos and embeds from the phone, data and
  * https; and never framed, never rebased, forms only to the phone.
  */
-internal fun pagePolicy(html: String): String {
-    val scripts = inlineScripts(html).joinToString("") { " '${scriptHash(it)}'" }
+internal fun pagePolicy(html: String): String = pagePolicy(inlineScripts(html))
+
+/** The Content-Security-Policy for a page whose own scripts ([inlineScripts]) are `scripts`, as [pagePolicy] makes it from the page. */
+internal fun pagePolicy(scripts: List<String>): String {
+    val hashes = scripts.joinToString("") { " '${scriptHash(it)}'" }
     return listOf(
         "default-src 'none'",
-        "script-src 'self'$scripts",
+        "script-src 'self'$hashes",
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: blob: https:",
         "media-src 'self' data: blob: https:",

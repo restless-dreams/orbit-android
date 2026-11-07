@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- O que a página que desenha os mapas diz quando não consegue. Veja TRANSLATING.md. -->
+<resources>
+    <string name="page_webview_too_old">O WebView deste dispositivo é antigo demais para desenhar mapas. Atualize-o pela loja de apps.</string>
+    <string name="page_stopped">A página parou</string>
+    <string name="page_closed">A página fechou</string>
+    <string name="page_sent_nothing_back">A página não retornou nada</string>
+    <string name="page_did_not_answer">A página não respondeu</string>
+    <string name="page_did_not_load">A página não carregou</string>
+</resources>

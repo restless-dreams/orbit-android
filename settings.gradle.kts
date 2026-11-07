@@ -18,4 +18,5 @@ dependencyResolutionManagement {
 rootProject.name = "orbit-android"
 include(":app")
 include(":baselineprofile")
+include(":journeys")
 include(":code-style")

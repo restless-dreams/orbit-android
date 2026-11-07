@@ -49,6 +49,29 @@ private fun syncDirectory(directory: File) {
     runCatching { FileChannel.open(directory.toPath(), StandardOpenOption.READ).use { it.force(true) } }
 }
 
+/**
+ * The partial file [writeAtomically] would fill for `file`, for what's made
+ * by its path rather than written through a stream, as a video made smaller
+ * is: [putInPlace] then gives it `file`'s name. The caller deletes it when
+ * it isn't put in place; one left behind goes as a crash's partial files go.
+ */
+internal fun partialFile(file: File): File {
+    val directory = file.absoluteFile.parentFile ?: throw IOException("No folder for $file")
+    directory.mkdirs()
+    return File(directory, ".${file.name}.${UUID.randomUUID().toString().take(8)}.partial")
+}
+
+/** Puts `partial`, made whole, in `file`'s place as [writeAtomically] does: on the disk first, then renamed in one step, the rename synced too. */
+internal fun putInPlace(partial: File, file: File) {
+    FileOutputStream(partial, true).use { it.fd.sync() }
+
+    if (!partial.renameTo(file)) {
+        throw IOException("Couldn't put ${file.name} in place")
+    }
+
+    syncDirectory(file.absoluteFile.parentFile ?: return)
+}
+
 /** Whether `file` is a write's partial file, as [writeAtomically] names them: one left means a write stopped partway. */
 internal fun isPartial(file: File): Boolean = file.name.startsWith(".") && file.name.endsWith(".partial")
 
@@ -124,6 +147,19 @@ fun endsMidCharacter(bytes: ByteArray): Boolean {
  * as it is: then it's how the file is.
  */
 class StillArriving(name: String, val text: String) : IOException("$name is still arriving")
+
+/**
+ * Thrown when a file holds more than a map's text may ([MAP_TEXT_LIMIT]),
+ * whatever size it was listed at: no more than that of it was read.
+ */
+class TooLargeForAMap(name: String) : IOException("$name is more than a map holds")
+
+/**
+ * Thrown when a picture, video or sound isn't copied to or from the folder
+ * maps are kept in, for lack of room on this device for it and some to spare
+ * ([ROOM_LEFT_FREE]): nothing of it was written, and it waits for room.
+ */
+class NoRoomForMedia(val name: String) : IOException("No room for $name")
 
 /** How many bytes the UTF-8 character at `index` takes, or 0 when the bytes there aren't one, whole. */
 private fun utf8Length(bytes: ByteArray, index: Int): Int {
@@ -218,6 +254,32 @@ private fun strictly(bytes: ByteArray, charset: Charset): String? = try {
         .toString()
 } catch (unreadable: CharacterCodingException) {
     null
+}
+
+/** Whether `one` and the file `other` hold the same bytes: told by their sizes when those differ, else read a piece at a time, as a video can be long. */
+internal fun sameBytes(one: File, other: File): Boolean {
+    if (!other.isFile || one.length() != other.length()) {
+        return false
+    }
+
+    return one.inputStream().use { first ->
+        other.inputStream().use { second ->
+            val mine = ByteArray(DEFAULT_BUFFER_SIZE)
+            val theirs = ByteArray(DEFAULT_BUFFER_SIZE)
+            var read = mine.size
+
+            while (read == mine.size) {
+                read = first.readUpTo(mine)
+
+                // Past what was read, both still hold the same piece as before: the whole of each compares.
+                if (second.readUpTo(theirs) != read || !mine.contentEquals(theirs)) {
+                    return false
+                }
+            }
+
+            true
+        }
+    }
 }
 
 /** A text file's text, decoded as [decodeText] does. */

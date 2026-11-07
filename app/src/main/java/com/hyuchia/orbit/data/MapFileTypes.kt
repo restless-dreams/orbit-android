@@ -25,8 +25,18 @@ object MapFileTypes {
     /** What a file that says nothing of what it is comes as: it can be a map, and its name says. */
     const val ANY_FILE = "application/octet-stream"
 
-    /** Every type a map comes as, Orbit's own and other apps': what the manifest's filters take. */
+    /** Every type a map comes as, Orbit's own and other apps'. */
     val MAPS: Set<String> = MARKDOWN + YAML + ZIP + OtherApps.TYPES
+
+    /**
+     * Plain text: a `.txt` file, which makes a map as shared text does, and
+     * what some apps call markdown and YAML files, which stay maps as
+     * written ([Importer.isPlainText]).
+     */
+    const val PLAIN_TEXT = "text/plain"
+
+    /** What the manifest's filters take, for opening a file with Orbit and sharing one to it: every map, and plain text. */
+    val OPENED: Set<String> = MAPS + PLAIN_TEXT
 
     /** The extensions of maps written as text, which are kept as written even when an app says they're plain text. */
     val TEXT_EXTENSIONS = setOf("md", "markdown", "yaml", "yml")
@@ -35,7 +45,7 @@ object MapFileTypes {
     val EXTENSIONS: Set<String> = TEXT_EXTENSIONS + "zip" + OtherFormat.entries.flatMap { it.extensions }
 
     /** What the file picker offers to open: every map, text to make one of, OPML that says it's XML, and files that say nothing. */
-    val FILE_PICKER: List<String> = (MAPS + "text/plain" + XML + ANY_FILE).toList()
+    val FILE_PICKER: List<String> = (OPENED + XML + ANY_FILE).toList()
 
     /** What Restore's picker offers: zips of every map, and files that say nothing, as a zip saved by some apps does. */
     val ZIPS_PICKER: List<String> = (ZIP + ANY_FILE).toList()

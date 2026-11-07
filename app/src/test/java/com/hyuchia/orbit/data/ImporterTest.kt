@@ -111,6 +111,21 @@ class ImporterTest {
     }
 
     @Test
+    fun `markdown with a nodes line in a note or a fence stays markdown, and only a YAML map is read as YAML`() {
+        // A note with a line that starts with "nodes:", and a fence of YAML in a note: markdown, kept as written.
+        assertFalse(Importer.isYamlMap("# Graphs\n\nA graph joins its\nnodes:\nwith edges.\n"))
+        assertFalse(Importer.isYamlMap("\n# Settings\n\n```yaml\nnodes:\n  - text: Example\n```\n\n"))
+        assertFalse(Importer.isYamlMap("- Graphs\n\n  A note.\n\nnodes:\n- Edges\n"))
+        // YAML maps, as Orbit reads them: its nodes first, its options first, a comment first, or its frontmatter saying so.
+        assertTrue(Importer.isYamlMap("nodes:\n  - text: Trip\n"))
+        assertTrue(Importer.isYamlMap("title: Trip\nnodes:\n  - Lisbon\n"))
+        assertTrue(Importer.isYamlMap("# Packed on Friday\nnodes:\n  - Lisbon\n"))
+        assertTrue(Importer.isYamlMap("---\nflavor: yaml\n---\nnodes:\n  - Lisbon\n"))
+        // A file named or typed as YAML is read as YAML, whatever it holds.
+        assertTrue(Importer.isYamlMap("- Lisbon\n", yamlFile = true))
+    }
+
+    @Test
     fun `text files make maps as shared text does, and markdown files are maps as written`() {
         assertTrue(Importer.isPlainText("Trip.txt", "text/plain"))
         assertTrue(Importer.isPlainText("Trip.TXT", ""))

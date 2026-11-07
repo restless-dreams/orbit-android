@@ -8,12 +8,18 @@ import android.media.MediaRecorder
 import android.os.Build
 import android.os.SystemClock
 import androidx.annotation.StringRes
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import kotlinx.coroutines.CoroutineScope
@@ -66,7 +72,7 @@ enum class RecorderPhase {
  * phone's sound, such as a call. `scope` runs its clock.
  */
 @Stable
-class VoiceRecorder(private val context: Context, private val file: File, private val limit: () -> Long, private val scope: CoroutineScope) {
+class VoiceRecorder(private val context: Context, internal val file: File, private val limit: () -> Long, private val scope: CoroutineScope) {
     var phase by mutableStateOf(RecorderPhase.Ready)
         private set
 
@@ -220,6 +226,26 @@ class VoiceRecorder(private val context: Context, private val file: File, privat
         }
     }
 
+    /**
+     * Has back the take this recorder's file holds, done, as a screen made
+     * again finds it ([rememberVoiceRecorder]): `elapsed` long, drawn as
+     * `levels`, and `full` when it reached the most a memo can be. One too
+     * short to hear, or a file with nothing in it, is nothing, and goes.
+     */
+    internal fun restore(elapsed: Long, levels: List<Float>, full: Boolean) {
+        if (elapsed < SHORTEST_TAKE_MILLISECONDS || !file.isFile || file.length() == 0L) {
+            discard()
+            return
+        }
+
+        this.levels.clear()
+        this.levels.addAll(levels)
+        this.elapsed = elapsed
+        before = elapsed
+        this.full = full
+        phase = RecorderPhase.Done
+    }
+
     /** Throws the take away. */
     fun discard() {
         release()
@@ -294,6 +320,51 @@ class VoiceRecorder(private val context: Context, private val file: File, privat
         phase = RecorderPhase.Ready
         file.delete()
     }
+}
+
+/** A take's waveform keeps at most this many levels through a screen made again: more than any width draws. */
+private const val KEPT_LEVELS = 1_000
+
+/**
+ * A recorder for a voice memo, whose take, kept in a file of its own in
+ * `folder`, outlasts a screen made again, as for a new language or font
+ * size: the new screen has it back, done, to listen to and save, or record
+ * again. A take still recording or paused is whole by then, since the
+ * screen that recorded it lets the microphone go as it goes. `limit` and
+ * `scope` are the recorder's (see [VoiceRecorder]).
+ */
+@Composable
+internal fun rememberVoiceRecorder(folder: File, limit: () -> Long, scope: CoroutineScope): VoiceRecorder {
+    val context = LocalContext.current.applicationContext
+    val name = rememberSaveable { "take-${System.currentTimeMillis()}.mp4" }
+    val file = remember(folder, name) { File(folder, name) }
+
+    val recorder = rememberSaveable(
+        file,
+        saver = listSaver(
+            save = { recorder ->
+                if (recorder.phase == RecorderPhase.Ready) {
+                    emptyList()
+                } else {
+                    val levels = recorder.levels.toList()
+                    listOf(recorder.elapsed, (if (levels.size > KEPT_LEVELS) barsOf(levels, KEPT_LEVELS) else levels).toFloatArray(), recorder.full)
+                }
+            },
+            restore = { kept ->
+                VoiceRecorder(context, file, limit, scope).apply {
+                    if (kept.isNotEmpty()) {
+                        restore(kept[0] as Long, (kept[1] as FloatArray).toList(), kept[2] as Boolean)
+                    }
+                }
+            },
+        ),
+    ) {
+        VoiceRecorder(context, file, limit, scope)
+    }
+
+    // The microphone goes with the screen; a take it was recording stays whole in its file.
+    DisposableEffect(recorder) { onDispose { recorder.release() } }
+    return recorder
 }
 
 /** A level the waveform draws, from 0 to 1, for an amplitude from the microphone: on a logarithmic scale, as ears hear. */

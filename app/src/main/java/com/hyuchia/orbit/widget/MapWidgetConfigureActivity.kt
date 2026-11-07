@@ -294,7 +294,7 @@ private fun ChooseMap(maps: List<MapSummary>?, shown: String?, onChoose: (MapSum
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             MapThumbnail(
                                 id = map.id,
-                                contentKey = map.contentKey,
+                                pictureKey = map.pictureKey,
                                 style = map.outline.style,
                                 branches = map.outline.branches,
                                 modifier = Modifier

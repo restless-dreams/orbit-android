@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A lista de mapas, os cartões deles, começar um mapa e o cartão sobre uma falha. Veja TRANSLATING.md. -->
+<resources>
+    <!-- A lista de mapas -->
+    <plurals name="home_map_count">
+        <item quantity="one">Mapas: %1$d</item>
+        <item quantity="many">Mapas: %1$d</item>
+        <item quantity="other">Mapas: %1$d</item>
+    </plurals>
+    <string name="home_deleted_map">Mapa “%1$s” excluído</string>
+    <string name="home_add_widget_from_list">Adicione o widget do Orbit pela lista de widgets da sua tela inicial</string>
+    <string name="home_could_not_share_map">O Orbit não conseguiu criar um arquivo desse mapa para compartilhar. O armazenamento deste dispositivo está cheio?</string>
+    <string name="home_map_from_newer_orbit">Uma versão mais nova do Orbit criou este mapa, então esta o deixa como está. Atualize o Orbit para alterá-lo.</string>
+    <string name="home_map_unreadable">O Orbit não conseguiu ler este mapa inteiro, então o deixa como está. Abra o mapa para corrigir o texto dele.</string>
+    <string name="home_map_kept_changing">O mapa não parava de mudar, então o Orbit o deixou como estava. Tente de novo.</string>
+    <plurals name="home_tag_left_on_maps">
+        <item quantity="one">A etiqueta continua em %1$d mapa que o Orbit só pode mostrar: ele foi criado por uma versão mais nova, ou o Orbit não consegue lê-lo inteiro.</item>
+        <item quantity="many">A etiqueta continua em %1$d mapas que o Orbit só pode mostrar: eles foram criados por uma versão mais nova, ou o Orbit não consegue lê-los inteiros.</item>
+        <item quantity="other">A etiqueta continua em %1$d mapas que o Orbit só pode mostrar: eles foram criados por uma versão mais nova, ou o Orbit não consegue lê-los inteiros.</item>
+    </plurals>
+    <string name="home_tag_stays_on_map_only_shown">A etiqueta continua em “%1$s”, que o Orbit só pode mostrar: ele foi criado por uma versão mais nova, ou o Orbit não consegue lê-lo inteiro.</string>
+    <string name="home_tag_stays_on_map_not_saved">A etiqueta continua em “%1$s”: o Orbit não conseguiu salvar a alteração. O armazenamento deste dispositivo está cheio?</string>
+    <plurals name="home_tag_stays_on_maps_not_saved">
+        <item quantity="one">A etiqueta continua em %1$d mapa: o Orbit não conseguiu salvar a alteração. O armazenamento deste dispositivo está cheio?</item>
+        <item quantity="many">A etiqueta continua em %1$d mapas: o Orbit não conseguiu salvar a alteração. O armazenamento deste dispositivo está cheio?</item>
+        <item quantity="other">A etiqueta continua em %1$d mapas: o Orbit não conseguiu salvar a alteração. O armazenamento deste dispositivo está cheio?</item>
+    </plurals>
+    <string name="home_tag_stays_on_map_not_changed">A etiqueta continua em “%1$s”: o Orbit não conseguiu alterá-lo. Tente de novo.</string>
+    <plurals name="home_tag_stays_on_maps_not_changed">
+        <item quantity="one">A etiqueta continua em %1$d mapa: o Orbit não conseguiu alterá-lo. Tente de novo.</item>
+        <item quantity="many">A etiqueta continua em %1$d mapas: o Orbit não conseguiu alterá-los. Tente de novo.</item>
+        <item quantity="other">A etiqueta continua em %1$d mapas: o Orbit não conseguiu alterá-los. Tente de novo.</item>
+    </plurals>
+    <string name="home_pinned_maps">Fixados</string>
+    <string name="home_everything_else">Todos os outros</string>
+    <string name="home_clear_the_search">Limpar a pesquisa</string>
+    <string name="home_no_maps_match">Nenhum mapa encontrado para “%1$s”</string>
+    <string name="home_no_maps_match_said">Nenhum mapa encontrado</string>
+    <string name="home_search_looks_in">A pesquisa procura nos títulos, nas ideias e nas notas.</string>
+    <plurals name="home_maps_match">
+        <item quantity="one">%1$d mapa encontrado</item>
+        <item quantity="many">%1$d mapas encontrados</item>
+        <item quantity="other">%1$d mapas encontrados</item>
+    </plurals>
+    <string name="home_sort_last_edited">Última edição</string>
+    <string name="home_sort_last_opened">Última abertura</string>
+    <string name="home_sort_newest_first">Mais novos primeiro</string>
+    <string name="home_sort_by_title">Por título</string>
+    <string name="home_sorted_by">Ordem: %1$s</string>
+    <string name="home_empty_title">Suas ideias, em órbita</string>
+    <string name="home_empty_body">Comece com um mapa em branco ou um modelo. Em um mapa, toque em + para adicionar ideias, e toque e mantenha pressionada qualquer ideia para alterá-la.</string>
+    <string name="home_templates">Modelos</string>
+    <string name="home_pick_a_map">Escolha um mapa para percorrê-lo aqui</string>
+
+    <!-- O + que se abre nas formas de começar um mapa -->
+    <string name="home_from_a_template">De um modelo</string>
+    <string name="home_menu_open">Aberto</string>
+    <string name="home_menu_closed">Fechado</string>
+
+    <!-- Pedir o título de um mapa -->
+    <string name="home_what_is_it_about">Sobre o que é?</string>
+    <string name="home_create">Criar</string>
+    <string name="home_rename_map">Renomear mapa</string>
+
+    <!-- Atalhos de teclado -->
+    <string name="home_shortcut_new_map_from_template">Novo mapa a partir de um modelo</string>
+    <string name="home_shortcut_group_map_card">No cartão de um mapa</string>
+    <string name="home_shortcut_open_it">Abrir o mapa</string>
+    <string name="home_shortcut_its_menu">Menu do mapa</string>
+    <string name="home_shortcut_delete_it">Excluir o mapa</string>
+
+    <!-- O cartão de um mapa -->
+    <string name="home_more_options">Mais opções</string>
+    <string name="home_more_options_for_map">Mais opções para %1$s</string>
+    <string name="home_pin">Fixar</string>
+    <string name="home_pin_to_the_top">Fixar no topo</string>
+    <string name="home_unpin">Desafixar</string>
+    <string name="home_pinned">Fixado</string>
+    <string name="home_add_to_home_screen">Adicionar à tela inicial</string>
+    <string name="home_send_to_a_device">Enviar para um dispositivo</string>
+    <string name="home_share">Compartilhar</string>
+    <string name="home_unreadable_map">O Orbit não consegue ler o arquivo, então o deixa como está</string>
+    <string name="home_unreadable_map_file">O Orbit não consegue ler o arquivo deste mapa</string>
+    <plurals name="home_map_summary">
+        <item quantity="one">Ideias: %1$d · %2$s</item>
+        <item quantity="many">Ideias: %1$d · %2$s</item>
+        <item quantity="other">Ideias: %1$d · %2$s</item>
+    </plurals>
+    <plurals name="home_progress_all_done">
+        <item quantity="one">%1$d de %1$d concluída</item>
+        <item quantity="many">%1$d de %1$d concluídas</item>
+        <item quantity="other">%1$d de %1$d concluídas</item>
+    </plurals>
+    <plurals name="home_progress_all_reached">
+        <item quantity="one">%1$d de %1$d alcançada</item>
+        <item quantity="many">%1$d de %1$d alcançadas</item>
+        <item quantity="other">%1$d de %1$d alcançadas</item>
+    </plurals>
+    <plurals name="home_progress_done">
+        <item quantity="one">Concluídas: %1$d de %2$d</item>
+        <item quantity="many">Concluídas: %1$d de %2$d</item>
+        <item quantity="other">Concluídas: %1$d de %2$d</item>
+    </plurals>
+    <plurals name="home_progress_reached">
+        <item quantity="one">Alcançadas: %1$d de %2$d</item>
+        <item quantity="many">Alcançadas: %1$d de %2$d</item>
+        <item quantity="other">Alcançadas: %1$d de %2$d</item>
+    </plurals>
+
+    <!-- Há quanto tempo algo aconteceu, no meio de uma frase: “12 ideias · há 5 minutos”, “verificada ontem” -->
+    <string name="home_just_now">agora mesmo</string>
+    <plurals name="home_minutes_ago">
+        <item quantity="one">há %1$d minuto</item>
+        <item quantity="many">há %1$d minutos</item>
+        <item quantity="other">há %1$d minutos</item>
+    </plurals>
+    <plurals name="home_hours_ago">
+        <item quantity="one">há %1$d hora</item>
+        <item quantity="many">há %1$d horas</item>
+        <item quantity="other">há %1$d horas</item>
+    </plurals>
+    <string name="home_yesterday">ontem</string>
+    <plurals name="home_days_ago">
+        <item quantity="one">há %1$d dia</item>
+        <item quantity="many">há %1$d dias</item>
+        <item quantity="other">há %1$d dias</item>
+    </plurals>
+
+    <!-- Começar um mapa -->
+    <string name="home_start_a_map">Começar um mapa</string>
+    <string name="home_start_a_map_subtitle">Comece com um mapa em branco, um arquivo ou um modelo</string>
+    <string name="home_blank_map_description">Só um título, e espaço para ideias</string>
+    <string name="home_open_a_file_description">Markdown, YAML, um arquivo zip com imagens, OPML, FreeMind ou XMind</string>
+    <string name="home_start_a_map_from_template">Começar um mapa com este modelo</string>
+
+    <!-- O cartão sobre uma falha -->
+    <string name="home_crash_title">O Orbit fechou inesperadamente da última vez</string>
+    <string name="home_crash_body">Há neste dispositivo um relatório do que deu errado: as versões do Orbit e do Android e em que parte do Orbit aconteceu, nada dos seus mapas. Compartilhá-lo ajuda a corrigir o problema.</string>
+    <string name="home_dismiss">Dispensar</string>
+    <string name="home_share_report">Compartilhar relatório</string>
+    <string name="home_share_the_crash_report">Compartilhar o relatório de falha</string>
+
+    <!-- O cartão sobre uma nova versão, no APK do site e do GitHub, que nenhuma loja atualiza -->
+    <string name="home_update_title">Saiu o Orbit %1$s</string>
+    <string name="home_update_body">Esta cópia do Orbit não veio de uma loja de apps, então ela não se atualiza sozinha. Baixe a nova versão e instale por cima desta: seus mapas continuam onde estão.</string>
+    <string name="home_update_download">Baixar</string>
+    <string name="home_update_not_now">Agora não</string>
+
+    <!-- Etiquetas na tela inicial: chips que mostram só os mapas de uma etiqueta, e renomear ou remover uma etiqueta em todos os mapas -->
+    <string name="home_edit_tags">Editar etiquetas</string>
+    <string name="home_rename_tag">Renomear etiqueta</string>
+    <string name="home_rename_named_tag">Renomear “%1$s”</string>
+    <string name="home_tag">Etiqueta</string>
+    <string name="home_remove_named_tag">Remover “%1$s” de todos os mapas</string>
+    <plurals name="home_remove_tag_question">
+        <item quantity="one">Remover “%1$s” de %2$d mapa?</item>
+        <item quantity="many">Remover “%1$s” de %2$d mapas?</item>
+        <item quantity="other">Remover “%1$s” de %2$d mapas?</item>
+    </plurals>
+    <string name="home_remove_tag_body">Os mapas continuam como estão, sem esta etiqueta.</string>
+    <string name="home_show_only_its_maps">Mostrar só os mapas com esta etiqueta</string>
+    <string name="home_folder_problem_title">Seus mapas não estão sincronizados com a pasta</string>
+    <string name="home_folder_problem_try_again">Tentar de novo</string>
+    <plurals name="home_private_maps_not_restored_title">
+        <item quantity="one">%1$d mapa privado não estava no backup</item>
+        <item quantity="many">Seus %1$d mapas privados não estavam no backup</item>
+        <item quantity="other">Seus %1$d mapas privados não estavam no backup</item>
+    </plurals>
+    <string name="home_private_maps_not_restored_folder">O backup do Android deixa os mapas privados de fora, a menos que seja criptografado. Quando o Orbit conseguir acessar sua pasta de novo, eles voltam dela como mapas comuns: torne-os privados de novo.</string>
+    <string name="home_private_maps_not_restored_export">O backup do Android deixa os mapas privados de fora, a menos que seja criptografado. Se você exportou seus mapas, Importar mapas, nas Configurações, os traz de volta, ainda privados.</string>
+    <plurals name="home_folder_files_gone_title">
+        <item quantity="one">O arquivo de %1$d mapa saiu da pasta</item>
+        <item quantity="many">Os arquivos de %1$d mapas saíram da pasta</item>
+        <item quantity="other">Os arquivos de %1$d mapas saíram da pasta</item>
+    </plurals>
+    <plurals name="home_folder_files_gone">
+        <item quantity="one">%1$s não está mais em “%2$s”. Se foi excluído lá, ele vai para a lixeira aqui também. Se foi movido, ou um app de sincronização o perdeu, mantenha-o e o Orbit o grava de novo.</item>
+        <item quantity="many">%1$s não estão mais em “%2$s”. Se foram excluídos lá, eles vão para a lixeira aqui também. Se foram movidos, ou um app de sincronização os perdeu, mantenha-os e o Orbit os grava de novo.</item>
+        <item quantity="other">%1$s não estão mais em “%2$s”. Se foram excluídos lá, eles vão para a lixeira aqui também. Se foram movidos, ou um app de sincronização os perdeu, mantenha-os e o Orbit os grava de novo.</item>
+    </plurals>
+    <string name="home_folder_files_gone_keep">Manter e gravar de novo</string>
+    <string name="home_folder_files_gone_remove">Mover para a lixeira</string>
+    <plurals name="home_folder_removed_title">
+        <item quantity="one">%1$d mapa foi para a lixeira</item>
+        <item quantity="many">%1$d mapas foram para a lixeira</item>
+        <item quantity="other">%1$d mapas foram para a lixeira</item>
+    </plurals>
+    <plurals name="home_folder_removed">
+        <item quantity="one">O arquivo dele foi excluído de “%2$s”: %1$s. Ele aguarda na lixeira, e os 30 dias dele lá começam a contar depois que você vir este aviso.</item>
+        <item quantity="many">Os arquivos deles foram excluídos de “%2$s”: %1$s. Eles aguardam na lixeira, e os 30 dias deles lá começam a contar depois que você vir este aviso.</item>
+        <item quantity="other">Os arquivos deles foram excluídos de “%2$s”: %1$s. Eles aguardam na lixeira, e os 30 dias deles lá começam a contar depois que você vir este aviso.</item>
+    </plurals>
+    <string name="home_folder_open_trash">Abrir a lixeira</string>
+    <string name="home_list_last">%1$s e %2$s</string>
+</resources>

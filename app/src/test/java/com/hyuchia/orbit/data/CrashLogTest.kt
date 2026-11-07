@@ -4,10 +4,13 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.io.IOException
+import java.io.PrintWriter
+import java.io.StringWriter
 import java.nio.file.Files
 
 class CrashLogTest {
@@ -94,5 +97,69 @@ class CrashLogTest {
         assertEquals(1, Regex("Caused by: java.lang.IllegalStateException").findAll(report).count())
         val stack = log.record("main", deep(200)).readText()
         assertTrue(stack.contains(" more\n"))
+    }
+
+    @Test
+    fun `names of one or two letters are masked too, where they stand as words`() {
+        assertEquals("Couldn't save … at 3", CrashLog.maskMessage("Couldn't save Yo at 3", listOf("Yo")))
+        assertEquals("… is gone, and … too: …'s pictures", CrashLog.maskMessage("Q is gone, and q too: Q's pictures", listOf("Q")))
+        // Inside a longer word, the letters are that word's: the message stays readable.
+        assertEquals("Your map is gone", CrashLog.maskMessage("Your map is gone", listOf("Yo")))
+        // A blank name masks nothing.
+        assertEquals("Couldn't save it", CrashLog.maskMessage("Couldn't save it", listOf("", " ")))
+
+        val short = CrashLog(folder, about, hidden = { listOf("Al", "al") }, clock = { now })
+        val report = short.record("main", IllegalStateException("Couldn't add to Al, a map")).readText()
+        assertTrue(report.contains("java.lang.IllegalStateException: Couldn't add to …, a map\n"))
+    }
+
+    @Test
+    fun `Android's own handler gets the crash as the report has it, never a map's path or title`() {
+        val before = Thread.getDefaultUncaughtExceptionHandler()
+        val passed = mutableListOf<Throwable>()
+        // Android's handler, which writes what it gets to the phone's log and the system's crash reports.
+        Thread.setDefaultUncaughtExceptionHandler { _, error -> passed += error }
+
+        try {
+            log.install()
+            val crashes = Thread.getDefaultUncaughtExceptionHandler()!!
+            val cause = IOException("Couldn't add the map trip-to-lisbon at /data/user/0/com.hyuchia.orbit/files/maps/trip-to-lisbon/map.md")
+            val error = IllegalStateException("Couldn't open Trip to Lisbon", cause)
+            error.addSuppressed(PageException("- Beach day with Ana"))
+            crashes.uncaughtException(Thread.currentThread(), error)
+
+            val given = passed.single()
+            val printed = StringWriter().also { given.printStackTrace(PrintWriter(it)) }.toString()
+            assertTrue(printed.startsWith("java.lang.IllegalStateException: Couldn't open …\n\tat com.hyuchia.orbit.data.CrashLogTest."))
+            assertTrue(printed.contains("Caused by: java.io.IOException: Couldn't add the map … at …\n"))
+            assertTrue(printed.contains("Suppressed: com.hyuchia.orbit.data.CrashLogTest\$PageException\n"))
+            assertFalse(printed.contains("Lisbon", ignoreCase = true))
+            assertFalse(printed.contains("/data/"))
+            assertFalse(printed.contains("Beach"))
+            assertEquals("Couldn't open …", given.message)
+            // Where it happened, exactly as it was.
+            assertEquals(error.stackTrace.toList(), given.stackTrace.toList())
+            assertEquals(cause.stackTrace.toList(), given.cause!!.stackTrace.toList())
+            // And the report is kept, as ever.
+            assertEquals(1, log.reports().size)
+
+            // A crash with nothing to mask goes on as it is, its kind the system's to see.
+            now += 1_000
+            val plain = IllegalArgumentException("A goal can't be below zero")
+            crashes.uncaughtException(Thread.currentThread(), plain)
+            assertSame(plain, passed.last())
+
+            // Causes that loop end as they do in the report.
+            now += 1_000
+            val first = IllegalStateException("first Trip to Lisbon")
+            val second = IllegalArgumentException("second", first)
+            first.initCause(second)
+            crashes.uncaughtException(Thread.currentThread(), second)
+            val looped = StringWriter().also { passed.last().printStackTrace(PrintWriter(it)) }.toString()
+            assertTrue(looped.contains("CIRCULAR REFERENCE"))
+            assertFalse(looped.contains("Lisbon"))
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(before)
+        }
     }
 }

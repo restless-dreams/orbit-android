@@ -12,6 +12,39 @@ class MapTagsTest {
         assertEquals(listOf("solo"), MapTags.read("---\ntags: solo\n---\n# Trip\n"))
     }
 
+    // Each read below is what Orbit's own YAML reading of the frontmatter gives (web/look.ts's tagsOf over parseOrbit).
+
+    @Test
+    fun `a comment after the tags is no tag, nor part of one`() {
+        assertEquals(listOf("work", "japan trip"), MapTags.read("---\ntags: [work, japan trip] # the map's\n---\n# Trip\n"))
+        assertEquals(listOf("work", "trip"), MapTags.read("---\ntags: work, trip # the map's\n---\n# Trip\n"))
+        assertEquals(listOf("work", "a # b"), MapTags.read("---\ntags:\n  - work # first\n  - \"a # b\" # second\n---\n# Trip\n"))
+        assertEquals(listOf("work", "trip"), MapTags.read("---\ntags:\n  - work\n  # the next one too\n  - trip\n---\n# Trip\n"))
+        assertEquals(listOf("Biology", "plants"), MapTags.read("tags: [Biology, plants] # school\nnodes:\n  - text: Photosynthesis\n"))
+        // A hash inside a word, or one a value starts with, is the tag's own.
+        assertEquals(listOf("C#", "web"), MapTags.read("---\ntags: [C#, web]\n---\n# Trip\n"))
+        assertEquals(listOf("C#", "web"), MapTags.read("---\ntags: C#, web\n---\n# Trip\n"))
+    }
+
+    @Test
+    fun `a quoted tag keeps its commas, quotes and escapes`() {
+        assertEquals(listOf("say \"hi\", then go", "work"), MapTags.read("---\ntags: [\"say \\\"hi\\\", then go\", work]\n---\n# Trip\n"))
+        assertEquals(listOf("it's, here", "work"), MapTags.read("---\ntags: ['it''s, here', work]\n---\n# Trip\n"))
+        assertEquals(listOf("back\\slash", "été"), MapTags.read("---\ntags: [\"back\\\\slash\", \"\\u00e9t\\u00e9\"]\n---\n# Trip\n"))
+        // An apostrophe inside a word opens no quotes.
+        assertEquals(listOf("it's", "work"), MapTags.read("---\ntags: [it's, work]\n---\n# Trip\n"))
+        // Words in quotes, apart with commas, are tags apart.
+        assertEquals(listOf("work", "trip"), MapTags.read("---\ntags: \"work, trip\"\n---\n# Trip\n"))
+    }
+
+    @Test
+    fun `a list of tags may go on over several lines, and is written over whole`() {
+        val text = "---\ntags: [work,\n  japan trip] # both\ntheme: night\n---\n# Trip\n"
+
+        assertEquals(listOf("work", "japan trip"), MapTags.read(text))
+        assertEquals("---\ntags: [home]\ntheme: night\n---\n# Trip\n", MapTags.write(text, listOf("home")))
+    }
+
     @Test
     fun `a tag is the same whatever its capitals, and loses a leading hash`() {
         assertEquals(listOf("Work", "trip"), MapTags.read("---\ntags: [Work, \"#trip\", work, '  trip ']\n---\n# Trip\n"))

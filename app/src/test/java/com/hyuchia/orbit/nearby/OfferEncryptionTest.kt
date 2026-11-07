@@ -8,16 +8,19 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayOutputStream
-import java.io.File
+import java.io.FilterOutputStream
 import java.io.InputStream
+import java.io.PipedInputStream
+import java.io.PipedOutputStream
 import java.nio.ByteBuffer
-import java.nio.file.Files
 import java.security.DigestInputStream
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.MessageDigest
 import java.security.spec.ECGenParameterSpec
 import java.util.Random
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.concurrent.thread
 
 /** Where a sealed offer's chunk count is: the header's last 4 bytes. */
 private const val COUNT_AT = HEADER_BYTES - 4
@@ -132,46 +135,57 @@ class OfferEncryptionTest {
     }
 
     @Test
-    fun `an offer as big as the limit opens, read as a stream`() {
-        // The largest offer whose sealed form fits OFFER_LIMIT.
-        val size = OFFER_LIMIT - HEADER_BYTES - chunkCount(OFFER_LIMIT) * TAG_BYTES.toLong()
-        assertEquals(OFFER_LIMIT, sealedLength(size))
+    fun `an offer as big as the limit opens, read as a stream as it's sealed`() {
+        // The largest offer whose sealed form fits OFFER_LIMIT: a map's zip at a gigabyte and more, never written anywhere.
+        var size = OFFER_LIMIT - HEADER_BYTES - chunkCount(OFFER_LIMIT) * TAG_BYTES.toLong()
+
+        while (sealedLength(size + 1) <= OFFER_LIMIT) {
+            size += 1
+        }
+
+        assertTrue(sealedLength(size) <= OFFER_LIMIT)
         assertTrue(sealedLength(size + 1) > OFFER_LIMIT)
         val (sending, receiving) = pair()
-        val file = File.createTempFile("sealed", ".bin")
+        val sent = MessageDigest.getInstance("SHA-256")
+        val pipe = PipedInputStream(1024 * 1024)
+        val into = PipedOutputStream(pipe)
+        val sealedBytes = AtomicLong()
 
-        try {
-            val sent = MessageDigest.getInstance("SHA-256")
-
-            file.outputStream().buffered().use { output ->
-                DigestInputStream(SeededStream(size), sent).use { sending.seal(it, size, output) }
+        // Sealed on one thread as it's opened on another, as a map goes over the network.
+        val sealing = thread {
+            val counted = object : FilterOutputStream(into) {
+                override fun write(bytes: ByteArray, offset: Int, length: Int) {
+                    out.write(bytes, offset, length)
+                    sealedBytes.addAndGet(length.toLong())
+                }
             }
 
-            assertEquals(OFFER_LIMIT, file.length())
-            val received = MessageDigest.getInstance("SHA-256")
+            counted.buffered().use { output -> DigestInputStream(SeededStream(size), sent).use { sending.seal(it, size, output) } }
+        }
 
-            val count = DigestInputStream(receiving.open(file.inputStream().buffered(), OFFER_LIMIT), received).use { input ->
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                var total = 0L
+        val received = MessageDigest.getInstance("SHA-256")
 
-                while (true) {
-                    val read = input.read(buffer)
+        val count = DigestInputStream(receiving.open(pipe, OFFER_LIMIT), received).use { input ->
+            val buffer = ByteArray(64 * 1024)
+            var total = 0L
 
-                    if (read < 0) {
-                        break
-                    }
+            while (true) {
+                val read = input.read(buffer)
 
-                    total += read
+                if (read < 0) {
+                    break
                 }
 
-                total
+                total += read
             }
 
-            assertEquals(size, count)
-            assertArrayEquals(sent.digest(), received.digest())
-        } finally {
-            Files.deleteIfExists(file.toPath())
+            total
         }
+
+        sealing.join()
+        assertEquals(sealedLength(size), sealedBytes.get())
+        assertEquals(size, count)
+        assertArrayEquals(sent.digest(), received.digest())
     }
 
     @Test
@@ -339,6 +353,34 @@ class OfferEncryptionTest {
         // A commitment made for another offer doesn't open in this one.
         val (other, _) = pair()
         assertFalse(receiving.isCommitted(other.commitment(half), half))
+    }
+
+    @Test
+    fun `only the two devices can prove where an offer is, and only for that offer and state`() {
+        val (sending, receiving) = pair()
+        val proof = receiving.stateProof("offer-1", "opened")
+        assertTrue(sending.isProof("offer-1", "opened", proof))
+        assertFalse(sending.isProof("offer-1", "declined", proof))
+        assertFalse(sending.isProof("offer-2", "opened", proof))
+
+        // Anyone else's session, as one answering in the receiver's place would have, makes another.
+        val (other, _) = pair()
+        assertFalse(sending.isProof("offer-1", "opened", other.stateProof("offer-1", "opened")))
+    }
+
+    @Test
+    fun `the receiver's half of the check code says it proves its answers, and is random besides`() {
+        val halves = List(100) { receiverNonce() }
+
+        halves.forEach { half ->
+            assertEquals(CHECK_NONCE_BYTES, half.size)
+            assertTrue(provesStates(half))
+        }
+
+        assertEquals(100, halves.map { it.toList() }.toSet().size)
+        // Orbit 0.3.0's and 0.4.0's halves are all random: they don't.
+        assertFalse(provesStates(randomBytes(CHECK_NONCE_BYTES)))
+        assertFalse(provesStates(receiverNonce().copyOf(CHECK_NONCE_BYTES - 1)))
     }
 
     /** `size` bytes of a seeded generator, without keeping them. */

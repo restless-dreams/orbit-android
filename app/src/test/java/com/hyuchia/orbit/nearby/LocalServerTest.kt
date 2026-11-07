@@ -1,11 +1,16 @@
 package com.hyuchia.orbit.nearby
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -15,6 +20,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
 import java.io.IOException
+import java.io.OutputStream
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.Inet6Address
@@ -26,7 +32,9 @@ import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 
 class LocalServerTest {
     private val servers = mutableListOf<LocalServer>()
@@ -545,6 +553,29 @@ class LocalServerTest {
     }
 
     @Test
+    fun aPageInAFileGoesAsItsReadWithItsOwnPolicyInPlaceOfAFiles() {
+        // A map's web page, made in a file: the server reads it as it sends it, and sends its scripts' policy with it.
+        val file = File(kept, "page.html").apply { writeText(PAGE) }
+        val scripts = inlineScripts(PAGE)
+        val first = server { Response.pageFile(file, pagePolicy(scripts), mapOf("Referrer-Policy" to "strict-origin")) }
+        val page = request(first.port, "/123456/")
+
+        assertEquals(200, page.status)
+        assertEquals("text/html; charset=utf-8", page.header("content-type"))
+        assertEquals(PAGE, page.body)
+        assertEquals(PAGE.toByteArray().size.toString(), page.header("content-length"))
+        // The same policy as the page made in memory, whose scripts are read from it as it's sent: never a file's.
+        assertEquals(pagePolicy(PAGE), page.header("content-security-policy"))
+        assertEquals("strict-origin", page.header("referrer-policy"))
+        assertTrue(file.isFile)
+
+        // One made for a single answer goes once it's sent.
+        val once = server { Response.pageFile(file, pagePolicy(scripts), temporary = true) }
+        assertEquals(PAGE, request(once.port, "/123456/").body)
+        assertTrue(eventually { !file.exists() })
+    }
+
+    @Test
     fun headersAHandlerMakesCantAddLinesOfTheirOwn() {
         val server = server { Response.Bytes(200, "text/plain", "ok".toByteArray(), mapOf("X-Name" to "a\r\nSet-Cookie: b=c", "X-Fine" to "yes")) }
         val answer = request(server.port, "/")
@@ -754,6 +785,121 @@ class LocalServerTest {
     }
 
     @Test
+    fun aStreamedBodyReachesItsHandlerAsItArrivesNeverInAFile() {
+        val firstHalf = CountDownLatch(1)
+
+        val server = LocalServer(
+            { _, _ -> 10_000_000 },
+            spool,
+            policy = anyone,
+            admit = { Admission.Read(streamed = true) },
+        ) { request ->
+            withContext(Dispatchers.IO) {
+                request.bodyStream().use { input ->
+                    // The handler has its first half while the rest is still on its way, as a map that opens as it arrives.
+                    val half = ByteArray(1_000_000)
+                    var read = 0
+
+                    while (read < half.size) {
+                        read += input.read(half, read, half.size - read)
+                    }
+
+                    firstHalf.countDown()
+                    val rest = input.readBytes().size
+                    Response.text(200, "${read + rest} bytes as they came, ${spool.list()!!.size} spooled")
+                }
+            }
+        }.also {
+            servers += it
+            it.start(0)
+        }
+
+        val socket = connect(server.port).also { sockets += it }
+        val output = socket.getOutputStream()
+        output.write("POST /upload HTTP/1.1\r\nHost: 127.0.0.1:${server.port}\r\nContent-Length: 2000000\r\n\r\n".toByteArray())
+        output.write(ByteArray(1_000_000))
+        output.flush()
+        assertTrue(firstHalf.await(5, TimeUnit.SECONDS))
+        output.write(ByteArray(1_000_000))
+        output.flush()
+
+        val answer = socket.getInputStream().bufferedReader().readText()
+        assertTrue(answer, answer.endsWith("2000000 bytes as they came, 0 spooled"))
+    }
+
+    @Test
+    fun aStreamedBodyEndsWhereItSaysItDoesOrSaysItWasCutShort() {
+        val read = AtomicReference<String>()
+        val answered = AtomicReference(CountDownLatch(1))
+
+        val server = LocalServer({ _, _ -> 10_000 }, policy = anyone, admit = { Admission.Read(streamed = true) }) { request ->
+            withContext(Dispatchers.IO) {
+                read.set(
+                    try {
+                        "${request.bodyStream().readBytes().size} bytes"
+                    } catch (short: BodyCutShortException) {
+                        "cut short"
+                    },
+                )
+
+                answered.get().countDown()
+                Response.text(200, read.get())
+            }
+        }.also {
+            servers += it
+            it.start(0)
+        }
+
+        // What follows the body on the connection isn't its.
+        assertEquals("5 bytes", exchange(server.port, "POST /upload HTTP/1.1\r\nHost: 127.0.0.1:${server.port}\r\nContent-Length: 5\r\n\r\n12345 and more").body)
+        answered.set(CountDownLatch(1))
+
+        connect(server.port).use { socket ->
+            socket.getOutputStream().write("POST /upload HTTP/1.1\r\nHost: 127.0.0.1:${server.port}\r\nContent-Length: 100\r\n\r\nshort".toByteArray())
+            socket.shutdownOutput()
+            assertTrue(answered.get().await(5, TimeUnit.SECONDS))
+        }
+
+        assertEquals("cut short", read.get())
+    }
+
+    @Test
+    fun aStreamedBodyThatDripsInIsCutOffAsAnyBodyIs() {
+        val server = LocalServer(
+            { _, _ -> 10_000 },
+            policy = anyone,
+            timings = ServerTimings(body = 300, bodyPerMegabyte = 1_000, tick = 20),
+            admit = { Admission.Read(streamed = true) },
+        ) { request ->
+            withContext(Dispatchers.IO) { Response.text(200, "${request.bodyStream().readBytes().size} bytes") }
+        }.also {
+            servers += it
+            it.start(0)
+        }
+
+        val socket = connect(server.port).also { sockets += it }
+        val output = socket.getOutputStream()
+        output.write("POST /upload HTTP/1.1\r\nHost: 127.0.0.1:${server.port}\r\nContent-Length: 1000\r\n\r\n".toByteArray())
+        val started = System.nanoTime()
+
+        // Read by its handler as it comes, the body still has only the time a body of its size has.
+        val cut = try {
+            repeat(50) {
+                output.write('X'.code)
+                output.flush()
+                Thread.sleep(100)
+            }
+
+            socket.getInputStream().read() < 0
+        } catch (closed: IOException) {
+            true
+        }
+
+        assertTrue(cut)
+        assertTrue((System.nanoTime() - started) / 1_000_000 < 3_000)
+    }
+
+    @Test
     fun aBigBodyHasTimeForItsSize() {
         // 300 ms, and a second for each megabyte: two megabytes coming in over a second arrive whole.
         val server = server(bodyLimit = 4L * 1024 * 1024, spool = spool, timings = ServerTimings(body = 300, bodyPerMegabyte = 1_000, tick = 20)) { request ->
@@ -773,6 +919,67 @@ class LocalServerTest {
         val answer = socket.getInputStream().bufferedReader().readText()
         assertTrue(answer, answer.startsWith("HTTP/1.1 200 OK"))
         assertTrue(answer, answer.endsWith("2000000 bytes"))
+    }
+
+    @Test
+    fun stoppingTheServerCancelsWhatItsHandlersAreStillDoing() {
+        val started = CountDownLatch(1)
+        val cancelled = CountDownLatch(1)
+
+        // A handler waiting for something that takes a while, as a page or a zip being made.
+        val server = server { _ ->
+            try {
+                started.countDown()
+                awaitCancellation()
+            } finally {
+                cancelled.countDown()
+            }
+        }
+
+        val asking = thread { runCatching { request(server.port, "/slow") } }
+        assertTrue(started.await(10, TimeUnit.SECONDS))
+        server.stop()
+        assertTrue("The handler goes on after the server stopped", cancelled.await(10, TimeUnit.SECONDS))
+        asking.join(10_000)
+    }
+
+    @Test
+    fun blockingWorkWritingABigAnswerStopsAsTheServerStops() {
+        val writing = CountDownLatch(1)
+        val stopped = AtomicReference<Throwable?>(null)
+        val written = AtomicLong()
+
+        // A big answer made a piece at a time, as a map's zip is, by blocking code that never looks at its coroutine.
+        val server = server { _ ->
+            val job = currentCoroutineContext().job
+
+            try {
+                withContext(Dispatchers.IO) {
+                    WhileActive(OutputStream.nullOutputStream(), job).use { output ->
+                        while (written.get() < Long.MAX_VALUE / 2) {
+                            output.write(ByteArray(8 * 1024))
+                            written.addAndGet(8 * 1024)
+                            writing.countDown()
+                        }
+                    }
+                }
+            } catch (failure: Throwable) {
+                stopped.set(failure)
+                throw failure
+            }
+
+            Response.text(200, "never")
+        }
+
+        val asking = thread { runCatching { request(server.port, "/big") } }
+        assertTrue(writing.await(10, TimeUnit.SECONDS))
+        server.stop()
+        assertTrue(eventually { stopped.get() != null })
+        assertTrue(stopped.get().toString(), stopped.get() is CancellationException)
+        val after = written.get()
+        Thread.sleep(200)
+        assertEquals(after, written.get())
+        asking.join(10_000)
     }
 
     private companion object {

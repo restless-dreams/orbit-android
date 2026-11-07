@@ -1,5 +1,6 @@
 package com.hyuchia.orbit.ui
 
+import com.hyuchia.orbit.data.IdeaDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -36,6 +37,8 @@ private val androidDays: PatternsFor = { locale, fields ->
         "MMMMd" -> if (spanish) "d 'de' MMMM" else "MMMM d"
         "EEEEMMMMd" -> if (spanish) "EEEE, d 'de' MMMM" else "EEEE, MMMM d"
         "yMMMMd" -> if (spanish) "d 'de' MMMM 'de' y" else "MMMM d, y"
+        "EEEMMMd" -> if (spanish) "EEE, d MMM" else "EEE, MMM d"
+        "EEEyMMMd" -> if (spanish) "EEE, d MMM y" else "EEE, MMM d, y"
         else -> jdkPatterns(locale, fields)
     }
 }
@@ -99,6 +102,18 @@ class TimeWordsTest {
     fun `a calendar the language was given doesn't change Orbit's dates or times`() {
         assertEquals("16:49", words("es-MX-u-ca-chinese-hc-h23", is24Hour = true).clock(fourFortyNine).spaced())
         assertEquals("21 oct 2026", words("es-MX-u-ca-hebrew", is24Hour = false).date(fourFortyNine))
+    }
+
+    @Test
+    fun `an idea's date reads with its weekday, its year when it's another year's, and its time on the phone's clock`() {
+        val today = LocalDate.of(2026, 11, 18)
+        fun words(tag: String, is24Hour: Boolean) = words(tag, is24Hour, androidDays)
+
+        assertEquals("Fri, Nov 20", words("en-US", is24Hour = false).ideaDate(IdeaDate.parse("2026-11-20")!!, today))
+        assertEquals("Fri, Nov 20, 6:30 PM", words("en-US", is24Hour = false).ideaDate(IdeaDate.parse("2026-11-20 18:30")!!, today).spaced())
+        assertEquals("Fri, Nov 20, 18:30", words("en-US", is24Hour = true).ideaDate(IdeaDate.parse("2026-11-20 18:30")!!, today))
+        assertEquals("Tue, Jan 5, 2027", words("en-US", is24Hour = false).ideaDate(IdeaDate.parse("2027-01-05")!!, today))
+        assertEquals("vie, 20 nov, 18:30", words("es-MX", is24Hour = true).ideaDate(IdeaDate.parse("2026-11-20 18:30")!!, today).spaced())
     }
 
     @Test

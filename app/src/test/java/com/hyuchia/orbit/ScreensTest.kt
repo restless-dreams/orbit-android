@@ -37,9 +37,10 @@ private const val PHONE_ON_ITS_SIDE = "w891dp-h411dp-land-mdpi"
 private const val TABLET = "w800dp-h1280dp-port-mdpi"
 private const val TABLET_ON_ITS_SIDE = "w1280dp-h800dp-land-mdpi"
 
-/** The phone in dark, and in Spanish, whose words run longer. */
+/** The phone in dark, and in Spanish and Brazilian Portuguese, whose words run longer. */
 private const val PHONE_DARK = "w411dp-h891dp-port-night-mdpi"
 private const val PHONE_SPANISH = "es-w411dp-h891dp-port-mdpi"
+private const val PHONE_PORTUGUESE = "pt-rBR-w411dp-h891dp-port-mdpi"
 
 /**
  * Every pixel has to match its picture, to within a little color: anti-aliased
@@ -56,9 +57,10 @@ private val Matching = RoborazziOptions(
 
 /**
  * Home and Settings drawn on a phone and a tablet, each both ways up, and on
- * the phone in dark and in Spanish ("Phones and tablets, both ways up" in
- * AGENTS.md), and compared with their pictures in src/test/screenshots/.
- * The maps' own pictures, which WebViews draw, show their placeholder here.
+ * the phone in dark, in Spanish and in Brazilian Portuguese ("Phones and
+ * tablets, both ways up" in AGENTS.md), and compared with their pictures in
+ * src/test/screenshots/. The maps' own pictures, which WebViews draw, show
+ * their placeholder here.
  * Both screens reach the app's container, so these start OrbitApplication
  * rather than robolectric.properties' plain Application.
  */
@@ -87,6 +89,9 @@ class ScreensTest {
     @Test @Config(qualifiers = PHONE_SPANISH)
     fun homeInSpanish() = home("phone-spanish")
 
+    @Test @Config(qualifiers = PHONE_PORTUGUESE)
+    fun homeInPortuguese() = home("phone-portuguese")
+
     @Test @Config(qualifiers = PHONE)
     fun settingsOnAPhone() = settings("phone")
 
@@ -104,6 +109,9 @@ class ScreensTest {
 
     @Test @Config(qualifiers = PHONE_SPANISH)
     fun settingsInSpanish() = settings("phone-spanish")
+
+    @Test @Config(qualifiers = PHONE_PORTUGUESE)
+    fun settingsInPortuguese() = settings("phone-portuguese")
 
     private fun home(shape: String) {
         // As Orbit starts: the maps are read, and the welcome map written the first time.

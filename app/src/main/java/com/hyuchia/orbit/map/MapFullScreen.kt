@@ -23,5 +23,5 @@ internal fun MapFullScreen(model: MapViewModel, ui: MapUi, sound: SoundState?) {
     }
 
     // After the pictures, so a video started from them plays over them, and they're still there after it.
-    ui.playing?.let { item -> VideoScreen(item, resolve = model::mediaModel, onClosed = model::stopPlaying) }
+    ui.playing?.let { item -> VideoScreen(model.id, item, resolve = model::mediaModel, onClosed = model::stopPlaying) }
 }

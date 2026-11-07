@@ -9,6 +9,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.zip.CRC32
@@ -190,6 +192,173 @@ class SharedPicturesTest {
         assertEquals(0x10 or 0x08, shared[20].toInt())
         assertArrayEquals(orientationOnly(3), shared.copyOfRange(exif + 8, exif + 8 + 26))
         assertEquals(shared.size - 8, ByteBuffer.wrap(shared, 4, 4).order(ByteOrder.LITTLE_ENDIAN).int)
+    }
+
+    /** `png` with a chunk of `type` holding `data` put before its first chunk of type `before`. */
+    private fun withChunk(png: ByteArray, before: String, type: String, data: ByteArray): ByteArray {
+        val at = chunkStarts(png).first { text(png.copyOfRange(it + 4, it + 8)) == before }
+        return png.copyOfRange(0, at) + chunk(type, data) + png.copyOfRange(at, png.size)
+    }
+
+    /** Where each of the PNG's chunks starts. */
+    private fun chunkStarts(png: ByteArray): List<Int> {
+        val starts = mutableListOf<Int>()
+        var position = 8
+
+        while (position + 12 <= png.size) {
+            starts += position
+            position += 12 + ByteBuffer.wrap(png, position, 4).int
+        }
+
+        return starts
+    }
+
+    /** Content credentials as an editor writes them into a PNG: a JUMBF box saying who made the picture, where and when. */
+    private val credentials = latin("jumb c2pa.claim: made by Test person with Test editor, $place, 2026-10-21")
+
+    @Test
+    fun `a PNG keeps only the chunks that draw it, not those apps keep their own in`() {
+        // As ImageMagick writes a picture: its colors' chromaticities and background, when it was made, and its dates as text.
+        val written = File("src/test/resources/outgoing/edited.png").readBytes()
+        val withPrivate = withChunk(withChunk(written, "IDAT", "prVt", latin("Test editor's own, $place")), "IEND", "caBX", credentials)
+        val shared = SharedPictures.withoutMetadata(withPrivate)!!
+
+        assertFalse(text(shared).contains("Lisbon"))
+        assertFalse(text(shared).contains("Test"))
+        assertArrayEquals(shared, streamed(withPrivate))
+        assertEquals(listOf("IHDR", "cHRM", "bKGD", "IDAT", "IEND"), chunks(shared).map { it.first })
+        // Every chunk it keeps is the written one, byte for byte, and so are its pixels.
+        val kept = chunks(written).filter { it.first in setOf("IHDR", "cHRM", "bKGD", "IDAT", "IEND") }
+        assertEquals(kept.map { it.first to text(it.second) }, chunks(shared).map { it.first to text(it.second) })
+        assertEquals(pixels(written), pixels(shared))
+    }
+
+    @Test
+    fun `an animated PNG keeps every frame as it was, without an app's chunks between them`() {
+        // As ffmpeg writes an animation: three frames of 24 by 16, looping.
+        val animation = File("src/test/resources/outgoing/animated.png").readBytes()
+        val withPrivate = withChunk(withChunk(animation, "fdAT", "prVt", latin("Test editor's own, $place")), "IEND", "caBX", credentials)
+
+        // Its header, how big it prints, the animation's control, and each frame's control and data, as they were, from memory or a piece at a time.
+        assertArrayEquals(animation, SharedPictures.withoutMetadata(withPrivate))
+        assertArrayEquals(animation, streamed(withPrivate))
+        assertArrayEquals(animation, SharedPictures.withoutMetadata(animation))
+    }
+
+    @Test
+    fun `a PNG with a chunk it can't be read without, of a kind Orbit doesn't know, doesn't go clean`() {
+        val png = File("src/test/resources/outgoing/edited.png").readBytes()
+
+        // Apple's CgBI, before the header, changes how everything after it reads: what it holds can't be told.
+        assertNull(SharedPictures.withoutMetadata(withChunk(png, "IHDR", "CgBI", ByteArray(4))))
+        assertNull(streamed(withChunk(png, "IHDR", "CgBI", ByteArray(4))))
+        assertNull(SharedPictures.withoutMetadata(withChunk(png, "IDAT", "Te5t", latin(place))))
+    }
+
+    /** A chunk of a WebP's RIFF: its type, its size, little-endian, what it holds, and a byte of padding after an odd size. */
+    private fun webPChunk(type: String, data: ByteArray): ByteArray {
+        val padded = if (data.size % 2 == 1) data + 0.toByte() else data
+        return latin(type) + ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(data.size).array() + padded
+    }
+
+    /** A WebP of these chunks. */
+    private fun webP(vararg chunks: ByteArray): ByteArray {
+        val body = latin("WEBP") + chunks.fold(ByteArray(0)) { all, chunk -> all + chunk }
+        return latin("RIFF") + ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(body.size).array() + body
+    }
+
+    /** A WebP's chunks, each as its type and its bytes, header and padding included. */
+    private fun webPChunks(webP: ByteArray, from: Int = 12, until: Int = webP.size): List<Pair<String, ByteArray>> {
+        val found = mutableListOf<Pair<String, ByteArray>>()
+        var position = from
+
+        while (position + 8 <= until) {
+            val size = ByteBuffer.wrap(webP, position + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
+            val end = minOf(until, position + 8 + size + size % 2)
+            found += text(webP.copyOfRange(position, position + 4)) to webP.copyOfRange(position, end)
+            position = end
+        }
+
+        return found
+    }
+
+    @Test
+    fun `an animated WebP keeps every frame as it was, without an app's chunks beside or inside them`() {
+        val animation = File("src/test/resources/animations/orbit.webp").readBytes()
+        val chunks = webPChunks(animation)
+        val first = chunks.indexOfFirst { it.first == "ANMF" }
+        val frame = chunks[first].second
+        // An app's chunk inside the first frame, after its image data, as the format lets frames carry.
+        val frameWithPrivate = webPChunk("ANMF", frame.copyOfRange(8, frame.size) + webPChunk("TEST", latin("Test editor's own, $place")))
+        val withPrivate = webP(
+            *chunks.take(first).map { it.second }.toTypedArray(),
+            webPChunk("C2PA", credentials),
+            frameWithPrivate,
+            *chunks.drop(first + 1).map { it.second }.toTypedArray(),
+            webPChunk("XMP ", latin("<x:xmpmeta>$place</x:xmpmeta>")),
+        )
+        assertTrue(text(withPrivate).contains("Lisbon"))
+
+        // Its features, its animation and each of its 48 frames, byte for byte, from memory or a piece at a time.
+        assertArrayEquals(animation, SharedPictures.withoutMetadata(withPrivate))
+        assertArrayEquals(animation, streamed(withPrivate))
+        assertArrayEquals(animation, SharedPictures.withoutMetadata(animation))
+    }
+
+    @Test
+    fun `a WebP with transparency keeps it, and what follows its RIFF isn't the picture's`() {
+        val still = File("src/test/resources/animations/still-alpha.webp").readBytes()
+        // A chunk that would draw, after where the RIFF says the file ends: it isn't the picture's.
+        val after = still + webPChunk("ICCP", latin("Test profile, $place"))
+
+        assertArrayEquals(still, SharedPictures.withoutMetadata(webP(*webPChunks(still).map { it.second }.toTypedArray(), webPChunk("TEST", latin(place)))))
+        assertArrayEquals(still, SharedPictures.withoutMetadata(after))
+        assertArrayEquals(still, streamed(after))
+        // A RIFF that says it goes on past the file isn't whole.
+        assertNull(SharedPictures.withoutMetadata(still.copyOfRange(0, still.size - 20)))
+    }
+
+    /** The picture `bytes` go as when they're read from their file and written a piece at a time, as a map's go in its zip and its page. */
+    private fun streamed(bytes: ByteArray): ByteArray? {
+        val file = File.createTempFile("picture", ".bin").apply { writeBytes(bytes) }
+
+        try {
+            return RandomAccessFile(file, "r").use { input ->
+                SharedPictures.plan(PictureInFile(input))?.let { pieces ->
+                    ByteArrayOutputStream().also { pieces.writeTo(it, input) }.toByteArray().also { assertEquals(pieces.size, it.size.toLong()) }
+                }
+            }
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `a picture goes the same read from its file a piece at a time as from memory`() {
+        val pictures = listOf(
+            cameraJpeg(orientation = null),
+            cameraJpeg(orientation = 6),
+            cameraPng(orientation = null),
+            cameraPng(orientation = 8),
+            cameraWebP(orientation = null),
+            cameraWebP(orientation = 3),
+            // Bigger than what's read of its file at a time, its odd size padded.
+            cameraWebP(orientation = 5, pictureSize = 700_001),
+            editorGif(),
+        )
+
+        for (picture in pictures) {
+            val inMemory = SharedPictures.withoutMetadata(picture)
+            assertTrue(inMemory != null)
+            assertArrayEquals(inMemory, streamed(picture))
+            assertFalse(text(streamed(picture)!!).contains("Lisbon"))
+        }
+
+        // One that isn't whole, or of a kind that isn't read through so, isn't planned at all.
+        val camera = cameraJpeg(orientation = null)
+        assertNull(streamed(camera.copyOfRange(0, camera.size / 2)))
+        assertNull(streamed(latin("<svg xmlns=\"http://www.w3.org/2000/svg\"/>")))
+        assertNull(streamed(latin("BM")))
     }
 
     @Test

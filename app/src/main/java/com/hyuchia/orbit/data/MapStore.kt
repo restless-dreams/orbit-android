@@ -22,6 +22,9 @@ import java.util.UUID
 /** What the app remembers about a map, in its folder (see [MapMetadata]). */
 internal const val METADATA_FILE = "meta.json"
 
+/** A map's details that a version couldn't read at all, kept aside as it wrote new ones ([MapStore.writeMetadata]): `meta.json.unreadable-<time>`. */
+internal val UNREADABLE_METADATA = Regex("""${Regex.escape(METADATA_FILE)}\.unreadable-\d+""")
+
 /** How the maps' own JSON files are read and written: what a newer version added is skipped, and defaults aren't written. */
 internal val mapsJson = Json {
     ignoreUnknownKeys = true
@@ -77,17 +80,22 @@ internal class MapStore(
     /** The map in the list of maps, once they're read. */
     fun summary(id: String): MapSummary? = summaries.value?.firstOrNull { it.id == id }
 
-    /** The pictures, videos and sounds the map's text points at, that its folder has: what its zip carries. */
+    /** The pictures, videos, sounds and files the map's text points at, that its folder has: what its zip carries ([carriedNames]). */
     fun mediaFiles(folder: File, markdown: String): List<File> {
         val media = File(folder, MEDIA_DIRECTORY)
-        return MediaNames.references(markdown).filter(::isMediaName).map { File(media, it) }.filter { it.isFile }
+        return carriedNames(markdown).map { File(media, it) }.filter { it.isFile }
     }
 
-    /** How many bytes the pictures, videos and sounds the map has that its text, or `markdown`, points at come to. */
-    fun mediaSize(id: String, markdown: String? = null): Long {
+    /**
+     * How many bytes the pictures, videos and sounds the map has that its
+     * text, or `markdown`, points at come to, leaving out the file named
+     * `except` in its media folder: one that's counted on its own, as a
+     * picture is with the motion it's given.
+     */
+    fun mediaSize(id: String, markdown: String? = null, except: String? = null): Long {
         val folder = folder(id)
         val text = markdown ?: runCatching { File(folder, MAP_FILE).readTextSafely() }.getOrDefault("")
-        return mediaFiles(folder, text).sumOf { it.length() }
+        return mediaFiles(folder, text).filter { it.name != except }.sumOf { it.length() }
     }
 
     fun checkWritable() {
@@ -121,6 +129,7 @@ internal class MapStore(
         }
     }
 
+    /** Changes the map's details as they are now, under the lock; a change that gives them back as they were writes nothing. */
     suspend fun updateMetadata(id: String, change: (MapMetadata) -> MapMetadata) = withContext(Dispatchers.IO) {
         mutex.withLock {
             val folder = folder(id)
@@ -129,8 +138,13 @@ internal class MapStore(
                 return@withLock
             }
 
-            writeMetadata(folder, change(readMetadataToChange(folder)))
-            replace(summarize(folder))
+            val current = readMetadataToChange(folder)
+            val changed = change(current)
+
+            if (changed !== current) {
+                writeMetadata(folder, changed)
+                replace(summarize(folder))
+            }
         }
     }
 
@@ -159,7 +173,36 @@ internal class MapStore(
             metadata = metadata,
             searchText = MapText.searchText(markdown),
             contentKey = digest(markdown),
+            missingMedia = missingMedia(folder, markdown),
         )
+    }
+
+    /** The pictures, videos, sounds and files `markdown` points at that the map in `folder` doesn't have ([MapSummary.missingMedia]); its media is listed once. */
+    private fun missingMedia(folder: File, markdown: String): Set<String> {
+        val wanted = carriedNames(markdown)
+
+        if (wanted.isEmpty()) {
+            return emptySet()
+        }
+
+        val here = File(folder, MEDIA_DIRECTORY).list().orEmpty().toHashSet()
+        return wanted.filterNotTo(HashSet()) { it in here }
+    }
+
+    /**
+     * Media among `names` came into map `id`'s folder, from the folder maps
+     * are kept in or a zip: those its text points at are missing no more
+     * ([MapSummary.missingMedia]), and its picture on Home is drawn again
+     * with them. Expects the lock held.
+     */
+    fun mediaArrived(id: String, names: Set<String>) {
+        val summary = summary(id) ?: return
+        val media = File(folder(id), MEDIA_DIRECTORY)
+        val arrived = summary.missingMedia.filterTo(HashSet()) { it in names && File(media, it).isFile }
+
+        if (arrived.isNotEmpty()) {
+            replace(summary.copy(missingMedia = summary.missingMedia - arrived))
+        }
     }
 
     /**
@@ -230,9 +273,10 @@ internal class MapStore(
      * each. Each is read on its own, so one this version can't read doesn't
      * lose the rest; one whose `private` it can't read was a private map's, so
      * its file, back in the folder, comes back private ([SyncRecord.private]).
-     * Throws [IOException] when they're there but can't be read now: none is
-     * taken for no deletions, so no deleted map's file comes back as a map
-     * like any other, and nothing writes over them.
+     * Throws [IOException] when they're there but can't be read, now or at
+     * all (damaged, not a list of records): none is taken for no deletions,
+     * so no deleted map's file comes back as a map like any other, and
+     * nothing writes over them.
      */
     fun readTombstones(): List<SyncRecord> {
         if (!tombstones.isFile) {
@@ -240,7 +284,12 @@ internal class MapStore(
         }
 
         val text = tombstones.readText()
-        val records = runCatching { mapsJson.parseToJsonElement(text).jsonArray }.getOrNull() ?: return emptyList()
+
+        val records = try {
+            mapsJson.parseToJsonElement(text).jsonArray
+        } catch (damaged: IllegalArgumentException) {
+            throw IOException("The folder's deletions can't be read", damaged)
+        }
 
         return records.mapNotNull { record -> runCatching { mapsJson.decodeFromJsonElement(SyncRecord.serializer(), record) }.getOrNull() ?: privateTombstone(record) }
     }
@@ -287,7 +336,7 @@ internal abstract class MapPart(protected val store: MapStore) {
 
     protected fun mediaFiles(folder: File, markdown: String): List<File> = store.mediaFiles(folder, markdown)
 
-    protected fun mediaSize(id: String, markdown: String? = null): Long = store.mediaSize(id, markdown)
+    protected fun mediaSize(id: String, markdown: String? = null, except: String? = null): Long = store.mediaSize(id, markdown, except)
 
     protected fun checkWritable() = store.checkWritable()
 
@@ -306,6 +355,8 @@ internal abstract class MapPart(protected val store: MapStore) {
     protected fun insert(summary: MapSummary) = store.insert(summary)
 
     protected fun replace(summary: MapSummary) = store.replace(summary)
+
+    protected fun mediaArrived(id: String, names: Set<String>) = store.mediaArrived(id, names)
 
     protected fun newFolder(title: String): String = store.newFolder(title)
 

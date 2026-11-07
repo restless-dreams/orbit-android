@@ -79,11 +79,13 @@ Releasing for the first time on a store takes longer than the release itself: F-
 ## After the release
 
 8. **The Cast receiver:** TVs load the audience's page from https://orbit.hyuchia.com/cast. Put the one built with the release's pages there before the play build reaches anyone (step 11):
-   - `web/dist/cast-receiver/orbit-cast-receiver.html` is that page as one file, with its script inside.
-   - Building the pages from the release's commit writes it (CONTRIBUTING.md, "Casting to TVs").
+   - Building the pages from the release's commit writes it to `web/dist/cast-receiver/` (CONTRIBUTING.md, "Casting to TVs"). It goes up as two files: `receiver.js`, its script, and `index.html`, the page, a few kilobytes, which loads the script.
+   - The script first, unchanged, at an address of its own that no other release's uses, on an HTTPS host that answers with `Access-Control-Allow-Origin: *`. The page loads it as a module from another origin, and the page at /cast runs in a sandbox, so its requests say `Origin: null`: without that header, TVs don't run the script. Check the address answers with the same bytes, as `text/javascript`, and with the header when asked with `Origin: null`.
+   - Then the page: `index.html` with the script's full address in place of `receiver.js` in its last `<script>`, since a relative address can't be resolved from /cast. With the script put back inside it, it's `orbit-cast-receiver.html`, the receiver as one file, byte for byte.
+   - Keep the earlier release's page and script where they are: its page back at /cast is the way back.
    - Keep the receiver published in the Google Cast SDK Developer Console: an unpublished receiver only starts on test devices.
    - Every version of the app casts to it, so it keeps working with all of them. When the release raises `AUDIENCE_PROTOCOL`, the new receiver has to be up before the app ships.
-9. **The store pages:** their texts and pictures are in `fastlane/metadata/android/`: `en-US`, `es-419` and `es-ES`.
+9. **The store pages:** their texts and pictures are in `fastlane/metadata/android/`: `en-US`, `es-419`, `es-ES` and `pt-BR`. Brazilian Portuguese has its own feature graphic but no screenshots of its own yet, so the stores show the English ones for it.
    - F-Droid reads them from the tagged commit.
    - Google Play and AppGallery take them by hand, from the same files. For Google Play, `fastlane supply` can upload them instead, with a service account of the Play Console.
 10. **F-Droid:**
@@ -99,7 +101,7 @@ Releasing for the first time on a store takes longer than the release itself: F-
          - Data safety: Orbit itself collects and shares nothing. The microphone turns speech into ideas through the phone's speech service and records voice memos, which stay on the phone. The fingerprint, face or PIN unlock private maps through Android's own prompt. The local network server sends maps to the person's own devices and shows presentations in browsers in the room. Declare what Google's Cast library sends, as the privacy policy describes it: anonymous information about casting, with the phone's and Orbit's versions.
          - Content rating: the questionnaire.
          - Target audience: choosing ages under 13 brings Play's Families rules.
-      4. The store listing, in English and both Spanishes (step 9).
+      4. The store listing, in English, both Spanishes and Brazilian Portuguese (step 9).
       5. Release on the internal testing track first, then closed testing, then production. A personal developer account created after November 2023 has to run a closed test with at least 12 testers for 14 days before it can apply for production.
     - **Each release:** upload `orbit-x.y.z-play.aab` with its `mapping.txt`, and its What's new from `changelogs/<versionCode>.txt` in each language. Roll it out only after the receiver (step 8).
 12. **AppGallery:**

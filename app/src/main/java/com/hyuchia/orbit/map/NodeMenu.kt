@@ -13,6 +13,7 @@ import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
 import androidx.compose.material.icons.outlined.AddCircleOutline
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -21,14 +22,18 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.ControlPointDuplicate
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Draw
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.EmojiEmotions
+import androidx.compose.material.icons.outlined.Event
+import androidx.compose.material.icons.outlined.EventBusy
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.OpenWith
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Timelapse
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.UnfoldLess
@@ -54,8 +59,10 @@ import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.data.isVoiceMemo
 import com.hyuchia.orbit.page.MapNode
+import com.hyuchia.orbit.sketch.isSketchName
 import com.hyuchia.orbit.theme.parseCssColor
 import com.hyuchia.orbit.ui.ColorChoices
+import com.hyuchia.orbit.ui.rememberTimeWords
 
 /** What the long-press menu does with an idea. */
 sealed interface NodeAction {
@@ -69,6 +76,13 @@ sealed interface NodeAction {
     data object PickColor : NodeAction
 
     data class SetStatus(val status: String?) : NodeAction
+
+    /** Picks its date's day, or its time, in Material's pickers. */
+    data class PickDate(val part: DatePart) : NodeAction
+
+    /** Takes its date off. */
+    data object ClearDate : NodeAction
+
     data class SetColor(val color: String?) : NodeAction
     data class SetCollapsed(val collapsed: Boolean) : NodeAction
 
@@ -94,11 +108,17 @@ sealed interface NodeAction {
     /** Opens the recorder for a voice memo on it. */
     data object RecordMemo : NodeAction
 
+    /** Picks files from the device for it: any kind, several at once. */
+    data object AddFiles : NodeAction
+
     /** Plays its sound in the small player over the map, or pauses it. */
     data object PlaySound : NodeAction
+
+    /** Sketches on its planet: a new sketch, or more on the one it has. */
+    data object Sketch : NodeAction
 }
 
-private enum class MenuPage { Main, Status, Color, Move }
+private enum class MenuPage { Main, Status, Color, Date, Move }
 
 /** How many ideas are under idea `id` among `nodes`, all the way down: deleting it deletes them all. */
 internal fun ideasUnder(nodes: List<MapNode>, id: String): Int {
@@ -185,6 +205,17 @@ fun NodeMenu(
                     Item(stringResource(R.string.common_color), Icons.Outlined.Palette, more = true) { page = MenuPage.Color }
                     Item(stringResource(if (node.icon == null) R.string.map_add_an_icon else R.string.map_change_the_icon), Icons.Outlined.EmojiEmotions) { onAction(NodeAction.PickIcon) }
 
+                    // Its date: picked at once when it has none, and changed, timed or taken off when it has one.
+                    val shown = shownDate(node, rememberTimeWords())
+
+                    if (shown == null) {
+                        Item(stringResource(R.string.map_date_add), Icons.Outlined.Event) { onAction(NodeAction.PickDate(DatePart.Day)) }
+                    } else {
+                        Item(stringResource(if (shown.overdue) R.string.map_date_overdue_label else R.string.map_date_label, shown.text), Icons.Outlined.Event, more = true) {
+                            page = MenuPage.Date
+                        }
+                    }
+
                     // Its sound, and a voice memo, said into it.
                     if (node.audio != null) {
                         Item(stringResource(if (soundPlaying) R.string.audio_pause_the_sound else R.string.audio_play_the_sound), if (soundPlaying) Icons.Outlined.PauseCircle else Icons.Outlined.GraphicEq) {
@@ -193,6 +224,8 @@ fun NodeMenu(
                     }
 
                     Item(stringResource(if (node.audio?.src?.let(::isVoiceMemo) == true) R.string.audio_record_again else R.string.audio_record_a_voice_memo), Icons.Outlined.Mic) { onAction(NodeAction.RecordMemo) }
+                    Item(stringResource(if (node.image?.src?.let(::isSketchName) == true) R.string.sketch_keep_sketching else R.string.sketch_sketch), Icons.Outlined.Draw) { onAction(NodeAction.Sketch) }
+                    Item(stringResource(R.string.files_add_a_file), Icons.Outlined.AttachFile) { onAction(NodeAction.AddFiles) }
 
                     if (node.childCount > 0 && !node.isRoot) {
                         if (node.collapsed) {
@@ -238,10 +271,10 @@ fun NodeMenu(
                     PageHeader(stringResource(R.string.common_status)) { page = MenuPage.Main }
 
                     Statuses.forEach { (word, label, icon) ->
-                        Item(stringResource(label), icon, checked = node.status.equals(word, ignoreCase = true)) { onAction(NodeAction.SetStatus(word)) }
+                        Item(stringResource(label), icon, checked = node.hasStatus(word)) { onAction(NodeAction.SetStatus(word)) }
                     }
 
-                    Item(stringResource(R.string.map_no_status), Icons.Outlined.Clear, checked = node.status == null) { onAction(NodeAction.SetStatus(null)) }
+                    Item(stringResource(R.string.map_no_status), Icons.Outlined.Clear, checked = node.shownStatus == null) { onAction(NodeAction.SetStatus(null)) }
                 }
                 MenuPage.Color -> {
                     PageHeader(stringResource(R.string.common_color)) { page = MenuPage.Main }
@@ -254,6 +287,16 @@ fun NodeMenu(
                         onCustom = { onAction(NodeAction.PickColor) },
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     )
+                }
+                MenuPage.Date -> {
+                    PageHeader(stringResource(R.string.map_section_date)) { page = MenuPage.Main }
+                    Item(stringResource(R.string.map_date_change), Icons.Outlined.Event) { onAction(NodeAction.PickDate(DatePart.Day)) }
+
+                    Item(stringResource(if (node.date?.time == null) R.string.map_date_add_time else R.string.map_date_change_time), Icons.Outlined.Schedule) {
+                        onAction(NodeAction.PickDate(DatePart.Time))
+                    }
+
+                    Item(stringResource(R.string.map_date_remove), Icons.Outlined.EventBusy) { onAction(NodeAction.ClearDate) }
                 }
                 MenuPage.Move -> {
                     PageHeader(stringResource(R.string.map_move)) { page = MenuPage.Main }

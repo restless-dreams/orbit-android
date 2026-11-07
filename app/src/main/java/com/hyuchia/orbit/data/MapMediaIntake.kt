@@ -23,10 +23,18 @@ private const val PICTURE_SIZE = 2048
 /** Where pictures and movies coming in are copied to be read whole, beside the maps: emptied as the maps load. */
 internal const val INCOMING_DIRECTORY = "incoming"
 
-/** The most a picture or movie coming in is copied to be read: far more than any a phone takes. */
-private const val INCOMING_LIMIT = 256L * 1024 * 1024
+/**
+ * The most a picture or movie coming in is copied to be read: far more than
+ * any a phone takes, and more than a file of a map's may be
+ * ([MEDIA_FILE_LIMIT]), so a live photo that fits one is always read whole.
+ */
+internal const val INCOMING_LIMIT = 256L * 1024 * 1024
 
-/** The most a movie is read to tell whether it's a live photo's: an iPhone's is a few megabytes. */
+/**
+ * The most a movie is read to tell whether it's a live photo's: an iPhone's
+ * is a few megabytes. It stays as it is while maps take bigger files: a
+ * longer video is a video, and isn't copied to be read.
+ */
 private const val LIVE_MOVIE_MOST = 64L * 1024 * 1024
 
 /** A video's poster is at most this many pixels on its longer side: enough for a planet, and for the viewer until the video plays. */
@@ -38,8 +46,12 @@ private const val POSTER_AT_MOST_MILLISECONDS = 2_000L
 /** Room on the device that copying a video in always leaves free. */
 private const val VIDEO_SPARE_ROOM = 64L * 1024 * 1024
 
-/** A video copied into a map's folder, and its poster beside it when the phone could read a frame, as the map points at them. */
-data class AddedVideo(val src: String, val thumbnail: String?)
+/**
+ * A video copied into a map's folder, and its poster beside it when the
+ * phone could read a frame, as the map points at them; `bytes` is how big
+ * one made smaller came out.
+ */
+data class AddedVideo(val src: String, val thumbnail: String?, val bytes: Long = 0)
 
 /**
  * A picture copied into a map's folder, as the map points at it, and the
@@ -48,6 +60,13 @@ data class AddedVideo(val src: String, val thumbnail: String?)
  * its motion may come to, so the picture came alone.
  */
 data class AddedPicture(val src: String, val motion: AddedMotion? = null, val motionLeftOut: Boolean = false, val fromIphone: Boolean = false)
+
+/**
+ * A file copied into a map's folder for one of its ideas, as its `files`
+ * entry gives it: where the map points at it (`media/file-…`), its name as
+ * it came, its type and its size.
+ */
+data class AddedFile(val src: String, val name: String, val type: String?, val size: Long)
 
 /** A live photo's motion, as the map points at it (`media/…-motion.mp4`), and where in it the still was taken, in seconds, when its file said. */
 data class AddedMotion(val src: String, val still: Double? = null)
@@ -73,7 +92,7 @@ internal class MapMediaIntake(
      * Copies a picture into the map's folder, at most [PICTURE_SIZE] pixels
      * on its longer side and in a format every browser reads (JPEG, or PNG
      * with transparency). An animation, a GIF or WebP that moves, is kept as
-     * it is, up to [VIDEO_SIZE_LIMIT]: drawn again, it would keep only its
+     * it is, up to [MEDIA_FILE_LIMIT]: drawn again, it would keep only its
      * first frame, as a bigger one does. A live photo that keeps its motion
      * in its file, as Android phones do ([LivePhotos]), comes as two: the
      * picture, and its motion beside it as the MP4 it is. Returns where the
@@ -116,19 +135,24 @@ internal class MapMediaIntake(
         checkWritable()
 
         val picture = incomingCopy(resolver, still, "picture")
-        val video = incomingCopy(resolver, movie, "movie")
-        val made = File(video.parentFile, "${video.name}.mp4")
 
+        // The picture's copy goes whatever happens next, a movie that can't be copied included.
         try {
-            val facts = LivePhotos.liveVideo(video)
-            val kept = if (MotionVideos.toMp4(video, made)) made else video
-            val extension = if (kept == made) "mp4" else "mov"
-            val motion = MotionToKeep(kept.length(), facts?.stillSeconds, extension) { output -> kept.inputStream().use { it.copyTo(output) } }
-            addStill(id, ImageDecoder.createSource(picture), motion)
+            val video = incomingCopy(resolver, movie, "movie")
+            val made = File(video.parentFile, "${video.name}.mp4")
+
+            try {
+                val facts = LivePhotos.liveVideo(video)
+                val kept = if (MotionVideos.toMp4(video, made)) made else video
+                val extension = if (kept == made) "mp4" else "mov"
+                val motion = MotionToKeep(kept.length(), facts?.stillSeconds, extension) { output -> kept.inputStream().use { it.copyTo(output) } }
+                addStill(id, ImageDecoder.createSource(picture), motion)
+            } finally {
+                video.delete()
+                made.delete()
+            }
         } finally {
             picture.delete()
-            video.delete()
-            made.delete()
         }
     }
 
@@ -149,7 +173,8 @@ internal class MapMediaIntake(
             val facts = LivePhotos.liveVideo(video)
             val kept = if (MotionVideos.toMp4(video, made)) made else video
             val stillSize = if (still.isFile) still.length() else 0L
-            videoRefusal(stillSize + kept.length(), mediaSize(id), words)?.let { throw MediaRefusedException(it) }
+            // The picture counts once, with its motion: the map's own media, which have it already, are counted without it.
+            videoRefusal(stillSize + kept.length(), mediaSize(id, except = still.name), words)?.let { throw MediaRefusedException(it) }
             // A motion added again doesn't go over the one before it, which earlier versions of the map may point at.
             val file = File(media, motionName(media, still.nameWithoutExtension, if (kept == made) "mp4" else "mov"))
             writeAtomically(file) { output -> kept.inputStream().use { it.copyTo(output) } }
@@ -188,7 +213,9 @@ internal class MapMediaIntake(
      * otherwise under a name of its own (`photo-2.jpg`). Two maps from zips
      * can each have their "photo.jpg": the pasted ideas show theirs, and
      * `to`'s keep theirs. As adding them one by one would be, it's refused
-     * with a [MediaRefusedException] past `to`'s room.
+     * with a [MediaRefusedException] past `to`'s room, or without room for
+     * them on the device; a copy that fails all the same, as when something
+     * else fills the disk meanwhile, takes the ones before it away again.
      */
     suspend fun copyMedia(from: String, to: String, markdown: String): String = withContext(Dispatchers.IO) {
         if (from == to || !exists(from) || !exists(to)) {
@@ -199,9 +226,10 @@ internal class MapMediaIntake(
 
         val source = File(folder(from), MEDIA_DIRECTORY)
         val target = File(folder(to), MEDIA_DIRECTORY)
-        val names = MediaNames.references(markdown)
+        val names = (MediaNames.references(markdown) + fileNamesIn(markdown)).distinct()
         // What `to`'s text points at: a file still on its way there, from the folder maps are kept in, keeps its name too.
-        val pointedAt = MediaNames.references(runCatching { File(folder(to), MAP_FILE).readTextSafely() }.getOrDefault("")).toSet()
+        val toText = runCatching { File(folder(to), MAP_FILE).readTextSafely() }.getOrDefault("")
+        val pointedAt = (MediaNames.references(toText) + fileNamesIn(toText)).toSet()
         // The names a file pasted under a name of its own can't take: `to`'s, and the ones the pasted text points at.
         val taken = (target.list().orEmpty().toSet() + pointedAt + names).toMutableSet()
         val renamed = mutableMapOf<String, String>()
@@ -232,10 +260,30 @@ internal class MapMediaIntake(
             }
         }
 
-        pictureRefusal(copies.sumOf { (file, _) -> file.length() }, mediaSize(to), words)?.let { throw MediaRefusedException(it) }
+        val size = copies.sumOf { (file, _) -> file.length() }
+        pictureRefusal(size, mediaSize(to), words)?.let { throw MediaRefusedException(it) }
 
-        for ((file, name) in copies) {
-            writeAtomically(fileInside(target, name, words)) { output -> file.inputStream().use { it.copyTo(output) } }
+        // Room on the device for them all, with some to spare, before the first is copied: a paste never fills the disk.
+        if (size > 0 && room(folder(to)) < size + VIDEO_SPARE_ROOM) {
+            throw MediaRefusedException(words.string(R.string.data_no_room_for_pasted_media))
+        }
+
+        val written = mutableListOf<File>()
+        var whole = false
+
+        try {
+            for ((file, name) in copies) {
+                val copy = fileInside(target, name, words)
+                writeAtomically(copy) { output -> file.inputStream().use { it.copyTo(output) } }
+                written += copy
+            }
+
+            whole = true
+        } finally {
+            // One that couldn't be copied, as on a full disk, pastes nothing: the copies made before it go, each new to `to`.
+            if (!whole) {
+                written.forEach { it.delete() }
+            }
         }
 
         MediaNames.replaced(markdown) { place -> renamed[place.groupValues[2]]?.let { "${place.groupValues[1]}$MEDIA_DIRECTORY/$it" } }
@@ -245,7 +293,7 @@ internal class MapMediaIntake(
      * Copies a video from the phone into the map's folder as it is, under a
      * name of Orbit's own with the extension its type has, and puts a frame
      * from it beside it as a JPEG, for the map to show as its poster. A video
-     * past [VIDEO_SIZE_LIMIT], or one that would take the map's pictures and
+     * past [MEDIA_FILE_LIMIT], or one that would take the map's pictures and
      * videos past [MAP_MEDIA_LIMIT], is refused with a [MediaRefusedException]
      * saying why. `onProgress` hears how far the copy is, from 0 to 1.
      */
@@ -263,9 +311,10 @@ internal class MapMediaIntake(
             },
         )
         val size = declaredSize.takeIf { it >= 0 } ?: resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+        val mapMedia = mediaSize(id)
 
         if (size >= 0) {
-            videoRefusal(size, mediaSize(id), words)?.let { throw MediaRefusedException(it) }
+            videoRefusal(size, mapMedia, words)?.let { throw MediaRefusedException(it) }
         }
 
         val media = mediaFolder(id)
@@ -279,17 +328,10 @@ internal class MapMediaIntake(
         val video = File(media, "$stem.$extension")
         val context = currentCoroutineContext()
 
+        // Within the map's room as it's copied, whatever size it said it was: nothing past it is kept.
         writeAtomically(video) { output ->
             val input = resolver.openInputStream(uri) ?: throw IOException("Couldn't open the video")
-            input.use { copyVideo(it, output, size, words, onProgress) { context.ensureActive() } }
-        }
-
-        if (size < 0) {
-            // Its size wasn't known before the copy: the map's room is checked now.
-            videoRefusal(video.length(), mediaSize(id), words)?.let { problem ->
-                video.delete()
-                throw MediaRefusedException(problem)
-            }
+            input.use { copyVideo(it, output, size, mapMedia, words, onProgress) { context.ensureActive() } }
         }
 
         val poster = runCatching { writePoster(video, File(media, "$stem.jpg")) }.getOrNull()
@@ -297,9 +339,46 @@ internal class MapMediaIntake(
     }
 
     /**
+     * A video from the phone made smaller into the map's folder, as an MP4
+     * under a name of Orbit's own, with a frame from it beside it as its
+     * poster: `make` makes it into the file it's given, which takes its
+     * place only once it's whole. One about `estimate` bytes that wouldn't
+     * fit what a map keeps ([MEDIA_FILE_LIMIT], the map's room), or the room
+     * on the device, is refused before it's made, with a
+     * [MediaRefusedException], and so is one that comes out past them.
+     * Nothing of one that isn't made whole, or is stopped, stays.
+     */
+    suspend fun addMadeVideo(id: String, estimate: Long, make: suspend (File) -> Unit): AddedVideo = withContext(Dispatchers.IO) {
+        checkWritable()
+        videoRefusal(estimate, mediaSize(id), words)?.let { throw MediaRefusedException(it) }
+        val media = mediaFolder(id)
+        media.mkdirs()
+
+        if (room(media) < estimate + VIDEO_SPARE_ROOM) {
+            throw MediaRefusedException(words.string(R.string.data_no_room_for_video))
+        }
+
+        val stem = uniqueStem(media, "video-${clock().toString(36)}")
+        val video = File(media, "$stem.mp4")
+        val made = partialFile(video)
+
+        try {
+            make(made)
+            // As it came out: the estimate was only that.
+            videoRefusal(made.length(), mediaSize(id), words)?.let { throw MediaRefusedException(it) }
+            putInPlace(made, video)
+        } finally {
+            made.delete()
+        }
+
+        val poster = runCatching { writePoster(video, File(media, "$stem.jpg")) }.getOrNull()
+        AddedVideo("$MEDIA_DIRECTORY/${video.name}", poster?.let { "$MEDIA_DIRECTORY/${it.name}" }, video.length())
+    }
+
+    /**
      * Copies a sound from the phone into the map's folder as it is, under a
      * name of Orbit's own with the extension its type has (an `.m4a` as the
-     * `.mp4` it is). One past [VIDEO_SIZE_LIMIT], or one that would take the
+     * `.mp4` it is). One past [MEDIA_FILE_LIMIT], or one that would take the
      * map's pictures, videos and sounds past [MAP_MEDIA_LIMIT], is refused
      * with a [MediaRefusedException] saying why. `onProgress` hears how far
      * the copy is, from 0 to 1.
@@ -321,9 +400,10 @@ internal class MapMediaIntake(
                 },
             )
             val size = declaredSize.takeIf { it >= 0 } ?: resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+            val mapMedia = mediaSize(id)
 
             if (size >= 0) {
-                soundRefusal(size, mediaSize(id), words)?.let { throw MediaRefusedException(it) }
+                soundRefusal(size, mapMedia, words)?.let { throw MediaRefusedException(it) }
             }
 
             val media = mediaFolder(id)
@@ -335,20 +415,57 @@ internal class MapMediaIntake(
 
             val sound = File(media, "${uniqueStem(media, "$SOUND_PREFIX${clock().toString(36)}")}.$extension")
             val context = currentCoroutineContext()
-            writeAtomically(sound) { output -> copySound(input, output, size, words, onProgress) { context.ensureActive() } }
-
-            if (size < 0) {
-                // Its size wasn't known before the copy: the map's room is checked now.
-                soundRefusal(sound.length(), mediaSize(id), words)?.let { problem ->
-                    sound.delete()
-                    throw MediaRefusedException(problem)
-                }
-            }
-
+            // Within the map's room as it's copied, whatever size it said it was: nothing past it is kept.
+            writeAtomically(sound) { output -> copySound(input, output, size, mapMedia, words, onProgress) { context.ensureActive() } }
             sound
         }
 
         AddedSound("$MEDIA_DIRECTORY/${sound.name}", soundCaption(displayName))
+    }
+
+    /**
+     * Copies a file from the phone into the map's folder for one of its
+     * ideas, as it is, of any kind: a PDF, a spreadsheet, a ticket. It's
+     * named `file-` and the name it came with, made safe
+     * ([ideaFileName]), and given a free one when that's taken. One past
+     * [MEDIA_FILE_LIMIT], or one that would take the map's pictures, videos,
+     * sounds and files past [MAP_MEDIA_LIMIT], is refused with a
+     * [MediaRefusedException] saying why, before it's copied when its size
+     * is known, and as soon as it's past either otherwise; nothing of it
+     * stays. `onProgress` hears how far the copy is, from 0 to 1.
+     */
+    suspend fun addFile(id: String, uri: Uri, resolver: ContentResolver, onProgress: (Float) -> Unit): AddedFile = withContext(Dispatchers.IO) {
+        checkWritable()
+
+        val (displayName, declaredSize) = nameAndSize(uri, resolver)
+        val type = resolver.getType(uri)?.takeIf { it.contains('/') && it != "application/octet-stream" }
+        val name = displayName?.trim()?.takeIf { it.isNotEmpty() } ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: words.string(R.string.files_kind_other)
+        val input = resolver.openInputStream(uri)?.buffered() ?: throw IOException("Couldn't open the file")
+
+        val file = input.use {
+            val size = declaredSize.takeIf { it >= 0 } ?: resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+            val mapMedia = mediaSize(id)
+
+            if (size >= 0) {
+                fileRefusal(size, mapMedia, words)?.let { throw MediaRefusedException(it) }
+            }
+
+            val media = mediaFolder(id)
+            media.mkdirs()
+
+            if (room(media) < maxOf(size, 0L) + VIDEO_SPARE_ROOM) {
+                throw MediaRefusedException(words.string(R.string.data_no_room_for_file))
+            }
+
+            val stored = ideaFileName(name, type)
+            val file = File(media, "${uniqueStem(media, stored.substringBeforeLast('.'))}${stored.extensionPart()}")
+            val context = currentCoroutineContext()
+            // Within the map's room as it's copied, whatever size it said it was: nothing past it is kept.
+            writeAtomically(file) { output -> copyFile(input, output, size, mapMedia, words, onProgress) { context.ensureActive() } }
+            file
+        }
+
+        AddedFile("$MEDIA_DIRECTORY/${file.name}", name, type, file.length())
     }
 
     /**
@@ -366,6 +483,24 @@ internal class MapMediaIntake(
         writeAtomically(memo) { output -> recording.inputStream().use { it.copyTo(output) } }
         recording.delete()
         "$MEDIA_DIRECTORY/${memo.name}"
+    }
+
+    /**
+     * Keeps a sketch drawn in Orbit, `svg` (Orbit's own drawing, see
+     * sketch/SketchSvg.kt), in the map's folder as `sketch-` and the moment, an
+     * `.svg`, which every release carries and shows. A new file each time, so
+     * earlier versions keep the sketch they point at. Refused with a
+     * [MediaRefusedException] past the map's room. Returns where the map
+     * points at it.
+     */
+    suspend fun addSketch(id: String, svg: ByteArray): String = withContext(Dispatchers.IO) {
+        checkWritable()
+        pictureRefusal(svg.size.toLong(), mediaSize(id), words)?.let { throw MediaRefusedException(it) }
+        val media = mediaFolder(id)
+        media.mkdirs()
+        val sketch = File(media, "${uniqueStem(media, "$SKETCH_PREFIX${clock().toString(36)}")}.svg")
+        writeAtomically(sketch) { output -> output.write(svg) }
+        "$MEDIA_DIRECTORY/${sketch.name}"
     }
 
     /** A copy of what `uri` holds, in a folder of its own beside the maps, to read it as a whole: the caller deletes it. */
@@ -439,13 +574,13 @@ internal class MapMediaIntake(
     /**
      * Copies an animation from the phone into the map's folder as it is, with
      * `extension`, under a picture's name. Null for one past
-     * [VIDEO_SIZE_LIMIT], to be kept still; one past the map's room is
+     * [MEDIA_FILE_LIMIT], to be kept still; one past the map's room is
      * refused with a [MediaRefusedException], as any picture is.
      */
     private fun addAnimation(id: String, uri: Uri, resolver: ContentResolver, extension: String): String? {
         val size = resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
 
-        if (size > VIDEO_SIZE_LIMIT) {
+        if (size > MEDIA_FILE_LIMIT) {
             return null
         }
 
@@ -457,7 +592,7 @@ internal class MapMediaIntake(
         try {
             writeAtomically(animation) { output ->
                 val input = resolver.openInputStream(uri) ?: throw IOException("Couldn't open the picture")
-                input.use { it.copyTo(CappedOutput(output, VIDEO_SIZE_LIMIT, words)) }
+                input.use { it.copyTo(CappedOutput(output, MEDIA_FILE_LIMIT, words)) }
             }
         } catch (tooBig: MediaRefusedException) {
             // Its size wasn't known, and it came to more than an animation may be: nothing of it was kept.
@@ -549,31 +684,5 @@ internal class MapMediaIntake(
                 }
             }
             .first { it !in taken }
-    }
-}
-
-/** Whether `one` and the file `other` hold the same bytes: told by their sizes when those differ, else read a piece at a time, as a video can be long. */
-private fun sameBytes(one: File, other: File): Boolean {
-    if (!other.isFile || one.length() != other.length()) {
-        return false
-    }
-
-    return one.inputStream().use { first ->
-        other.inputStream().use { second ->
-            val mine = ByteArray(DEFAULT_BUFFER_SIZE)
-            val theirs = ByteArray(DEFAULT_BUFFER_SIZE)
-            var read = mine.size
-
-            while (read == mine.size) {
-                read = first.readUpTo(mine)
-
-                // Past what was read, both still hold the same piece as before: the whole of each compares.
-                if (second.readUpTo(theirs) != read || !mine.contentEquals(theirs)) {
-                    return false
-                }
-            }
-
-            true
-        }
     }
 }

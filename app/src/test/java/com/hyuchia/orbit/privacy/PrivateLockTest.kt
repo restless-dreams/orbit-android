@@ -3,11 +3,17 @@ package com.hyuchia.orbit.privacy
 import com.hyuchia.orbit.data.MapMetadata
 import com.hyuchia.orbit.data.MapOutline
 import com.hyuchia.orbit.data.MapSummary
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -168,5 +174,73 @@ class PrivateLockTest {
         runCurrent()
         assertEquals(2, heard)
         listening.cancel()
+    }
+
+    @Test
+    fun `what names a private map while they're unlocked goes as they lock, even while it waits to show`() = runTest {
+        lock.unlock()
+        var stopped = false
+
+        // A message about it, waiting for the one before it to go.
+        val waiting = async {
+            lock.unlessLocked {
+                try {
+                    awaitCancellation()
+                } finally {
+                    stopped = true
+                }
+            }
+        }
+
+        runCurrent()
+        assertFalse(stopped)
+
+        lock.screenOff()
+        runCurrent()
+        assertTrue(stopped)
+        assertNull(waiting.await())
+    }
+
+    @Test
+    fun `what's done before they lock gives what it gives, and one they lock before it starts never shows`() = runTest {
+        lock.unlock()
+        assertEquals("Deleted “Journal”", lock.unlessLocked { "Deleted “Journal”" })
+
+        // Asked for, then locked before it starts: it never shows.
+        var shown = false
+
+        val asked = async(start = CoroutineStart.UNDISPATCHED) {
+            lock.unlessLocked {
+                yield()
+                shown = true
+                "Deleted “Journal”"
+            }
+        }
+
+        lock.lock()
+        assertNull(asked.await())
+        assertFalse(shown)
+    }
+
+    @Test
+    fun `whoever waits for it can still stop it, and isn't told it locked`() = runTest {
+        lock.unlock()
+        var given: String? = "nothing yet"
+        var stopped = false
+
+        val waiting = launch {
+            try {
+                given = lock.unlessLocked<String> { awaitCancellation() }
+            } catch (cancelled: CancellationException) {
+                stopped = true
+                throw cancelled
+            }
+        }
+
+        runCurrent()
+        waiting.cancel()
+        runCurrent()
+        assertTrue(stopped)
+        assertEquals("nothing yet", given)
     }
 }

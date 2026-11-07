@@ -14,7 +14,7 @@ import java.io.InputStream
 import kotlin.coroutines.cancellation.CancellationException
 
 /** What a drag from another app holds, as far as its types say: what it would make in Orbit. */
-enum class DropKind { Ideas, Pictures, Videos, Sounds, Maps }
+enum class DropKind { Ideas, Pictures, Videos, Sounds, Maps, Files }
 
 /** One item of a drag let go on Orbit: text, or a file another app hands over, by its content address. */
 sealed interface DroppedItem {
@@ -36,12 +36,15 @@ sealed interface DroppedItem {
 
     /** A file of plain text, which becomes ideas as text does. */
     data class TextFile(val address: String, val name: String?) : DroppedItem
+
+    /** A file of any other kind, a PDF or a spreadsheet, which joins an idea's files. */
+    data class File(val address: String, val name: String?) : DroppedItem
 }
 
 /** The types maps come as, other apps' own among them, and the XML OPML often says it is. */
 private val MAP_TYPES = MapFileTypes.MAPS + MapFileTypes.XML
 
-/** What one of a drag's types would make in Orbit; null for what Orbit can't take, such as a PDF. */
+/** What one of a drag's types would make in Orbit: any other kind of file, such as a PDF, joins an idea's files. */
 fun dropKindOf(mimeType: String): DropKind? {
     val type = mimeType.substringBefore(';').trim().lowercase()
 
@@ -51,7 +54,8 @@ fun dropKindOf(mimeType: String): DropKind? {
         type.startsWith("audio/") -> DropKind.Sounds
         type in MAP_TYPES || type == MapFileTypes.ANY_FILE -> DropKind.Maps
         type.startsWith("text/") -> DropKind.Ideas
-        else -> null
+        type.isEmpty() -> null
+        else -> DropKind.Files
     }
 }
 
@@ -66,8 +70,9 @@ fun dropKinds(description: ClipDescription?): Set<DropKind> {
 
 /**
  * A file another app hands over in a drag, by its content address, its type
- * and its name: what Orbit makes of it, or null when it's nothing Orbit
- * takes. A file without a type of its own is a map only when its name says so.
+ * and its name: what Orbit makes of it. A file without a type of its own is
+ * a map only when its name says so; one of any other kind joins an idea's
+ * files.
  */
 fun droppedFile(address: String, type: String?, name: String?): DroppedItem? {
     val plain = type?.substringBefore(';')?.trim()?.lowercase().orEmpty()
@@ -79,7 +84,7 @@ fun droppedFile(address: String, type: String?, name: String?): DroppedItem? {
         plain.startsWith("audio/") || ((plain.isEmpty() || plain == MapFileTypes.ANY_FILE) && soundExtension(null, name) != null) -> DroppedItem.Sound(address, name)
         extension in MapFileTypes.EXTENSIONS || plain in MAP_TYPES -> DroppedItem.MapFile(address, name)
         plain.startsWith("text/") || extension == "txt" -> DroppedItem.TextFile(address, name)
-        else -> null
+        else -> DroppedItem.File(address, name)
     }
 }
 

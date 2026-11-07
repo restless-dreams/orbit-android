@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shortcut_new_map">Novo mapa</string>
+    <string name="shortcut_new_map_long">Começar um novo mapa</string>
+    <string name="share_new_map">Novo mapa do Orbit</string>
+    <string name="share_add_to_map">Adicionar a um mapa do Orbit</string>
+    <string name="share_attach_to_idea">Anexar a uma ideia do Orbit</string>
+    <string name="capture_label">Adicionar uma ideia</string>
+    <string name="tile_capture">Nova ideia</string>
+    <string name="widget_label">Mapa do Orbit</string>
+    <string name="widget_description">Um mapa na sua tela inicial: a imagem dele, o progresso e um + para adicionar uma ideia</string>
+</resources>

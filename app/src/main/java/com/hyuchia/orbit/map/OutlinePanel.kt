@@ -57,8 +57,11 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.page.MapNode
@@ -66,6 +69,7 @@ import com.hyuchia.orbit.rememberWords
 import com.hyuchia.orbit.theme.parseCssColor
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.WavyProgress
+import com.hyuchia.orbit.ui.rememberTimeWords
 import kotlinx.serialization.json.JsonPrimitive
 import java.text.NumberFormat
 import kotlin.math.roundToInt
@@ -73,7 +77,8 @@ import kotlin.math.roundToInt
 /**
  * The map as a native list: every idea, its color and status, with checkboxes
  * to tick tasks off and progress for each branch. Tap a row to fly there; it
- * is also how screen readers and keyboards get around the map.
+ * is also how screen readers and keyboards get around the map. On a map that
+ * can only be looked at, rows open no editor and checkboxes only show.
  */
 @Composable
 fun OutlinePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
@@ -81,6 +86,8 @@ fun OutlinePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
     val progress = ui.progress
     val locale = LocalConfiguration.current.locales[0]
     val words = rememberWords()
+    // One for the list: each idea's date is written with it.
+    val timeWords = rememberTimeWords()
     val folded: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() }
 
     val hidden = remember(nodes, folded.toMap()) {
@@ -126,6 +133,7 @@ fun OutlinePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
 
     val total = nodes.firstOrNull()?.let { progress.under(it) }
     val untitled = stringResource(R.string.common_untitled)
+    val changeable = ui.readOnly == null
     val fallbackColor = MaterialTheme.colorScheme.primaryContainer.toArgb()
 
     PanelFrame(title = stringResource(R.string.common_outline), sheet = sheet, onDismiss = { model.show(null) }, partial = true, scrim = false) {
@@ -149,6 +157,7 @@ fun OutlinePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
                         folded = folded[node.id] == true,
                         under = progress.under(node),
                         ring = progress.followsItsIdeas(node),
+                        date = shownDate(node, timeWords),
                         onFold = { folded[node.id] = !(folded[node.id] ?: false) },
                         onOpen = {
                             if (sheet) {
@@ -157,8 +166,9 @@ fun OutlinePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
 
                             model.focus(node.id, point = true)
                         },
-                        onEdit = { model.show(Panel.Editor(node.id)) },
-                        onCheck = { checked -> model.update(node.id, "status", JsonPrimitive(if (checked) "done" else "todo")) },
+                        // A map that can only be looked at has no editor to open, and its to-dos stay as they are.
+                        onEdit = if (changeable) ({ model.show(Panel.Editor(node.id)) }) else null,
+                        onCheck = if (changeable) ({ checked -> model.update(node.id, "status", JsonPrimitive(if (checked) "done" else "todo")) }) else null,
                         onDragOut = { view ->
                             val started = model.drops.canDragOut && startIdeaDrag(view, model.id, nodes, node.id, untitled, parseCssColor(node.drawnColor)?.toArgb() ?: fallbackColor)
 
@@ -183,8 +193,9 @@ fun OutlinePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
 
 /**
  * A row of the outline. Tapped, it flies to its idea; held, it lifts, as an
- * idea does on the map: let go, its editor opens, and moved on, the idea is
- * dragged out to other apps (or back onto the map, into another idea).
+ * idea does on the map: let go, its editor opens (`onEdit`, none on a map
+ * that can only be looked at), and moved on, the idea is dragged out to
+ * other apps (or back onto the map, into another idea).
  */
 @Composable
 private fun OutlineRow(
@@ -193,10 +204,11 @@ private fun OutlineRow(
     folded: Boolean,
     under: Rollup,
     ring: Boolean,
+    date: ShownDate?,
     onFold: () -> Unit,
     onOpen: () -> Unit,
-    onEdit: () -> Unit,
-    onCheck: (Boolean) -> Unit,
+    onEdit: (() -> Unit)?,
+    onCheck: ((Boolean) -> Unit)?,
     onDragOut: (View) -> Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -257,7 +269,7 @@ private fun OutlineRow(
                             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                         }
                     },
-                    onLetGo = { edit() },
+                    onLetGo = { edit?.invoke() },
                     onDragOut = { dragOut(view) },
                     ours = { !pressOnFold.also { pressOnFold = false } },
                 )
@@ -267,12 +279,14 @@ private fun OutlineRow(
                     stateDescription = ideas
                 }
 
-                onLongClick(label = editLabel) {
-                    onEdit()
-                    true
-                }
+                onEdit?.let { open ->
+                    onLongClick(label = editLabel) {
+                        open()
+                        true
+                    }
 
-                customActions = listOf(CustomAccessibilityAction(editLabel) { onEdit(); true })
+                    customActions = listOf(CustomAccessibilityAction(editLabel) { open(); true })
+                }
             }
             .padding(start = (node.depth * 18).dp, end = 4.dp),
     ) {
@@ -314,19 +328,37 @@ private fun OutlineRow(
                 under.takeIf { ring && it.total > 0 }?.let { NumberFormat.getPercentInstance(locale).format((it.share * 100).roundToInt() / 100.0) },
                 under.takeIf { it.total > 0 }?.let { pluralStringResource(R.plurals.map_done_of_total, it.finished, it.finished, it.total) },
                 // A status that isn't a to-do's, such as "primary key", is a label: it reads with the tags.
-                node.status?.trim()?.takeIf { it.isNotEmpty() && !node.isToDo }?.let { statusLabel(it) },
+                node.shownStatus?.takeIf { !node.isToDo }?.let { statusLabel(it) },
                 node.tags.takeIf { it.isNotEmpty() }?.joinToString(" ") { "#$it" },
                 node.note?.lineSequence()?.map { it.trim().trimStart('#', '>', '-', '*', ' ') }?.firstOrNull { it.isNotEmpty() },
             )
 
-            if (details.isNotEmpty()) {
-                Text(details.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = mutedColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // Its date first, past and not done in the error color, saying so in words too.
+            val dateText = date?.let { if (it.overdue) stringResource(R.string.map_date_overdue_label, it.text) else it.text }
+
+            if (dateText != null || details.isNotEmpty()) {
+                val line = buildAnnotatedString {
+                    if (date != null && dateText != null) {
+                        withStyle(SpanStyle(color = if (date.overdue) colors.error else mutedColor, fontWeight = if (date.overdue) FontWeight.SemiBold else null)) {
+                            append(dateText)
+                        }
+
+                        if (details.isNotEmpty()) {
+                            append(" · ")
+                        }
+                    }
+
+                    append(details.joinToString(" · "))
+                }
+
+                Text(line, style = MaterialTheme.typography.bodySmall, color = mutedColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
 
         if (node.isToDo) {
             Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                Checkbox(checked = done, onCheckedChange = onCheck)
+                // On a map that can only be looked at, it shows whether the to-do is done, and takes no tap.
+                Checkbox(checked = done, onCheckedChange = { checked -> onCheck?.invoke(checked) }, enabled = onCheck != null)
             }
         } else if (goal?.target != null) {
             // A goal's ring, as on the map: a check once it's reached.

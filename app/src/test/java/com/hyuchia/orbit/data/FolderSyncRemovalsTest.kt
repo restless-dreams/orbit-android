@@ -3,9 +3,11 @@ package com.hyuchia.orbit.data
 import com.hyuchia.orbit.FileWords
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -30,7 +32,12 @@ class FolderSyncRemovalsTest {
     private fun repository() = MapRepository(File(root, "maps"), File(root, "trash"), starters, words, clock = { now })
 
     private val maps = repository()
-    private val sync = FolderSync(maps, settings, CoroutineScope(Dispatchers.Default), File(root, "folder-notes.json"), words, TestEditor(words)) { folder }
+
+    /** What the sync does on its own after a call, to wait for. */
+    private val work = SupervisorJob()
+
+    private val day = 24 * 60 * 60 * 1000L
+    private val sync = FolderSync(maps, settings, CoroutineScope(Dispatchers.Default + work), File(root, "folder-notes.json"), words, TestEditor(words)) { folder }
 
     private suspend fun start() {
         maps.load()
@@ -144,5 +151,58 @@ class FolderSyncRemovalsTest {
         assertEquals(listOf("Diary"), repository().also { it.load() }.trash.value.map { it.title })
         now += 24 * 60 * 60 * 1000L
         assertTrue(repository().also { it.load() }.trash.value.isEmpty())
+    }
+
+    @Test
+    fun `reading the notes that show leaves a hidden private map's note, and its time in the trash`() = runTest {
+        start()
+        val diary = maps.add("# Diary\n- Idea\n")
+        maps.setPrivate(diary, true)
+        val plan = maps.add("# Plan\n- Idea\n")
+        maps.add("# Stays\n- Idea\n")
+        sync.syncNow()
+        folder.delete("Diary.md")
+        folder.delete("Plan.md")
+        sync.syncNow()
+
+        for (id in listOf(diary, plan)) {
+            val record = maps.summary(id)!!.metadata.sync!!
+            maps.setSyncRecord(id, record.copy(missingSince = record.missingSince!! - MISSING_CONFIRMATION))
+        }
+
+        sync.syncNow()
+        assertEquals(setOf("Diary", "Plan"), sync.state.value.notes.removed.toSet())
+
+        // While private maps hide, the note shows the plan alone: reading it leaves the diary's.
+        sync.dismissNotes(FolderNotes(removed = listOf("Plan")), hidden = { it.isPrivate })
+        work.children.forEach { it.join() }
+        assertEquals(FolderNotes(removed = listOf("Diary"), private = listOf("Diary")), sync.state.value.notes)
+        // So does the file that keeps them, across restarts.
+        val kept = File(root, "folder-notes.json").readText()
+        assertTrue("Diary" in kept && "Plan" !in kept)
+
+        // The plan has the trash's thirty days from now, and goes after them; the diary waits for its note, however long.
+        now += (TRASH_DAYS + 1) * day
+        repository().load()
+        now += day
+        assertEquals(listOf("Diary"), repository().also { it.load() }.trash.value.map { it.title })
+
+        // Its note read too, once private maps show, the diary has its days as well.
+        sync.dismissNotes(sync.state.value.notes)
+        work.children.forEach { it.join() }
+        assertTrue(sync.state.value.notes.isEmpty)
+        assertFalse(File(root, "folder-notes.json").exists())
+        now += (TRASH_DAYS + 1) * day
+        repository().load()
+        now += day
+        assertTrue(repository().also { it.load() }.trash.value.isEmpty())
+    }
+
+    @Test
+    fun `notes read leave the others, and which of those are about private maps`() {
+        val notes = FolderNotes(keptBoth = listOf("Trip (changed elsewhere)"), removed = listOf("Plan", "Diary"), tooBig = listOf("film.mp4, in “Diary”"), private = listOf("Diary", "film.mp4, in “Diary”"))
+        val left = notes - FolderNotes(removed = listOf("Plan", "Diary"), keptBoth = listOf("Trip (changed elsewhere)"))
+        assertEquals(FolderNotes(tooBig = listOf("film.mp4, in “Diary”"), private = listOf("film.mp4, in “Diary”")), left)
+        assertTrue((notes - notes).isEmpty)
     }
 }

@@ -17,6 +17,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
@@ -27,8 +29,10 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -38,10 +42,12 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.io.RandomAccessFile
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -50,8 +56,11 @@ import java.util.Locale
 import java.util.Random
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.Deflater
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -89,10 +98,35 @@ class SendingTest {
     @Before
     fun start() = runBlocking<Unit> {
         maps.load()
-        host = NearbyHost(context, maps, scope, anyone, english) { null }
+        host = newHost()
+    }
+
+    /**
+     * A device taking maps, listening on the loopback, with its offers'
+     * `times`, its `clock` and the `room` it says it has as a test needs them.
+     */
+    private suspend fun newHost(
+        times: OfferTimes = OfferTimes(),
+        clock: () -> Long = { System.nanoTime() / 1_000_000 },
+        room: () -> Long = { files.usableSpace },
+        mapLimit: Long = OFFER_LIMIT,
+    ): NearbyHost {
+        val made = NearbyHost(context, maps, scope, anyone, english, listenOn = { null }, times = times, clock = clock, room = room, mapLimit = mapLimit)
         // It clears what an earlier launch left in its folder as it starts: that's done before anything arrives.
         scope.coroutineContext.job.children.toList().joinAll()
-        host.start(accepting = true)
+        made.start(accepting = true)
+        return made
+    }
+
+    /** The test's host, made again as the test says, before anything was offered to it. */
+    private fun restart(
+        times: OfferTimes = OfferTimes(),
+        clock: () -> Long = { System.nanoTime() / 1_000_000 },
+        room: () -> Long = { files.usableSpace },
+        mapLimit: Long = OFFER_LIMIT,
+    ) = runBlocking {
+        host.stop()
+        host = newHost(times, clock, room, mapLimit)
     }
 
     @After
@@ -183,7 +217,9 @@ class SendingTest {
         }
 
     /** A request's head alone, saying its body is `length` bytes, and the answer: one that comes before any body was read. */
-    private fun headOnly(path: String, length: Long, headers: Map<String, String> = emptyMap()): Int = Socket("127.0.0.1", host.port).use { socket ->
+    private fun headOnly(path: String, length: Long, headers: Map<String, String> = emptyMap(), from: String? = null): Int = Socket().use { socket ->
+        from?.let { socket.bind(InetSocketAddress(it, 0)) }
+        socket.connect(InetSocketAddress("127.0.0.1", host.port), 5_000)
         socket.soTimeout = 5_000
 
         val head = buildString {
@@ -207,19 +243,19 @@ class SendingTest {
         return Hello(session, senderNonce, mapOf(VERSION_HEADER to "$OFFER_VERSION", KEY_HEADER to session.senderKey.text), body)
     }
 
-    private fun greet(hello: Hello): Pair<Int, OfferAnswer?> {
-        val (status, body) = request("POST", "/offer", hello.headers, hello.body)
+    private fun greet(hello: Hello, from: String? = null): Pair<Int, OfferAnswer?> {
+        val (status, body) = request("POST", "/offer", hello.headers, hello.body, from)
         return status to if (status == 200) offerJson.decodeFromString(OfferAnswer.serializer(), body) else null
     }
 
-    private fun reveal(id: String, nonce: ByteArray): Pair<Int, String> =
-        request("POST", "/offer/$id", body = offerJson.encodeToString(Reveal.serializer(), Reveal(base64Url(nonce))).toByteArray())
+    private fun reveal(id: String, nonce: ByteArray, from: String? = null): Pair<Int, String> =
+        request("POST", "/offer/$id", body = offerJson.encodeToString(Reveal.serializer(), Reveal(base64Url(nonce))).toByteArray(), from = from)
 
-    /** A hello revealed, so both devices show the code: its id, and what the sender has. */
-    private fun agreed(): Pair<String, Hello> {
+    /** A hello revealed, so both devices show the code: its id, and what the sender has. From `from`, when it's given. */
+    private fun agreed(from: String? = null): Pair<String, Hello> {
         val hello = hello()
-        val (_, answer) = greet(hello)
-        assertEquals(200, reveal(answer!!.id, hello.senderNonce).first)
+        val (_, answer) = greet(hello, from)
+        assertEquals(200, reveal(answer!!.id, hello.senderNonce, from).first)
         return answer.id to hello
     }
 
@@ -231,10 +267,14 @@ class SendingTest {
     private fun state(id: String): String = offerJson.decodeFromString(StateAnswer.serializer(), request("GET", "/offer/$id").second).state
 
     /**
-     * Orbit 0.3.0 taking maps, as far as its answers go: this host's, passed
-     * on without what of a map it opens, which 0.3.0 doesn't say.
+     * A device between the sender and the host, as one answering in the
+     * host's place on the Wi-Fi: it answers a request itself when `instead`
+     * says how, else passes it on to the host, and the host's answer back,
+     * as `change` makes it (as it is for null).
      */
-    private fun orbit030(): LocalServer = LocalServer({ _, _ -> 64 * 1024 }, policy = anyone) { request ->
+    private fun between(instead: (Request) -> Response? = { null }, change: (Request, Answer) -> Response? = { _, _ -> null }): LocalServer = LocalServer({ _, _ -> 64 * 1024 }, policy = anyone) { request ->
+        instead(request)?.let { return@LocalServer it }
+
         val head = buildString {
             append("${request.method} ${request.path} HTTP/1.1\r\nHost: $address\r\nConnection: close\r\n")
             request.headers.filterKeys { it !in setOf("host", "connection", "content-length") }.forEach { (name, value) -> append("$name: $value\r\n") }
@@ -242,10 +282,42 @@ class SendingTest {
         }
 
         val answer = exchange(host.port, head + String(request.body, Charsets.ISO_8859_1))
-        val json = runCatching { Json.parseToJsonElement(answer.body).jsonObject }.getOrNull()
-        val body = json?.let { JsonObject(it - "mapFormat" - "mediaTypes").toString() } ?: answer.body
-        Response.Bytes(answer.status, answer.header("content-type") ?: "text/plain", body.toByteArray())
+        change(request, answer) ?: Response.Bytes(answer.status, answer.header("content-type") ?: "text/plain", answer.body.toByteArray())
     }
+
+    /** The host's answer as JSON changed by `change`, or as it is when it isn't JSON. */
+    private fun Answer.json(change: (JsonObject) -> JsonObject): Response {
+        val json = runCatching { Json.parseToJsonElement(body).jsonObject }.getOrNull()
+        return Response.Bytes(status, header("content-type") ?: "text/plain", (json?.let(change)?.toString() ?: body).toByteArray())
+    }
+
+    /**
+     * Orbit 0.3.0 taking maps, as far as its answers go: this host's, passed
+     * on without what of a map it opens, which 0.3.0 doesn't say, without
+     * proofs, and with its half of the check code all random, as 0.3.0 and
+     * 0.4.0 make it. The codes then differ, as only this stand-in makes them.
+     */
+    private fun orbit030(): LocalServer = between { _, answer ->
+        answer.json { json ->
+            val random = json["nonce"]?.let { mapOf("nonce" to JsonPrimitive(base64Url(randomBytes(CHECK_NONCE_BYTES)))) }.orEmpty()
+            JsonObject(json - "mapFormat" - "mediaTypes" - "mapSize" - "proof" + random)
+        }
+    }
+
+    /**
+     * Orbit 0.4.0 taking maps, as far as its answers go: this host's,
+     * without how big a map it takes, which 0.4.0 doesn't say, and without
+     * proofs. Its codes differ from the sender's, as [orbit030]'s do.
+     */
+    private fun orbit040(): LocalServer = between { _, answer ->
+        answer.json { json ->
+            val random = json["nonce"]?.let { mapOf("nonce" to JsonPrimitive(base64Url(randomBytes(CHECK_NONCE_BYTES)))) }.orEmpty()
+            JsonObject(json - "mapSize" - "proof" + random)
+        }
+    }
+
+    /** A file of zeros that says it's `size` bytes, on a disk that keeps none of them: a map's zip as big as a test needs, never written. */
+    private fun sparse(size: Long): File = File(files, "${UUID.randomUUID()}.zip").also { file -> RandomAccessFile(file, "rw").use { it.setLength(size) } }
 
     @Test
     fun `a map sent to a typed address arrives whole, once both devices showed the same code`() = runBlocking<Unit> {
@@ -385,15 +457,101 @@ class SendingTest {
     }
 
     @Test
-    fun `the device taking maps says what of a map it opens, with its key and in its answer to a hello`() {
+    fun `the device taking maps says what of a map it opens, and how big a map it takes, with its key and in its answer to a hello`() {
         val key = offerJson.decodeFromString(KeyAnswer.serializer(), request("GET", "/key").second)
         assertEquals(MAP_FORMAT, key.mapFormat)
         assertEquals(carriedMediaTypes().sorted(), key.mediaTypes)
+        assertEquals(OFFER_LIMIT, key.mapSize)
 
         val (status, answer) = greet(hello())
         assertEquals(200, status)
         assertEquals(MAP_FORMAT, answer!!.mapFormat)
         assertEquals(carriedMediaTypes().sorted(), answer.mediaTypes)
+        assertEquals(OFFER_LIMIT, answer.mapSize)
+    }
+
+    @Test
+    fun `a map bigger than an older Orbit takes goes no further than its hello, and the person sending hears to update Orbit there`() = runBlocking<Unit> {
+        val older = orbit040()
+        older.start(0)
+
+        try {
+            // A map just past the 64 MiB Orbit 0.4.0 takes, sealed: it never needs to be read.
+            val big = sparse(OFFER_LIMIT_UP_TO_0_4_0 - sealedLength(0) + 1)
+            val checker = Checker()
+            val (job, states) = send(host.key.text, big, to = "127.0.0.1:${older.port}", checker = checker)
+            job.join()
+
+            assertEquals(listOf(SendState.Sending, SendState.TooBigThere(sealedLength(big.length()))), states.toList())
+            // Its code never showed, there or here, and the offer it said hello with is gone.
+            assertTrue(checker.shown.isEmpty())
+            assertTrue(host.incoming.value.isEmpty())
+            assertTrue(eventually { host.incoming.value.isEmpty() && host.offers.value.isEmpty() })
+
+            // One as big as 0.4.0 takes goes to it as before: its code shows.
+            val (fits, fitting) = send(host.key.text, bundle("# Plan\n", mapOf("photo.jpg" to picture(5_000))), to = "127.0.0.1:${older.port}", checker = Checker { false })
+            waitFor(fitting) { it is SendState.Confirming }
+            fits.join()
+        } finally {
+            older.stop()
+        }
+    }
+
+    @Test
+    fun `a device's word on how big a map it takes is believed, and what it leaves unsaid is as an older Orbit had it`() {
+        assertEquals(OFFER_LIMIT_UP_TO_0_4_0, DeviceReads.of(1, null).mapSize)
+        assertEquals(OFFER_LIMIT_UP_TO_0_4_0, DeviceReads.of(1, null, mapSize = 0).mapSize)
+        assertEquals(OFFER_LIMIT, DeviceReads.of(1, null, mapSize = OFFER_LIMIT).mapSize)
+        assertEquals(OFFER_LIMIT_UP_TO_0_4_0, DeviceReads.RELEASE_0_3_0.mapSize)
+    }
+
+    @Test
+    fun `a map opens as it arrives, straight from the connection, and needs room for itself once`() = runBlocking<Unit> {
+        val photo = picture(3_000_000, seed = 4)
+        val zip = bundle("# Trip\n- Beach ![](media/beach.jpg)\n", mapOf("beach.jpg" to photo))
+        // Room for the map once and what's always left free, but not twice: a sealed copy and an opened one wouldn't fit.
+        restart(room = { sealedLength(zip.length()) * 3 / 2 + SPARE_SPACE })
+
+        val (_, states) = send(host.key.text, zip)
+        val offer = arrived()
+        assertEquals(1, offer.bundle.media.pictures)
+        waitFor(states) { it is SendState.Waiting }
+        // Nothing of it was spooled: it opened from the connection into its own files.
+        assertEquals(emptyList<String>(), offersFolder.list().orEmpty().toList())
+        assertArrayEquals(photo, offer.bundle.pictures.getValue("beach.jpg").readBytes())
+
+        val id = host.accept(offer, keepBoth = false)!!
+        assertArrayEquals(photo, maps.picture(id, "beach.jpg")!!.readBytes())
+        assertEquals(emptyList<String>(), File(files, "unpacking").list().orEmpty().toList())
+        waitFor(states) { it == SendState.Opened }
+    }
+
+    @Test
+    fun `a map the storage runs out of room for as it opens is refused, and leaves nothing behind`() = runBlocking<Unit> {
+        val zip = bundle("# Trip\n- Beach ![](media/beach.jpg)\n", mapOf("beach.jpg" to picture(4_000_000, seed = 5)))
+        // Room enough as it's admitted and starts, gone a couple of megabytes in.
+        val looks = AtomicInteger()
+        restart(room = { if (looks.incrementAndGet() <= 3) Long.MAX_VALUE / 4 else SPARE_SPACE / 2 })
+
+        val (job, states) = send(host.key.text, zip)
+        job.join()
+
+        assertEquals(SendState.Failed(R.string.nearby_send_no_room_there), states.last())
+        assertTrue(host.offers.value.isEmpty())
+        assertEquals(emptyList<String>(), File(files, "unpacking").list().orEmpty().toList())
+    }
+
+    @Test
+    fun `a declined map's files go at once`() = runBlocking<Unit> {
+        val (_, states) = send(host.key.text, bundle("# Trip\n- Beach ![](media/beach.jpg)\n", mapOf("beach.jpg" to picture(2_000_000, seed = 6))))
+        val offer = arrived()
+        val unpacked = offer.bundle.pictures.getValue("beach.jpg")
+        assertTrue(unpacked.isFile)
+
+        host.decline(offer)
+        waitFor(states) { it == SendState.Declined }
+        assertFalse(unpacked.exists())
+        assertEquals(emptyList<String>(), File(files, "unpacking").list().orEmpty().toList())
     }
 
     @Test
@@ -599,8 +757,10 @@ class SendingTest {
     }
 
     @Test
-    fun `a map nearly as big as the limit arrives`() = runBlocking<Unit> {
-        val photo = picture(OFFER_LIMIT.toInt() - 200_000, seed = 9)
+    fun `a map nearly as big as the device takes arrives`() = runBlocking<Unit> {
+        // A device that takes maps of up to 8 MiB stands in for one at its gigabyte: the map's zip and sealing alike.
+        restart(mapLimit = 8L * 1024 * 1024)
+        val photo = picture(8 * 1024 * 1024 - 200_000, seed = 9)
         val (_, states) = send(host.key.text, bundle("# Big\n", mapOf("big.png" to photo)))
         val offer = arrived()
         assertEquals(1, offer.bundle.media.pictures)
@@ -611,8 +771,7 @@ class SendingTest {
 
     @Test
     fun `a map too big to send is refused before anything is sent`() = runBlocking<Unit> {
-        val big = File(files, "big.zip")
-        RandomAccessFile(big, "rw").use { it.setLength(OFFER_LIMIT) }
+        val big = sparse(OFFER_LIMIT)
         val states = CopyOnWriteArrayList<SendState>()
         sendMap(address, host.key.text, OFFER_VERSION, "Ana's Pixel", big, { true }) { states += it }
         assertEquals(listOf(SendState.Failed(R.string.nearby_send_too_big)), states.toList())
@@ -633,53 +792,138 @@ class SendingTest {
         assertEquals(listOf(SendState.Sending, SendState.Failed(R.string.nearby_send_could_not_reach)), states.toList())
     }
 
+    /** A shared map's zip as `browser` downloads it from the share at `code`: the answer's head, and the zip. */
+    private fun download(browser: Browser, code: String): Pair<String, ByteArray> = Socket("127.0.0.1", host.port).use { socket ->
+        val cookies = browser.cookieHeaders.joinToString("; ")
+        socket.getOutputStream().write("GET /$code/map.zip HTTP/1.1\r\nHost: $address\r\nCookie: $cookies\r\n\r\n".toByteArray())
+        val answer = socket.getInputStream().readBytes()
+        val end = String(answer, Charsets.ISO_8859_1).indexOf("\r\n\r\n")
+        String(answer, 0, end, Charsets.ISO_8859_1) to answer.copyOfRange(end + 4, answer.size)
+    }
+
+    private fun entries(zip: ByteArray): Map<String, ByteArray> = ZipInputStream(zip.inputStream()).use { input -> generateSequence { input.nextEntry }.associate { it.name to input.readBytes() } }
+
+    private val sharedZips: List<String> get() = File(context.cacheDir, "shared-maps").list().orEmpty().toList()
+
     @Test
-    fun `a shared map downloads from a file made for each browser, gone once it's sent`() = runBlocking<Unit> {
+    fun `every browser downloading a shared map is sent one zip, made once for each version of the map, gone as the share ends`() = runBlocking<Unit> {
         val photo = TestMedia.picture(600, 400, noise = 1)
         val id = maps.add("# Trip\n\n- Lisbon\n\n  ![Tram](media/photo.jpg)\n", pictures = mapOf("photo.jpg" to photo))
+        val code = host.share(id, AppTheme(dark = false, tokens = emptyMap())).code
+        val browsers = List(3) { Browser(host.port).also { browser -> assertEquals(303, browser.post("/$code/join", emptyMap()).status) } }
+
+        val (head, zip) = download(browsers[0], code)
+        assertTrue(head, head.startsWith("HTTP/1.1 200"))
+        assertTrue(head, "Content-Disposition: attachment; filename=\"Trip.zip\"" in head)
+        assertArrayEquals(OutgoingMedia.picture(photo), entries(zip)["media/photo.jpg"])
+        assertTrue(entries(zip).getValue("map.md").decodeToString().startsWith("# Trip"))
+
+        // The next browsers, two at once, are sent the same zip: one file for the room, not one for each.
+        val others = browsers.drop(1).map { browser -> async(Dispatchers.IO) { download(browser, code) } }.awaitAll()
+        others.forEach { (_, theirs) -> assertArrayEquals(zip, theirs) }
+        assertEquals(1, sharedZips.size)
+
+        // A new version of the map makes a new zip; the one before stays for downloads still going.
+        maps.write(id, "# Trip\n\n- Lisbon\n- Porto\n\n  ![Tram](media/photo.jpg)\n")
+        assertTrue(entries(download(browsers[0], code).second).getValue("map.md").decodeToString().contains("Porto"))
+        assertEquals(2, sharedZips.size)
+        maps.write(id, "# Trip\n\n- Lisbon\n- Porto\n- Faro\n\n  ![Tram](media/photo.jpg)\n")
+        download(browsers[0], code)
+        assertEquals(2, sharedZips.size)
+
+        // The share ended: its zips go.
+        host.unshare(code)
+        assertEquals(emptyList<String>(), sharedZips)
+    }
+
+    @Test
+    fun `a shared map's zip is made only once there's room for all of it`() = runBlocking<Unit> {
+        restart(room = { 0L })
+        val id = maps.add("# Trip\n\n- Lisbon\n\n  ![Tram](media/photo.jpg)\n", pictures = mapOf("photo.jpg" to TestMedia.picture(600, 400, noise = 1)))
         val code = host.share(id, AppTheme(dark = false, tokens = emptyMap())).code
         val browser = Browser(host.port)
         assertEquals(303, browser.post("/$code/join", emptyMap()).status)
 
-        val (head, zip) = Socket("127.0.0.1", host.port).use { socket ->
-            val cookies = browser.cookieHeaders.joinToString("; ")
-            socket.getOutputStream().write("GET /$code/map.zip HTTP/1.1\r\nHost: $address\r\nCookie: $cookies\r\n\r\n".toByteArray())
-            val answer = socket.getInputStream().readBytes()
-            val end = String(answer, Charsets.ISO_8859_1).indexOf("\r\n\r\n")
-            String(answer, 0, end, Charsets.ISO_8859_1) to answer.copyOfRange(end + 4, answer.size)
-        }
-
-        assertTrue(head, head.startsWith("HTTP/1.1 200"))
-        assertTrue(head, "Content-Disposition: attachment; filename=\"Trip.zip\"" in head)
-        val entries = ZipInputStream(zip.inputStream()).use { input -> generateSequence { input.nextEntry }.associate { it.name to input.readBytes() } }
-        assertArrayEquals(OutgoingMedia.picture(photo), entries["media/photo.jpg"])
-        assertTrue(entries.getValue("map.md").decodeToString().startsWith("# Trip"))
-        assertTrue(eventually { File(context.cacheDir, "shared-maps").list().isNullOrEmpty() })
+        val full = browser.get("/$code/map.zip")
+        assertEquals(507, full.status)
+        assertEquals("There isn't room on the phone to make the map's zip. Free up some space there, and download it again.", full.body)
+        assertEquals(emptyList<String>(), sharedZips)
     }
 
     @Test
-    fun `a computer's page is made once for each version of the map, its files included`() = runBlocking<Unit> {
+    fun `a zip being made as Orbit stops listening stops, and leaves nothing behind`() = runBlocking<Unit> {
+        // The room is looked at as the zip is about to be made: there, Orbit leaves the screen, and the server stops.
+        val asked = CountDownLatch(1)
+        val stopped = CountDownLatch(1)
+
+        restart(
+            room = {
+                asked.countDown()
+                stopped.await(10, TimeUnit.SECONDS)
+                1L shl 40
+            },
+        )
+
+        val id = maps.add("# Trip\n\n- Lisbon\n\n  ![Tram](media/photo.jpg)\n", pictures = mapOf("photo.jpg" to TestMedia.picture(600, 400, noise = 1)))
+        val code = host.share(id, AppTheme(dark = false, tokens = emptyMap())).code
+        val browser = Browser(host.port)
+        assertEquals(303, browser.post("/$code/join", emptyMap()).status)
+        val downloading = async(Dispatchers.IO) { runCatching { download(browser, code) } }
+
+        assertTrue(asked.await(10, TimeUnit.SECONDS))
+        host.stop()
+        stopped.countDown()
+        downloading.await()
+
+        // Nothing goes on being made for a browser no one answers.
+        Thread.sleep(1_000)
+        assertEquals(emptyList<String>(), sharedZips)
+    }
+
+    @Test
+    fun `a computer's page is made once for each version of the map, its files included, into a file of its own`() = runBlocking<Unit> {
         val id = maps.add("# Trip\n\n- Lisbon\n\n  ![Tram](media/tram.jpg)\n")
         val share = host.share(id, AppTheme(dark = false, tokens = emptyMap()))
         val folder = maps.folder(id)
+        val pages = File(context.cacheDir, "shared-pages")
         var builds = 0
 
-        suspend fun page(): String = share.page(pageVersion(maps.summary(id), folder)) {
+        suspend fun page(): SharedPage = share.page(pageVersion(maps.summary(id), folder)) { file ->
             builds += 1
-            "page $builds"
+            file.writeText("page $builds")
+            listOf("script $builds")
         }
 
-        assertEquals("page 1", page())
-        assertEquals("page 1", page())
+        val first = page()
+        assertEquals("page 1", first.file.readText())
+        assertEquals(listOf("script 1"), first.scripts)
+        assertEquals(first, page())
 
         // The picture reaches the folder late, as from a sync app: the page is made again with it.
         File(folder, "media").apply { mkdirs() }.resolve("tram.jpg").writeBytes(picture(2_000))
-        assertEquals("page 2", page())
-        assertEquals("page 2", page())
+        val second = page()
+        assertEquals("page 2", second.file.readText())
+        assertEquals(second, page())
+        // The page before stays, for an answer already on its way with it.
+        assertTrue(first.file.isFile)
 
         maps.write(id, "# Trip\n\n- Lisbon\n- Porto\n\n  ![Tram](media/tram.jpg)\n")
-        assertEquals("page 3", page())
+        val third = page()
+        assertEquals("page 3", third.file.readText())
         assertEquals(3, builds)
+        // Two versions on, it goes.
+        assertFalse(first.file.exists())
+        assertEquals(setOf(second.file, third.file), pages.listFiles()!!.toSet())
+
+        // A page that couldn't be made leaves nothing behind, and the last one stays.
+        maps.write(id, "# Trip\n\n- Lisbon\n- Porto\n- Sintra\n\n  ![Tram](media/tram.jpg)\n")
+        assertTrue(runCatching { share.page(pageVersion(maps.summary(id), folder)) { file -> file.writeText("half a page"); throw IOException("A picture went") } }.isFailure)
+        assertEquals(setOf(second.file, third.file), pages.listFiles()!!.toSet())
+
+        // As the share ends, so do its pages; one made for an answer as it ended goes once it's sent.
+        host.unshare(share.code)
+        assertEquals(emptyList<File>(), pages.listFiles()!!.toList())
+        assertTrue(page().temporary)
     }
 
     @Test
@@ -766,6 +1010,240 @@ class SendingTest {
         }
     }
 
+    @Test
+    fun `a sender believes only the device that showed its code about whether the map opened`() = runBlocking<Unit> {
+        val forged = AtomicInteger(0)
+
+        // A device in between passes everything on, but says a map waiting for an answer was opened, its proof kept.
+        val relay = between { request, answer ->
+            if (request.method == "GET" && request.path.startsWith("/offer/") && answer.body.contains("\"waiting\"")) {
+                forged.incrementAndGet()
+                answer.json { JsonObject(it + ("state" to JsonPrimitive("opened"))) }
+            } else {
+                null
+            }
+        }
+
+        relay.start(0)
+
+        try {
+            val (_, states) = send(host.key.text, bundle("# Plan\n"), to = "127.0.0.1:${relay.port}")
+            val offer = arrived()
+            assertTrue(eventually { forged.get() >= 2 })
+            assertFalse(states.toString(), SendState.Opened in states)
+
+            // The device itself says it declined: that's believed.
+            host.decline(offer)
+            assertEquals(SendState.Declined, waitFor(states) { it == SendState.Declined || it == SendState.Opened })
+        } finally {
+            relay.stop()
+        }
+    }
+
+    @Test
+    fun `a sender says the map was declined only when the device itself says so`() = runBlocking<Unit> {
+        // A device in between turns the map away in the device's place, which never sees it.
+        val relay = between(instead = { request -> if (request.path.endsWith("/map")) Response.notFound() else null })
+        relay.start(0)
+
+        try {
+            val (_, states) = send(host.key.text, bundle("# Plan\n"), to = "127.0.0.1:${relay.port}")
+            assertEquals(SendState.Failed(R.string.nearby_send_could_not_reach), waitFor(states) { it is SendState.Failed || it == SendState.Declined })
+        } finally {
+            relay.stop()
+        }
+    }
+
+    @Test
+    fun `the device taking a map proves what it says of the offer, and its half of the code says so`() = runBlocking<Unit> {
+        val hello = hello()
+        val (_, offered) = greet(hello)
+        val id = offered!!.id
+
+        // Its half of the check code says it proves its answers; Orbit 0.3.0's and 0.4.0's, all random, don't.
+        assertTrue(provesStates(fromBase64Url(offered.nonce)!!))
+        assertFalse(provesStates(randomBytes(CHECK_NONCE_BYTES)))
+
+        assertEquals(200, reveal(id, hello.senderNonce).first)
+        val answer = offerJson.decodeFromString(StateAnswer.serializer(), request("GET", "/offer/$id").second)
+        assertEquals("confirming", answer.state)
+        assertTrue(hello.session.isProof(id, "confirming", fromBase64Url(answer.proof)!!))
+        assertFalse(hello.session.isProof(id, "opened", fromBase64Url(answer.proof)!!))
+
+        // An Orbit that doesn't know the proof reads the answer as it always has.
+        val older = Json { ignoreUnknownKeys = true }.decodeFromString(StateAnswer030.serializer(), request("GET", "/offer/$id").second)
+        assertEquals("confirming", older.state)
+    }
+
+    @Test
+    fun `no one in between can take the mark off the device's half of the code without the codes differing`() = runBlocking<Unit> {
+        val relay = between { request, answer ->
+            if (request.path == "/offer") {
+                // Its half, as Orbit 0.4.0 would send it: all random.
+                answer.json { JsonObject(it + ("nonce" to JsonPrimitive(base64Url(randomBytes(CHECK_NONCE_BYTES))))) }
+            } else {
+                null
+            }
+        }
+
+        relay.start(0)
+
+        try {
+            val (_, states) = send(host.key.text, bundle("# Plan\n"), to = "127.0.0.1:${relay.port}", checker = Checker { false })
+            val coming = incoming()
+            val shown = waitFor(states) { it is SendState.Confirming } as SendState.Confirming
+            assertNotEquals(coming.check, shown.check)
+            waitFor(states) { it == SendState.Cancelled }
+        } finally {
+            relay.stop()
+        }
+    }
+
+    @Test
+    fun `an older Orbit's word about the offer is taken as it is`() = runBlocking<Unit> {
+        val older = orbit030()
+        older.start(0)
+
+        try {
+            val (_, states) = send(host.key.text, bundle("# Plan\n- From an older Orbit\n"), to = "127.0.0.1:${older.port}")
+            val offer = arrived()
+            host.accept(offer, keepBoth = false)
+            assertEquals(SendState.Opened, waitFor(states) { it == SendState.Opened || it == SendState.Declined })
+        } finally {
+            older.stop()
+        }
+    }
+
+    @Test
+    fun `a map cut short once its offer's time is up ends the offer, and can't start coming again`() = runBlocking<Unit> {
+        restart(times = OfferTimes(confirming = 1_500))
+        val (id, hello) = agreed()
+
+        Socket("127.0.0.1", host.port).use { slow ->
+            slow.getOutputStream().write("POST /offer/$id/map HTTP/1.1\r\nHost: $address\r\nContent-Length: 1000000\r\n\r\nstarting".toByteArray())
+            slow.getOutputStream().flush()
+            assertTrue(eventually { host.incoming.value.singleOrNull { it.id == id }?.uploading == true })
+
+            // Its time is up while the map is on its way: it may still finish.
+            Thread.sleep(2_500)
+            assertEquals("confirming", state(id))
+        }
+
+        // Cut short: the offer is over, and its place free.
+        assertTrue(eventually { host.incoming.value.isEmpty() })
+        assertEquals("declined", state(id))
+        assertEquals(404, request("POST", "/offer/$id/map", body = sealedMap(hello, "# Plan\n")).first)
+        assertEquals(200, greet(hello()).first)
+    }
+
+    @Test
+    fun `a map still coming as its offer's time is up arrives`() = runBlocking<Unit> {
+        restart(times = OfferTimes(confirming = 1_500))
+        val (id, hello) = agreed()
+        val map = sealedMap(hello, "# Plan\n- Slow\n")
+
+        Socket("127.0.0.1", host.port).use { slow ->
+            slow.soTimeout = 15_000
+            val output = slow.getOutputStream()
+            output.write("POST /offer/$id/map HTTP/1.1\r\nHost: $address\r\nContent-Length: ${map.size}\r\n\r\n".toByteArray())
+            output.write(map, 0, 10)
+            output.flush()
+            assertTrue(eventually { host.incoming.value.singleOrNull { it.id == id }?.uploading == true })
+            Thread.sleep(2_500)
+            output.write(map, 10, map.size - 10)
+            output.flush()
+            val status = slow.getInputStream().bufferedReader().readLine()
+            assertTrue(status, status.startsWith("HTTP/1.1 200"))
+        }
+
+        assertEquals("Plan", arrived().bundle.title)
+        assertEquals("waiting", state(id))
+    }
+
+    @Test
+    fun `a map is taken only with room for it as it opens, besides the maps on their way`() = runBlocking<Unit> {
+        assumeTrue("Needs another loopback address to send from", canBindFrom("127.0.0.2"))
+        val left = AtomicLong(Long.MAX_VALUE)
+        restart(room = { left.get() })
+        val (first, firstHello) = agreed()
+        val one = sealedMap(firstHello, "# One\n")
+
+        // Room for half the map: refused before any of it is read.
+        left.set(SPARE_SPACE + one.size / 2L)
+        assertEquals(507, headOnly("/offer/$first/map", one.size.toLong()))
+
+        // Room for one map as it opens, not two: while one is on its way, another device's has to wait.
+        left.set(SPARE_SPACE + one.size * 3L / 2)
+        val (second, secondHello) = agreed(from = "127.0.0.2")
+        val two = sealedMap(secondHello, "# Two\n")
+
+        Socket("127.0.0.1", host.port).use { slow ->
+            slow.getOutputStream().write("POST /offer/$first/map HTTP/1.1\r\nHost: $address\r\nContent-Length: ${one.size}\r\n\r\n".toByteArray())
+            slow.getOutputStream().write(one, 0, 10)
+            slow.getOutputStream().flush()
+            assertTrue(eventually { host.incoming.value.single { it.id == first }.uploading })
+            assertEquals(507, headOnly("/offer/$second/map", two.size.toLong(), from = "127.0.0.2"))
+        }
+
+        // Once the first stopped coming, the second has room.
+        assertTrue(eventually { !host.incoming.value.single { it.id == first }.uploading })
+        assertEquals(200, request("POST", "/offer/$second/map", body = two, from = "127.0.0.2").first)
+        assertEquals("Two", arrived().bundle.title)
+    }
+
+    @Test
+    fun `a map the storage runs out of room for as it opens leaves nothing behind, and ends its offer`() = runBlocking<Unit> {
+        // Plenty of room as the map is let in, none by the time it opens: another app filled the storage meanwhile.
+        val looks = AtomicInteger(0)
+        restart(room = { if (looks.getAndIncrement() == 0) 1L shl 40 else 0L })
+        val (id, hello) = agreed()
+
+        assertEquals(507, request("POST", "/offer/$id/map", body = sealedMap(hello, "# Plan\n")).first)
+        assertEquals("declined", state(id))
+        assertTrue(host.incoming.value.isEmpty())
+        assertTrue(host.offers.value.isEmpty())
+        assertEquals(emptyList<String>(), offersFolder.list().orEmpty().toList())
+        assertEquals(200, greet(hello()).first)
+    }
+
+    @Test
+    fun `offers answered long ago, or past the newest kept, are forgotten`() = runBlocking<Unit> {
+        val now = AtomicLong(1_000_000)
+        restart(times = OfferTimes(settled = 60_000), clock = { now.get() })
+
+        // A device offering again and again, and cancelling each time.
+        val ids = (1..SETTLED_OFFERS_KEPT + 4).map {
+            val (status, answer) = greet(hello())
+            assertEquals(200, status)
+            assertEquals(200, request("POST", "/offer/${answer!!.id}/cancel").first)
+            answer.id
+        }
+
+        ids.take(4).forEach { id -> assertEquals(404, request("GET", "/offer/$id").first) }
+        assertEquals("declined", state(ids[4]))
+        assertEquals("declined", state(ids.last()))
+
+        // Past the time this host says answers for, a minute here, the sender has long heard: even the newest are forgotten.
+        now.addAndGet(60_001)
+        assertEquals(404, request("GET", "/offer/${ids.last()}").first)
+    }
+
+    @Test
+    fun `an offer going on is never forgotten for answered ones`() = runBlocking<Unit> {
+        assumeTrue("Needs another loopback address to send from", canBindFrom("127.0.0.2"))
+        val now = AtomicLong(1_000_000)
+        restart(times = OfferTimes(settled = 60_000), clock = { now.get() })
+        val (id, _) = agreed()
+
+        repeat(SETTLED_OFFERS_KEPT + 4) {
+            val (_, answer) = greet(hello(), from = "127.0.0.2")
+            assertEquals(200, request("POST", "/offer/${answer!!.id}/cancel", from = "127.0.0.2").first)
+        }
+
+        now.addAndGet(10 * 60_000)
+        assertEquals("confirming", state(id))
+    }
+
     private companion object {
         fun canBindFrom(address: String): Boolean = runCatching { Socket().use { it.bind(InetSocketAddress(address, 0)) } }.isSuccess
 
@@ -784,4 +1262,21 @@ class SendingTest {
             return false
         }
     }
+
+    @Test
+    fun `an ideas files go to a device that keeps them, and stay here, named as files, for one from before them`() {
+        val map = bundle(
+            "# Trip\n## Tickets\n<!-- orbit\nfiles:\n  - src: media/file-pass.pdf\n    name: Pass.pdf\n  - src: media/file-scan.png\n-->\n",
+            mapOf("file-pass.pdf" to picture(1_000), "file-scan.png" to picture(2_000, seed = 2)),
+        )
+
+        // This version says it keeps ideas' files of every kind: they all open there.
+        assertNull(olderThere(map, DeviceReads.of(1, carriedMediaTypes().toList(), files = true)))
+        // Orbit 0.4.0 says nothing of them, and keeps only its own kinds: the PDF stays here, counted as a file; the PNG goes, a kind it keeps.
+        assertEquals(OlderThere(MediaSummary(files = 1, bytes = 1_000), showsOnly = false), olderThere(map, DeviceReads.of(1, carriedMediaTypes().toList())))
+    }
 }
+
+/** What Orbit 0.3.0 and 0.4.0 read of an answer about an offer. */
+@Serializable
+private class StateAnswer030(val state: String)

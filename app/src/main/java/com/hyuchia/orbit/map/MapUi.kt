@@ -18,8 +18,12 @@ sealed interface Panel {
     /** The long-press menu, at (`x`, `y`) dp from the map's top left. */
     data class Menu(val id: String, val x: Float, val y: Float) : Panel
 
-    /** The idea editor, on idea `id`: `opened` tells each time it opens on an idea from the next, and stays as new text gives the idea a new id. */
-    data class Editor(val id: String, val opened: Int = 0) : Panel
+    /**
+     * The idea editor, on idea `id`: `opened` tells each time it opens on an
+     * idea from the next, and stays as new text gives the idea a new id.
+     * `afterSketch`: it's back from a sketch begun in it.
+     */
+    data class Editor(val id: String, val opened: Int = 0, val afterSketch: Boolean = false) : Panel
 
     data class Details(val id: String) : Panel
     data object Outline : Panel
@@ -28,6 +32,13 @@ sealed interface Panel {
     data object Export : Panel
     data object History : Panel
 }
+
+/**
+ * Whether the panel changes the map: its menu of changes, the editor and
+ * the style. A map that can only be looked at opens none of them, and
+ * closes the one that's open as it becomes so.
+ */
+val Panel.changesTheMap: Boolean get() = this is Panel.Menu || this is Panel.Editor || this is Panel.Style
 
 /**
  * The version history, while it's open: the versions kept (null while
@@ -160,11 +171,21 @@ data class Rehearsal(val steps: List<Step>) {
     }
 }
 
-/** A video on its way into the map from the phone, for idea `nodeId`: how far along the copy is, from 0 to 1, or null while that isn't known. */
-data class VideoCopy(val nodeId: String, val progress: Float? = null)
+/**
+ * A video on its way into the map from the phone, for idea `nodeId`: how far
+ * along the copy is, from 0 to 1, or null while that isn't known; and, while
+ * it's made smaller, how big it was and about how big it will be.
+ */
+data class VideoCopy(val nodeId: String, val progress: Float? = null, val smaller: SmallerSizes? = null)
+
+/** A video being made smaller: `from` bytes, to about `about`. */
+data class SmallerSizes(val from: Long, val about: Long)
 
 /** A sound on its way into the map from the phone, for idea `nodeId`, as [VideoCopy] is for a video. */
 data class SoundCopy(val nodeId: String, val progress: Float? = null)
+
+/** Files on their way into the map from the phone, for idea `nodeId`: the one being copied (`name`), how far along it is, and how many are left after it. */
+data class FileCopy(val nodeId: String, val name: String, val progress: Float? = null, val left: Int = 0)
 
 /**
  * Text for the screen to show, read from the app's strings as it's shown, so
@@ -195,8 +216,11 @@ sealed interface ShownText {
     private fun written(arguments: List<Any>, resources: Resources): Array<Any> = arguments.map { if (it is ShownText) it.text(resources) else it }.toTypedArray()
 }
 
-/** Why a picture, video or sound from the phone didn't join idea `nodeId`, for its editor to say. */
-data class MediaProblem(val nodeId: String, val video: Boolean, val message: ShownText, val sound: Boolean = false)
+/** Why a picture, video, sound or file from the phone didn't join idea `nodeId`, for its editor to say. */
+data class MediaProblem(val nodeId: String, val video: Boolean, val message: ShownText, val sound: Boolean = false, val file: Boolean = false)
+
+/** What came of a big video joining idea `nodeId`, said in its editor while that's open: made smaller, or kept as it is. */
+data class VideoNote(val nodeId: String, val message: ShownText)
 
 /** The map's pictures and videos full screen, as they were when the viewer opened, from the one at `start`. */
 data class Viewing(val items: List<GalleryItem>, val start: Int)
@@ -222,8 +246,8 @@ data class MapUi(
     /** The page has drawn the map since it was ready: the map fades in then, rather than over an empty surface first. */
     val drawn: Boolean = false,
 
-    /** The page's process stopped: the map is gone until it loads again. */
-    val stopped: Boolean = false,
+    /** Why the page can't draw the map until it loads again, in a new page: its process stopped, or it didn't load. */
+    val pageProblem: PageProblem? = null,
 
     val error: ShownText? = null,
     val map: MapState? = null,
@@ -273,6 +297,9 @@ data class MapUi(
     /** Why the last picture or video from the phone didn't join its idea. */
     val mediaProblem: MediaProblem? = null,
 
+    /** What came of the last big video chosen for an idea in its editor: said under it while the editor's open. */
+    val videoNote: VideoNote? = null,
+
     /** The idea whose picture just came from an iPhone, without the movie that would make it a live photo: its editor offers to add it. */
     val iphoneStill: String? = null,
 
@@ -285,14 +312,34 @@ data class MapUi(
     /** A sound being copied in from the phone. */
     val soundCopy: SoundCopy? = null,
 
+    /** Files being copied in from the phone. */
+    val fileCopy: FileCopy? = null,
+
     /** The idea a voice memo is being recorded for, while the recorder is open. */
     val recording: String? = null,
+
+    /** Boxes of notes' checklists just checked or unchecked, by idea, then by line, shown so until the map's notes say so. */
+    val noteChecks: Map<String, Map<Int, Boolean>> = emptyMap(),
+
+    /** Sketching on an idea's planet, from asking until the map is back as it was (sketch/). */
+    val sketch: SketchUi? = null,
 ) {
     /** Whether a picture or video is full screen on this phone. */
     val fullScreen: Boolean get() = viewing != null || playing != null
 
     /** Whether an earlier version from the history is on the map: it's only looked at, and takes no changes. */
     val showingVersion: Boolean get() = history?.showing != null
+
+    /**
+     * Whether a press on the map can lead to an edit, its menu of changes:
+     * not while a path is made or the map is presented or studied (a
+     * keyboard's menu key still reaches the page then), on a map that can't
+     * be changed, or on an earlier version.
+     */
+    val takesEdits: Boolean get() = !pathMaking && presentation == null && study == null && readOnly == null && !showingVersion && sketch == null
+
+    /** Whether a planet is up close to sketch on, the map's own bars and buttons stepping aside for the sketch's. */
+    val sketching: Boolean get() = sketch != null && sketch.phase != SketchPhase.Reading && sketch.phase != SketchPhase.Asking
 
     val nodes: Map<String, MapNode> by lazy { map?.nodes?.associateBy { it.id }.orEmpty() }
 
@@ -315,6 +362,35 @@ data class MapUi(
     /** Whether the map shows one idea with its orbit, rather than the whole map. */
     val focused: Boolean get() = mode == ViewMode.FOCUS
 }
+
+/**
+ * Where a sketch is: reading the idea's picture, to tell a sketch to draw on
+ * further from another picture; asking first whether it may replace that
+ * one; the map flying to the planet, drawing on it, describing it as it's
+ * done, keeping it, or the map flying back.
+ */
+enum class SketchPhase { Reading, Asking, Opening, Drawing, Describing, Saving, Closing }
+
+/** Where a planet is on the map's page while it's sketched on: its middle, in dp from the page's top left, and its radius. */
+data class PlanetCircle(val x: Float, val y: Float, val radius: Float)
+
+/**
+ * Sketching on idea `nodeId`'s planet: where it is, its circle on the
+ * page once the page holds it up close, the color the map dims with around
+ * it (ARGB), whether the sketch takes the place of the idea's picture, and
+ * whether the person is asked to let go of strokes drawn.
+ */
+data class SketchUi(
+    val nodeId: String,
+    val phase: SketchPhase = SketchPhase.Opening,
+    val circle: PlanetCircle? = null,
+    val scrim: Int? = null,
+    val replacing: Boolean = false,
+    val discarding: Boolean = false,
+
+    /** The description the sketch starts with: its picture's, when it's drawn on further. */
+    val description: String = "",
+)
 
 /** One-off things the screen does for the map. */
 sealed interface MapEvent {

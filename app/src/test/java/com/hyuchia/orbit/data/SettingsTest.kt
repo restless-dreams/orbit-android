@@ -36,6 +36,17 @@ class SettingsTest {
     }
 
     @Test
+    fun `reminders are on until turned off, and Orbit asks for notifications once`() = runTest {
+        val settings = SettingsRepository(store)
+        assertEquals(true, settings.settings.first().reminders)
+        assertEquals(false, settings.settings.first().notificationsAsked)
+
+        settings.update { it.copy(reminders = false, notificationsAsked = true) }
+        assertEquals(false, settings.settings.first().reminders)
+        assertEquals(true, settings.settings.first().notificationsAsked)
+    }
+
+    @Test
     fun `a choice a newer version made stays as it was while other settings change here`() = runTest {
         val settings = SettingsRepository(store)
         store.edit { it[stringPreferencesKey("theme_mode")] = "Sepia" }
@@ -118,6 +129,8 @@ class SettingsTest {
             storageNoteDismissed = true,
             folderNoticesDismissed = setOf("older:pixel:5:1"),
             newCardsADay = 30,
+            reminders = false,
+            notificationsAsked = true,
         )
 
         // Each one other than its default, so a setting added without its line in update() or read() fails here.

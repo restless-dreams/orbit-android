@@ -21,6 +21,11 @@
         <item quantity="many">%1$d audios</item>
         <item quantity="other">%1$d audios</item>
     </plurals>
+    <plurals name="sharing_files">
+        <item quantity="one">un archivo</item>
+        <item quantity="many">%1$d archivos</item>
+        <item quantity="other">%1$d archivos</item>
+    </plurals>
     <!-- El movimiento de una foto en vivo que se queda mientras su imagen se va, como en una página web sin espacio para él. -->
     <plurals name="sharing_motions">
         <item quantity="one">el movimiento de una foto en vivo</item>
@@ -56,6 +61,11 @@
         <item quantity="many">%1$s se quedan en este dispositivo: Orbit no puede quitarles dónde se tomaron o grabaron.</item>
         <item quantity="other">%1$s se quedan en este dispositivo: Orbit no puede quitarles dónde se tomaron o grabaron.</item>
     </plurals>
+    <plurals name="sharing_uncleaned_stay_hidden">
+        <item quantity="one">%1$s se queda en este dispositivo: Orbit no puede quitarle lo que pueda tener oculto.</item>
+        <item quantity="many">%1$s se quedan en este dispositivo: Orbit no puede quitarles lo que puedan tener oculto.</item>
+        <item quantity="other">%1$s se quedan en este dispositivo: Orbit no puede quitarles lo que puedan tener oculto.</item>
+    </plurals>
     <plurals name="sharing_uncleaned_go_taken">
         <item quantity="one">%1$s va tal como está, con el lugar donde se tomó.</item>
         <item quantity="many">%1$s van tal como están, con el lugar donde se tomaron.</item>
@@ -70,6 +80,11 @@
         <item quantity="one">%1$s va tal como está, con el lugar donde se tomó o grabó.</item>
         <item quantity="many">%1$s van tal como están, con el lugar donde se tomaron o grabaron.</item>
         <item quantity="other">%1$s van tal como están, con el lugar donde se tomaron o grabaron.</item>
+    </plurals>
+    <plurals name="sharing_uncleaned_go_hidden">
+        <item quantity="one">%1$s va tal como está, con lo que pueda tener oculto.</item>
+        <item quantity="many">%1$s van tal como están, con lo que puedan tener oculto.</item>
+        <item quantity="other">%1$s van tal como están, con lo que puedan tener oculto.</item>
     </plurals>
 
     <plurals name="sharing_as_they_are_title">
@@ -92,6 +107,11 @@
         <item quantity="many">Orbit no pudo quitarles dónde y cuándo se tomaron o grabaron ni con qué dispositivos, así que irían con los archivos.</item>
         <item quantity="other">Orbit no pudo quitarles dónde y cuándo se tomaron o grabaron ni con qué dispositivos, así que irían con los archivos.</item>
     </plurals>
+    <plurals name="sharing_as_they_are_hidden">
+        <item quantity="one">Orbit no pudo quitarle lo que pueda decir además de lo que muestra, como quién lo hizo, cuándo y dónde, así que iría con el archivo.</item>
+        <item quantity="many">Orbit no pudo quitarles lo que puedan decir además de lo que muestran, como quién los hizo, cuándo y dónde, así que iría con los archivos.</item>
+        <item quantity="other">Orbit no pudo quitarles lo que puedan decir además de lo que muestran, como quién los hizo, cuándo y dónde, así que iría con los archivos.</item>
+    </plurals>
     <plurals name="sharing_leave_them_out">
         <item quantity="one">Dejar fuera</item>
         <item quantity="many">Dejar fuera</item>
@@ -107,8 +127,10 @@
     <string name="sharing_map_with">El mapa, con %1$s</string>
     <string name="sharing_map_alone">El mapa</string>
     <string name="sharing_map_with_description">Un archivo zip que se abre en Orbit\u00A0· %1$s</string>
+    <string name="sharing_zip_past_older_orbits">Las versiones anteriores de Orbit no pueden abrir un zip tan grande: actualiza Orbit donde se abra</string>
     <string name="sharing_just_the_text">Solo el texto</string>
     <string name="sharing_markdown_file">Un archivo markdown</string>
+    <string name="sharing_yaml_file">Un archivo YAML</string>
 
     <string name="sharing_send_copy">Envía una copia del mapa.</string>
     <string name="sharing_send_copy_with">Envía una copia del mapa, con %1$s.</string>

@@ -48,6 +48,8 @@
     <string name="data_zip_points_outside">Ese archivo zip tiene un archivo que apunta fuera de él.</string>
     <string name="data_zip_file_too_big">Ese archivo zip tiene un archivo demasiado grande para formar parte de un mapa.</string>
     <string name="data_no_room_for_zip_maps">No hay espacio en este dispositivo para los mapas de ese archivo zip.</string>
+    <string name="data_no_room_for_zip_map">No hay espacio en este dispositivo para el mapa de ese archivo zip: ocupa unos %1$s, y hay %2$s libres.</string>
+    <string name="data_no_room_left_for_zip_map">No hay espacio en este dispositivo para el mapa de ese archivo zip.</string>
     <plurals name="data_zip_files_filled_in">
         <item quantity="one">Llegó un archivo que le faltaba a un mapa de aquí: una imagen, un video, un audio o una versión.</item>
         <item quantity="many">Llegaron %1$d archivos que les faltaban a mapas de aquí: imágenes, videos, audios o versiones.</item>
@@ -62,13 +64,15 @@
     <!-- Imágenes y videos que un mapa no admite -->
     <string name="data_video_too_big">Ese video pesa %1$s, y un mapa admite videos de hasta %2$s para poder enviarse a tus otros dispositivos. Recórtalo en tu galería o agrégalo como enlace de YouTube o Vimeo.</string>
     <string name="data_video_past_limit">Ese video pesa más de %1$s, y un mapa admite videos de hasta ese tamaño para poder enviarse a tus otros dispositivos. Recórtalo en tu galería o agrégalo como enlace de YouTube o Vimeo.</string>
-    <string name="data_video_past_map_room">Las imágenes, los videos y los audios de este mapa ya suman %1$s. Con este video pasarían de los %2$s que un mapa puede llevar cuando se comparte o se respalda. Elige uno más corto o agrégalo como enlace de YouTube o Vimeo.</string>
+    <string name="data_video_past_map_room">Las imágenes, los videos y los audios de este mapa ya suman %1$s. Con este video pasarían del máximo de %2$s que un mapa puede llevar cuando se comparte o se respalda. Elige uno más corto o agrégalo como enlace de YouTube o Vimeo.</string>
     <string name="data_picture_past_map_room">Las imágenes, los videos y los audios de este mapa suman %1$s, todo lo que un mapa puede llevar cuando se comparte o se respalda. Quita uno para hacer espacio o agrega esta imagen como dirección web.</string>
     <string name="data_video_kind_refused">Orbit guarda los videos como archivos MP4, WebM o QuickTime, y este es de tipo %1$s.</string>
     <string name="data_video_kind_unknown">Orbit guarda los videos como archivos MP4, WebM o QuickTime, y este es de un tipo que no conoce.</string>
     <string name="data_no_room_for_video">No hay espacio en este dispositivo para ese video.</string>
+    <string name="data_no_room_for_pasted_media">No hay espacio en este dispositivo para las imágenes, los videos y los audios de esas ideas.</string>
     <string name="data_more_than_a_map_keeps">Eso es más de lo que admite un mapa.</string>
     <string name="data_megabytes">%1$s MB</string>
+    <string name="data_gigabytes">%1$s GB</string>
 
     <!-- Guardar los mapas en una carpeta -->
     <string name="data_folder">Carpeta</string>
@@ -84,6 +88,17 @@
         <item quantity="many">No se pudieron leer %1$d archivos de la carpeta.</item>
         <item quantity="other">No se pudieron leer %1$d archivos de la carpeta.</item>
     </plurals>
+    <plurals name="data_folder_media_not_arriving">
+        <item quantity="one">A un mapa todavía le faltan imágenes, videos o audios de la carpeta.</item>
+        <item quantity="many">A %1$d mapas todavía les faltan imágenes, videos o audios de la carpeta.</item>
+        <item quantity="other">A %1$d mapas todavía les faltan imágenes, videos o audios de la carpeta.</item>
+    </plurals>
+    <plurals name="data_folder_no_room">
+        <item quantity="one">Una imagen, video o audio necesita más espacio del que tiene libre este dispositivo.</item>
+        <item quantity="many">%1$d imágenes, videos o audios necesitan más espacio del que tiene libre este dispositivo.</item>
+        <item quantity="other">%1$d imágenes, videos o audios necesitan más espacio del que tiene libre este dispositivo.</item>
+    </plurals>
+    <string name="data_folder_deletions_unreadable">Orbit no pudo leer qué mapas se eliminaron en este dispositivo, así que tus mapas esperan para sincronizarse con la carpeta. Lo intentará de nuevo en un momento.</string>
     <string name="data_folder_tries_again">Orbit lo intentará de nuevo en un momento.</string>
     <string name="data_folder_too_big_file">%1$s, en “%2$s”</string>
 

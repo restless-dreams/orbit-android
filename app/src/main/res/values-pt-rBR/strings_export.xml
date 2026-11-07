@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Exportar e compartilhar um mapa: suas imagens, desenhos e arquivos. Veja TRANSLATING.md. -->
+<resources>
+    <string name="export_and_share">Exportar e compartilhar</string>
+    <string name="export_default_title">Mapa</string>
+
+    <string name="export_pictures_show">As imagens mostram</string>
+    <string name="export_this_view">Esta visão</string>
+    <string name="export_whole_map">Mapa inteiro</string>
+    <string name="export_as_it_opens">Ao abrir</string>
+    <string name="export_background">Fundo</string>
+
+    <string name="export_web_page_description">Voa em qualquer navegador, mesmo sem conexão, e faz apresentações</string>
+    <string name="export_pdf">PDF ou impressão</string>
+    <string name="export_pdf_description">O mapa, a estrutura de tópicos e todas as notas, no papel ou em PDF</string>
+    <string name="export_picture">Imagem</string>
+    <string name="export_picture_description">Um PNG, desenhado pelo Orbit</string>
+    <string name="export_drawing">Desenho</string>
+    <string name="export_drawing_description">Um SVG que fica nítido em qualquer tamanho</string>
+    <string name="export_markdown_description">O mapa em orbit-md, para editar em qualquer lugar</string>
+    <string name="export_yaml_description">O mapa como dados, para apps e scripts</string>
+    <string name="export_opml_description">A estrutura de tópicos, para apps de tópicos e outros apps de mapas mentais</string>
+    <string name="export_zip">Arquivo zip</string>
+    <string name="export_zip_description">O markdown com as imagens, os vídeos e os áudios que ele tem</string>
+
+    <!-- Cada forma de exportar como uma frase a nomeia, depois de Salvar, Compartilhar ou Copiar: “Salvar a página da web”. -->
+    <string name="export_web_page_named">a página da web</string>
+    <string name="export_pdf_named">o PDF</string>
+    <string name="export_picture_named">a imagem</string>
+    <string name="export_drawing_named">o desenho</string>
+    <string name="export_markdown_named">o markdown</string>
+    <string name="export_yaml_named">o YAML</string>
+    <string name="export_opml_named">o OPML</string>
+    <string name="export_zip_named">o arquivo zip</string>
+    <string name="export_copy_format">Copiar %1$s</string>
+    <string name="export_save_format">Salvar %1$s</string>
+    <string name="export_share_format">Compartilhar %1$s</string>
+    <string name="export_print">Imprimir ou salvar como PDF</string>
+    <string name="export_copy">Copiar</string>
+    <string name="export_save">Salvar</string>
+    <string name="export_share">Compartilhar</string>
+    <string name="export_print_button">Imprimir</string>
+    <string name="export_copied">Copiado</string>
+
+    <string name="export_print_failed">Não foi possível preparar o mapa para impressão</string>
+
+    <string name="export_could_not_make">O Orbit não conseguiu criar este arquivo. Tente de novo em instantes.</string>
+    <string name="export_no_room">O Orbit não conseguiu criar este arquivo. O armazenamento deste dispositivo está cheio?</string>
+    <string name="export_could_not_save">O Orbit não conseguiu salvar este arquivo nesse lugar. Tente outro.</string>
+    <string name="export_too_much_to_copy">Isto é grande demais para copiar de uma vez. Compartilhe ou salve.</string>
+    <string name="export_newer_map_not_written">Uma versão mais recente do Orbit criou este mapa, então esta versão não consegue gerá-lo neste formato. Atualize o Orbit ou exporte como markdown.</string>
+    <string name="export_unreadable_map_not_written">O Orbit não conseguiu ler este mapa inteiro, então não consegue gerá-lo neste formato. Corrija o texto ou exporte como markdown.</string>
+    <string name="export_newer_yaml_map_not_written">Uma versão mais recente do Orbit criou este mapa, então esta versão não consegue gerá-lo neste formato. Atualize o Orbit ou exporte como YAML.</string>
+    <string name="export_unreadable_yaml_map_not_written">O Orbit não conseguiu ler este mapa inteiro, então não consegue gerá-lo neste formato. Corrija o texto ou exporte como YAML.</string>
+</resources>

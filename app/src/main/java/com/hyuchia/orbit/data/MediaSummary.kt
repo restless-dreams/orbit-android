@@ -2,8 +2,9 @@ package com.hyuchia.orbit.data
 
 /**
  * What goes with a map when it's shared, sent or shown: the pictures,
- * videos and audio its text points at in its media folder, by kind, and
- * how many bytes they come to. A picture named as a video is, with a
+ * videos, audio and ideas' files its text points at in its media folder,
+ * by kind, and how many bytes they come to. An idea's file counts as a
+ * file, whatever its kind: a PDF, or a picture held as a file. A picture named as a video is, with a
  * picture's extension (`video-1.jpg` beside `video-1.mp4`), is that video's
  * poster, and counts with its video. A live photo's motion
  * (`picture-1-motion.mp4` beside `picture-1.jpg`) is part of its picture
@@ -19,16 +20,24 @@ data class MediaSummary(
 
     /** The live photos among the pictures: each one's motion goes with it, wherever it goes whole. */
     val motions: Int = 0,
+
+    /** Ideas' files: PDFs, documents, any file an idea holds. */
+    val files: Int = 0,
 ) {
     val isEmpty: Boolean get() = count == 0
 
     /** How many files people would count: posters are part of their videos. */
-    val count: Int get() = pictures + videos + audio
+    val count: Int get() = pictures + videos + audio + files
 
     companion object {
-        /** The summary of a map's media files, by name, with their sizes; `audio` names those its text plays as audio. */
-        fun of(files: Map<String, Long>, audio: Set<String> = emptySet()): MediaSummary {
-            val kinds = files.keys.associateWith { name -> if (name in audio) MediaKindOfFile.Audio else kindOf(name) }
+        /**
+         * The summary of a map's media files, by name, with their sizes;
+         * `audio` names those its text plays as audio, and `ideaFiles` those
+         * its ideas hold as files, which count as files whatever their kind.
+         */
+        fun of(files: Map<String, Long>, audio: Set<String> = emptySet(), ideaFiles: Set<String> = emptySet()): MediaSummary {
+            val media = files.filterKeys { it !in ideaFiles || it in audio }
+            val kinds = media.keys.associateWith { name -> if (name in audio) MediaKindOfFile.Audio else kindOf(name) }
             val pictureStems = kinds.filterValues { it == MediaKindOfFile.Picture }.keys.map { it.substringBeforeLast('.') }.toSet()
             // A live photo's motion beside its picture: the picture counts it.
             val motions = kinds.filter { (name, kind) -> kind == MediaKindOfFile.Video && MediaNames.stillOf(name)?.let { it in pictureStems } == true }.keys
@@ -42,6 +51,7 @@ data class MediaSummary(
                 audio = kinds.count { it.value == MediaKindOfFile.Audio },
                 bytes = files.values.filter { it > 0 }.sum(),
                 motions = motions.size,
+                files = files.keys.count { it in ideaFiles && it !in audio },
             )
         }
 

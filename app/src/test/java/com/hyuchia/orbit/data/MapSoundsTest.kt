@@ -154,6 +154,46 @@ class MapSoundsTest {
         assertEquals(emptyList<String>(), soundNamesIn("# Trip\n## Tram <!-- orbit video: media/video-tram.mp4 -->"))
     }
 
+    @Test
+    fun `a YAML map's sounds are its ideas' audio keys, and its notes, names and comments are only words`() {
+        val yaml = """
+            title: Trip
+            nodes:
+              - text: Trip
+                audio: media/memo-intro.mp4
+                note: |
+                  A note that says audio: media/nothing.mp3 is only words,
+                  and so does sound: { src: media/nothing-either.mp3 }.
+                children:
+                  - text: Alfama
+                    audio:
+                      caption: Fado at night
+                      src: ./media/sound-fado.mp3
+                  - text: Belém
+                    sound: { src: "media/bells.ogg", caption: Bells }
+                  - voice: 'media/memo-voice.mp4'
+                    text: Voice
+                  # audio: media/commented.mp3
+                  - text: |
+                      A name of two lines,
+                      recording: media/in-a-name.mp3
+                    recording: media/memo-recorded.mp4
+                  - text: Tram
+                    video: media/video-tram.mp4
+                  - text: Radio
+                    audio: https://example.com/media/live.mp3
+                  - text: Again
+                    audio: media/memo-intro.mp4
+        """.trimIndent()
+
+        assertEquals(listOf("memo-intro.mp4", "sound-fado.mp3", "bells.ogg", "memo-voice.mp4", "memo-recorded.mp4"), soundNamesIn(yaml))
+        // A map whose first line is its nodes, and one whose frontmatter says it's YAML, read the same way.
+        assertEquals(listOf("memo-1.mp4"), soundNamesIn("nodes:\n  - text: Trip\n    audio: media/memo-1.mp4\n"))
+        assertEquals(listOf("memo-1.mp4"), soundNamesIn("---\nflavor: yaml\n---\nnodes:\n  - text: Trip\n    sound: \"./media/memo-1.mp4\"\n"))
+        // In markdown, the same words outside an idea's attributes are only words.
+        assertEquals(emptyList<String>(), soundNamesIn("# Trip\n\naudio: media/memo-1.mp4\n"))
+    }
+
     @Test(timeout = 5_000)
     fun `a sound's line with a long run of spaces is read in one pass`() {
         val spaces = " ".repeat(100_000)
@@ -203,21 +243,21 @@ class MapSoundsTest {
     @Test
     fun `a sound past what a map keeps is refused, saying why`() {
         assertEquals(
-            "That sound is 60 MB, and a map keeps sounds of up to 50 MB, so it can still go to your other devices. Trim it, or add it as a web address.",
-            soundRefusal(60_000_000, 0, words),
+            "That sound is 260\u00A0MB, and a map keeps sounds of up to 250\u00A0MB, so it can still go to your other devices. Trim it, or add it as a web address.",
+            soundRefusal(260_000_000, 0, words),
         )
         assertEquals(
-            "This map's pictures, videos and sounds come to 80 MB already. With this sound they'd be more than the 90 MB a map can carry when it's shared or backed up. Choose a shorter one, or add it as a web address.",
-            soundRefusal(15_000_000, 80_000_000, words),
+            "This map's pictures, videos and sounds come to 990\u00A0MB already. With this sound they'd be more than the 1\u00A0GB a map can carry when it's shared or backed up. Choose a shorter one, or add it as a web address.",
+            soundRefusal(15_000_000, 990_000_000, words),
         )
-        assertNull(soundRefusal(5_000_000, 80_000_000, words))
+        assertNull(soundRefusal(5_000_000, 990_000_000, words))
     }
 
     @Test
     fun `copying a sound says how far along it is, a whole percent at a time`() {
         val heard = mutableListOf<Float>()
         val sink = DiscardingOutput()
-        copySound(ByteArrayInputStream(ByteArray(1_000_000)), sink, 1_000_000, words, onProgress = { heard += it })
+        copySound(ByteArrayInputStream(ByteArray(1_000_000)), sink, 1_000_000, mapMedia = 0, words, onProgress = { heard += it })
         assertEquals(1_000_000L, sink.written)
         assertEquals(1f, heard.last())
         assertEquals(heard.distinct(), heard)
@@ -226,11 +266,33 @@ class MapSoundsTest {
     @Test
     fun `a sound that turns out bigger than it said is refused as it's copied`() {
         try {
-            copySound(Zeros(VIDEO_SIZE_LIMIT + 1), DiscardingOutput(), 1_000, words, onProgress = {})
+            copySound(Zeros(MEDIA_FILE_LIMIT + 1), DiscardingOutput(), 1_000, mapMedia = 0, words, onProgress = {})
             fail("It should have been refused")
         } catch (refused: MediaRefusedException) {
-            assertEquals("That sound is more than 50 MB, and a map keeps sounds of up to that, so it can still go to your other devices. Trim it, or add it as a web address.", refused.message)
+            assertEquals("That sound is more than 250\u00A0MB, and a map keeps sounds of up to that, so it can still go to your other devices. Trim it, or add it as a web address.", refused.message)
         }
+    }
+
+    @Test
+    fun `a sound that turns out bigger than what's left of its map's room is refused as it's copied, nothing past the room written`() {
+        // A storage app that says a sound is a kilobyte, and gives two megabytes, to a map one megabyte short of full.
+        val sink = DiscardingOutput()
+
+        try {
+            copySound(Zeros(2_000_000), sink, 1_000, mapMedia = MAP_MEDIA_LIMIT - 1_000_000, words, onProgress = {})
+            fail("It should have been refused")
+        } catch (refused: MediaRefusedException) {
+            assertEquals(
+                "This map's pictures, videos and sounds come to 999\u00A0MB already. With this sound they'd be more than the 1\u00A0GB a map can carry when it's shared or backed up. Choose a shorter one, or add it as a web address.",
+                refused.message,
+            )
+        }
+
+        assertTrue(sink.written <= 1_000_000)
+        // One that fits what's left is copied whole.
+        val fits = DiscardingOutput()
+        copySound(Zeros(1_000_000), fits, 1_000, mapMedia = MAP_MEDIA_LIMIT - 1_000_000, words, onProgress = {})
+        assertEquals(1_000_000L, fits.written)
     }
 
     private fun ascii(text: String) = text.toByteArray(Charsets.ISO_8859_1)

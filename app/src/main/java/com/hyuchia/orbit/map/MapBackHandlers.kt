@@ -46,7 +46,7 @@ internal fun MapBackHandlers(model: MapViewModel, ui: MapUi, talk: Talk, backSca
     val scope = rememberCoroutineScope()
     val canGoUp = ui.path.size > 1 || !ui.focused
 
-    PredictiveBackHandler(enabled = canGoUp && !ui.editing && ui.source == null && ui.presentation == null && ui.study == null && ui.panel == null) { events ->
+    PredictiveBackHandler(enabled = canGoUp && !ui.editing && ui.source == null && ui.presentation == null && ui.study == null && ui.panel == null && ui.sketch == null) { events ->
         try {
             events.collect { event -> backScale.snapTo(1f - 0.06f * event.progress) }
             model.goUp()

@@ -1,6 +1,6 @@
 # Translating Orbit
 
-Orbit speaks English and Spanish. This is where each kind of text lives, how to add a language, and the words and style the app uses in each one.
+Orbit speaks English, Spanish and Brazilian Portuguese. This is where each kind of text lives, how to add a language, and the words and style the app uses in each one.
 
 ## Where the text lives
 
@@ -33,7 +33,7 @@ The English files are the source: a string is added or changed there first, then
 ## How strings are written
 
 - **Placeholders:** `%1$s` for text and `%1$d` for numbers, numbered whenever a string has more than one, so a translation can put them in any order.
-- **Counts:** anything with a number of things is a `<plurals>`, never "%d maps" in a `<string>`. Give each language the quantities it needs: English uses `one` and `other`, Spanish `one`, `many` and `other` (`many` reads like `other`).
+- **Counts:** anything with a number of things is a `<plurals>`, never "%d maps" in a `<string>`. Give each language the quantities it needs: English uses `one` and `other`, Spanish and Portuguese `one`, `many` and `other` (`many` reads like `other`). In Brazilian Portuguese `one` is for 0 as well as 1 (see Brazilian Portuguese, below).
 - **Whole sentences:** never build a sentence from pieces, because word order changes between languages. Give each case its own string.
 - **Apostrophes:** write `\'` for a straight apostrophe in XML, or use the typographic ’.
 - **Not translated:** Orbit's name, markdown syntax, the words in map attributes (`status: done`, `theme: night`), file formats and anything a computer reads.
@@ -87,6 +87,8 @@ Neutral Latin American Spanish, the way people across Latin America and the US w
 | export | exportar |
 | bring in (import) | importar |
 | file, folder | archivo, carpeta |
+| an idea's files, attach (a file to an idea) | los archivos de una idea, adjuntar |
+| spreadsheet, presentation, archive (kinds of file) | hoja de cálculo, presentación, archivo comprimido |
 | zip | archivo zip |
 | sync | sincronizar, sincronización |
 | version history | historial de versiones |
@@ -98,6 +100,9 @@ Neutral Latin American Spanish, the way people across Latin America and the US w
 | live photo, Live (its mark) | foto en vivo, En vivo |
 | Again, Knew it (a card's answers) | Otra vez, Lo sabía |
 | all caught up, to study (due) | al día, por estudiar |
+| date (an idea's), time | fecha, hora |
+| reminder, Remind me | recordatorio, Recordarme |
+| overdue (an idea whose date is past) | vencida |
 | captions (presenting) | subtítulos |
 | pace, on time, up next | ritmo, a tiempo, a continuación |
 | presenter view | vista de quien presenta |
@@ -128,6 +133,10 @@ Neutral Latin American Spanish, the way people across Latin America and the US w
 | video | video |
 | sound (an idea's: a voice memo, a file or a web address) | audio (*el audio*) |
 | voice memo | nota de voz |
+| sketch (on a planet), to sketch | desenho, desenhar |
+| pen, eraser, stroke (in a sketch) | caneta, borracha, traço |
+| sketch (on a planet), to sketch | dibujo, dibujar |
+| pen, eraser, stroke (in a sketch) | lápiz, borrador, trazo |
 | record, recording, take | grabar, grabación, toma |
 | play, pause, turn the sound off/on | reproducir, pausar, silenciar/activar el sonido |
 | catch (an idea, quickly) | capturar |
@@ -199,3 +208,186 @@ Neutral Latin American Spanish, the way people across Latin America and the US w
 
 - Counts of finished things agree with how many are finished: *1 de 3 hecha*, *2 de 3 hechas*.
 - Statuses read as their own words (*Hecho*, *Bloqueado*); words about an idea agree with *idea* (*contraída*).
+
+## Brazilian Portuguese
+
+Brazilian Portuguese (`pt-BR`), the way people across Brazil write to each other on their phones, spelled as the 2009 spelling agreement has it (*ideia*, *voo*, *frequente*).
+
+- **You:** *você*, never *tu* or *o senhor*. Everything agrees with it: *seu mapa*, *suas ideias*, never *teu*.
+- **Tone:** friendly and short, like the English. Buttons and menu items are verbs in the infinitive (*Excluir*, *Renomear*, *Adicionar uma ideia*); instructions speak to the person (*Toque em +*, *Libere espaço*). Prefer a verb to a noun: *Renomear*, not *Renomeação*.
+- **Capitals:** sentence case, as in English: *Histórico de versões*.
+- **Punctuation:** quote with “ ”, like the English.
+- **Gender:** prefer wording that needs no gender (*quem apresenta*, *as pessoas que assistem*) when it reads naturally.
+- **Brazil's words, not Portugal's:** *celular* (not *telemóvel*), *tela* (not *ecrã*), *arquivo* (not *ficheiro*), *baixar* (not *descarregar*), *excluir* (not *eliminar*), *o app*.
+- **Words Brazil uses as they are:** *app*, *link*, *widget*, *tablet*, *backup*, *layout*, *emoji*, *e-mail*, *PIN*, *hotspot*, *notebook* (a laptop).
+- **Orbit** takes *o* where a sentence needs an article, as Brazilians say *o WhatsApp*: *O Orbit salva seus mapas*.
+- **Counts:** Unicode's plural rules for Brazilian Portuguese give 0 the `one` form, as they do 1, so look at where a count comes from before writing its forms. Where it can't be 0, `one` is the singular (*1 ideia*, *%1$d ideias*). Where it can, every form says it the same way, as a label that reads right for any number (*Ideias: %1$d*, *Navegadores: %d*), so a list doesn't change its wording between one row and the next. `many` reads like `other`.
+- **The number in `one`:** since `one` is for 0 too, lint asks for the number in every `one` form (`ImpliedQuantity`): *%1$d mapa foi para a lixeira*. Only a form whose count is never 0 and where a number would read oddly, such as a button's words, leaves it out, with `tools:ignore="ImpliedQuantity"` and a comment saying why the count can't be 0.
+
+### Words
+
+| English | Portuguese |
+| --- | --- |
+| map | mapa (*o mapa*) |
+| idea | ideia |
+| note | nota |
+| planet, moon, sun | planeta, lua, sol |
+| orbit (the ring) | órbita |
+| focus (the view) | foco |
+| overview | visão geral |
+| outline | tópicos (the map as a list: *Tópicos*); *estrutura de tópicos* where *tópicos* alone could read as subjects |
+| template | modelo |
+| goal | meta |
+| progress | progresso |
+| goal (target, amount, currency) | meta (objetivo, valor, moeda) |
+| reached (a goal) | alcançada |
+| done (a task) | concluído, concluída |
+| status | status |
+| statuses: To do, In progress, Done, Blocked, No status | A fazer, Em andamento, Concluído, Bloqueado, Sem status |
+| kinds: Milestone, Question, Decision, Risk, Source, Person | Marco, Pergunta, Decisão, Risco, Fonte, Pessoa |
+| tag, priority, kind | etiqueta, prioridade, tipo |
+| to-do | tarefa |
+| pin, pinned | fixar, fixado |
+| unpin | desafixar |
+| trash | lixeira |
+| restore | restaurar |
+| add | adicionar |
+| undo, redo | desfazer, refazer |
+| delete | excluir |
+| remove | remover |
+| rename | renomear |
+| duplicate | duplicar |
+| share | compartilhar |
+| send | enviar |
+| export | exportar |
+| bring in (import) | importar |
+| file, folder | arquivo, pasta |
+| an idea's files, attach (a file to an idea) | os arquivos de uma ideia, anexar |
+| spreadsheet, presentation, archive (kinds of file) | planilha, apresentação, arquivo compactado |
+| zip | arquivo zip |
+| sync | sincronizar, sincronização |
+| version history | histórico de versões |
+| backup, back up | backup, fazer backup |
+| present, presenting | apresentar, apresentação |
+| presentation path | roteiro (da apresentação) |
+| rehearse, rehearsal | ensaiar, ensaio |
+| study (a map), studying | estudar, ao estudar |
+| card (in study mode) | cartão |
+| live photo, Live (its mark) | foto ao vivo, Ao vivo |
+| Again, Knew it (a card's answers) | De novo, Eu sabia |
+| all caught up, to study (due) | em dia, para estudar |
+| captions (presenting) | legendas |
+| pace, on pace, up next | ritmo, no ritmo, a seguir |
+| presenter view | visão de quem apresenta |
+| audience | público |
+| guest (in a presentation) | participante |
+| room (a presentation's) | sala |
+| join | entrar |
+| second screen | segunda tela |
+| device, this device | dispositivo, este dispositivo |
+| phone | celular |
+| tablet | tablet |
+| computer | computador |
+| laptop, hotspot | notebook, hotspot |
+| offline | sem conexão |
+| app store | loja de apps |
+| email | e-mail |
+| storage | armazenamento |
+| browser | navegador |
+| web page | página da web |
+| link | link |
+| address | endereço |
+| code (to join) | código |
+| check code | código de verificação |
+| PIN, PINs | PIN, PINs |
+| picture | imagem |
+| date (an idea's), time | data, horário |
+| reminder, Remind me | lembrete, Lembrar |
+| overdue (an idea whose date is past) | atrasada |
+| caption (of a picture, video or sound) | legenda |
+| icon | ícone |
+| video | vídeo |
+| sound (an idea's: a voice memo, a file or a web address) | áudio (*o áudio*) |
+| voice memo | nota de voz |
+| record, recording | gravar, gravação |
+| play, pause, turn the sound off/on | reproduzir, pausar, desativar/ativar o som |
+| catch (an idea, quickly) | capturar |
+| talk ideas onto a map | ditar ideias |
+| speech service | serviço de voz, reconhecimento de voz |
+| nearby | por perto, próximos |
+| widget | widget |
+| home screen | tela inicial |
+| shortcut (on the home screen or the launcher) | atalho |
+| clear (a search, a field) | limpar |
+| settings | configurações |
+| appearance, system (light or dark, and the language, as the device has them) | aparência, sistema |
+| wallpaper | plano de fundo |
+| haptics | retorno tátil |
+| about, privacy | sobre, privacidade |
+| source code, free software | código-fonte, software livre |
+| crash, crash report | falha, relatório de falha |
+| style, layout | estilo, layout |
+| colors | cores |
+| keyboard shortcuts | atalhos de teclado |
+| light, dark | claro, escuro |
+| search | pesquisar |
+| OK, Got it, Dismiss | OK, Entendi, Dispensar |
+| Done (a button that closes) | Concluído |
+| save, create | salvar, criar |
+| keep (both) | manter |
+| keep (maps, in a folder or on this device) | guardar |
+| as it is (a file shared without cleaning) | como está |
+| drop (from another app), drag | soltar, arrastar |
+| branch (an idea and the ideas under it) | ramo |
+| changes (a map's) | alterações |
+| web address | endereço da web |
+| make smaller (a video), made smaller | reduzir, reduzido |
+| in step (synced) | sincronizado |
+| try again | tentar de novo |
+| decline | recusar |
+| empty trash, for good | esvaziar a lixeira, para sempre |
+| fold away, folded | recolher, recolhida |
+| fly to | voar até |
+| tap, double-tap | tocar, tocar duas vezes |
+| long-press, hold | tocar e manter pressionado, manter pressionado |
+| drag, swipe | arrastar, deslizar |
+| just now, yesterday | agora mesmo, ontem |
+| read-only | somente leitura |
+| private map, make private, Private (the switch) | mapa privado, tornar privado, Privado |
+| lock, unlock, locked | bloquear, desbloquear, bloqueado |
+| screen lock | bloqueio de tela |
+| fingerprint, face | impressão digital, rosto |
+| Recents (the overview of open apps) | Recentes |
+
+### Styles and colors
+
+| English | Portuguese |
+| --- | --- |
+| Paper | Papel |
+| Night | Noite |
+| Glass, Glass night | Vidro, Vidro noturno |
+| Cosmos | Cosmos |
+| Blueprint | Cianótipo |
+| Ink | Tinta |
+| Flat, Flat night | Plano, Plano noturno |
+| Material, Material night | Material, Material noturno |
+| Liquid glass, Liquid glass night | Vidro líquido, Vidro líquido noturno |
+| The style's own (colors) | As do estilo |
+| Mint, Sky, Lilac, Apricot, Pink, Teal, Amber | Menta, Céu, Lilás, Damasco, Rosa, Turquesa, Âmbar |
+| Sorbet, Ocean, Forest, Sunset, Vivid, Mono | Sorvete, Oceano, Floresta, Pôr do sol, Vivas, Mono |
+| App colors, High contrast | Cores do app, Alto contraste |
+
+### Keys
+
+Brazilian keyboards print most keys' names in English, so they stay as they're printed.
+
+| English | Portuguese |
+| --- | --- |
+| Shift, Enter, Space, Backspace | Shift, Enter, Espaço, Backspace |
+| Delete, Insert, Menu | Delete, Insert, Menu |
+| Page Up, Page Down, Home, End | Page Up, Page Down, Home, End |
+
+### Agreement
+
+- Counts of finished things can be 0, so they're labels, in the feminine of *tarefa* and *meta*: *Concluídas: 1 de 3*, *Alcançadas: 0 de 2*.
+- Statuses read as their own words (*Concluído*, *Bloqueado*); words about an idea agree with *ideia* (*recolhida*), and words about a map with *mapa* (*fixado*, *bloqueado*).

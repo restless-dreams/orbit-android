@@ -39,8 +39,13 @@ android {
         minSdk = 29
         targetSdk = 36
         // One more with each release, whatever its name: stores and Android tie every update to it.
-        versionCode = 5
-        versionName = "0.4.0"
+        versionCode = 6
+        versionName = "0.5.0"
+        // Big videos are made smaller only with an encoder in the phone's hardware, quick and kind to its battery
+        // (media/VideoMaker.kt). Debug builds take the software one too, so emulators, which have no other, make them.
+        buildConfigField("boolean", "SOFTWARE_VIDEO_ENCODING", "false")
+        // The device tests in src/androidTest, on a phone or an emulator: scripts/device-tests.sh.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     // The languages the app speaks (see TRANSLATING.md): English, and each language with its strings
@@ -104,7 +109,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("boolean", "SOFTWARE_VIDEO_ENCODING", "true")
+        }
+
         release {
+            // -Porbit.softwareVideoEncoding=true makes a release that takes the software encoder too, to try it on an emulator.
+            buildConfigField("boolean", "SOFTWARE_VIDEO_ENCODING", "${providers.gradleProperty("orbit.softwareVideoEncoding").orNull == "true"}")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -191,6 +202,8 @@ dependencies {
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.emoji.picker)
+    // A sketch's ink drawn a frame or two ahead of the stylus or finger, where it's going, so it keeps up.
+    implementation(libs.androidx.input.motionprediction)
     implementation(libs.androidx.glance.appwidget)
     // Glance runs on WorkManager. The version it asks for brings a Room whose rules don't keep
     // WorkManager's database in a minified build, which then can't start.
@@ -215,6 +228,9 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui.compose)
     implementation(libs.media3.ui.compose.material3)
+    // Big videos made smaller on the phone as they come into a map: H.264 and AAC at 1080p, with the phone's own encoder.
+    implementation(libs.media3.transformer)
+    implementation(libs.media3.effect)
     implementation(libs.compose.material3)
     implementation(libs.compose.material3.adaptive)
     implementation(libs.compose.material3.adaptive.layout)
@@ -251,6 +267,12 @@ dependencies {
     testImplementation(libs.compose.ui.test.junit4)
     // The empty activity Compose's tests draw in, in debug builds only.
     debugImplementation(libs.compose.ui.test.manifest)
+
+    // The device tests (src/androidTest): the app on a phone, its maps drawn by the phone's own WebView, which
+    // they reach through the screen as people do (UiAutomator) and through the app's own parts.
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.test.uiautomator)
 }
 
 // The screens' pictures (ScreensTest): ./gradlew recordRoborazziLibreDebug draws them again, and verifyRoborazziLibreDebug,

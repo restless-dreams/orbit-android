@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sketching on an idea's planet: its canvas, the pens, the eraser, and what the map says of a sketch. See TRANSLATING.md. -->
+<resources>
+    <!-- In an idea's menu and editor: draw on its planet. -->
+    <string name="sketch_sketch">Sketch</string>
+    <!-- The same, for an idea whose picture is a sketch: draw more on it. -->
+    <string name="sketch_keep_sketching">Keep sketching</string>
+
+    <!-- For screen readers, the canvas over the planet: %1$s is the idea. -->
+    <string name="sketch_canvas">Sketch on %1$s</string>
+    <plurals name="sketch_strokes">
+        <item quantity="one">%d stroke</item>
+        <item quantity="other">%d strokes</item>
+    </plurals>
+    <!-- Closing the canvas without keeping what was drawn. -->
+    <string name="sketch_close">Close the sketch</string>
+
+    <!-- The toolbar's pen; and what it is: %1$s is its color's name, %2$s its width. -->
+    <string name="sketch_pen">Pen</string>
+    <string name="sketch_pen_named">Pen: %1$s, %2$s</string>
+    <string name="sketch_eraser">Eraser</string>
+    <string name="sketch_clear">Clear the sketch</string>
+    <!-- The pens' widths. -->
+    <string name="sketch_fine">Fine</string>
+    <string name="sketch_medium">Medium</string>
+    <string name="sketch_bold">Bold</string>
+
+    <!-- As Done is tapped: what the sketch shows, which screen readers say. -->
+    <string name="sketch_describe_title">Describe your sketch</string>
+    <string name="sketch_describe_label">Describe it, for screen readers</string>
+    <string name="sketch_keep_drawing">Keep drawing</string>
+
+    <!-- Asked before a sketch takes the place of an idea's picture: %1$s is the idea. -->
+    <string name="sketch_replace_title">Replace the picture with a sketch?</string>
+    <string name="sketch_replace_text">The sketch takes the place of %1$s’s picture. Undo brings the picture back.</string>
+
+    <!-- Asked before closing a canvas with strokes on it. -->
+    <string name="sketch_discard_title">Discard the sketch?</string>
+    <string name="sketch_discard_text">What you drew goes, and the idea stays as it was.</string>
+    <string name="sketch_discard">Discard</string>
+
+    <!-- Messages on the map, after a sketch. -->
+    <string name="sketch_replaced_the_picture">The sketch replaced the picture</string>
+    <string name="sketch_taken_off">The sketch is off the idea</string>
+    <string name="sketch_lost">The sketch closed: its idea is gone</string>
+    <string name="sketch_not_kept">The sketch couldn’t be kept</string>
+
+    <!-- The list of keyboard shortcuts, while sketching. -->
+    <string name="sketch_shortcuts">Sketching</string>
+</resources>

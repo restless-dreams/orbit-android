@@ -4,6 +4,7 @@
     <string name="shortcut_new_map_long">Empezar un mapa nuevo</string>
     <string name="share_new_map">Mapa nuevo de Orbit</string>
     <string name="share_add_to_map">Agregar a un mapa de Orbit</string>
+    <string name="share_attach_to_idea">Adjuntar a una idea de Orbit</string>
     <string name="capture_label">Agregar una idea</string>
     <string name="tile_capture">Nueva idea</string>
     <string name="widget_label">Mapa de Orbit</string>

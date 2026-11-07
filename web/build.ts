@@ -14,9 +14,9 @@
 //
 // And into dist/cast-receiver/, the same audience page as a Cast receiver,
 // for a TV: a site to host over HTTPS and register with Google Cast, as
-// index.html and receiver.js, and as one file with its script inside,
-// orbit-cast-receiver.html, which is what https://orbit.hyuchia.com/cast
-// serves (RELEASE.md, "The Cast receiver").
+// index.html and receiver.js, which https://orbit.hyuchia.com/cast serves,
+// the script from an address of its own (RELEASE.md, "The Cast receiver"),
+// and as one file with its script inside, orbit-cast-receiver.html.
 //
 // And one of each message between the app and the pages, from
 // protocol-examples.ts, into the app's tests

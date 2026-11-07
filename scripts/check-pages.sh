@@ -5,8 +5,8 @@
 #   - Orbit at the commit app/src/main/assets/map/orbit.json names, built with the Bun Orbit's own package.json
 #     names (packageManager);
 #   - the pages built with it, with the Bun web/package.json names;
-#   - what that build wrote, compared with what the commit has: orbit.json's commit aside, whose short form can be
-#     longer in another clone, and its Orbit version, which has to be the same.
+#   - what that build wrote, compared with what the commit has (compare-pages.sh): every file, and orbit.json but for
+#     its commit, whose short form can be longer in another clone, so its Orbit version and map format too.
 #
 # Another Bun bundles the same source differently, Orbit's or the pages': pages built with one fail CI's check, and a
 # check made with one says pages built right don't match.
@@ -29,6 +29,7 @@ fi
 
 commit=${1:-HEAD}
 orbit=${2:-${ORBIT_REPOSITORY:-https://github.com/restless-dreams/orbit.git}}
+scripts=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 for tool in git jq; do
     if ! command -v "$tool" > /dev/null; then
@@ -121,21 +122,10 @@ echo "Building Orbit $orbit_commit with Bun $orbit_bun, from $orbit"
 echo "Building the pages of $short with Bun $pages_bun"
 (cd "$app/web" && quietly mise exec "bun@$pages_bun" -- bun install --frozen-lockfile && ORBIT_PATH="$work/orbit" quietly mise exec "bun@$pages_bun" -- bun run build)
 
-changes=$(git -C "$app" status --porcelain -- app/src/main/assets/map app/src/test/resources/page-protocol.json ':(exclude)app/src/main/assets/map/orbit.json')
-
-if [ -n "$changes" ]; then
-    echo "The committed pages or protocol examples differ from what web/ builds:" >&2
-    echo "$changes" >&2
-    echo "Rebuild them as CONTRIBUTING.md says, Orbit $orbit_commit with Bun $orbit_bun and the pages with Bun $pages_bun, and commit them." >&2
+# This checkout's comparison, which an older commit may not have.
+if ! "$scripts/compare-pages.sh" "$app"; then
+    echo "Rebuild them as CONTRIBUTING.md says, Orbit $orbit_commit with Bun $orbit_bun and the pages with Bun $pages_bun, and commit them with orbit.json." >&2
     exit 1
 fi
 
-committed=$(git -C "$app" show HEAD:app/src/main/assets/map/orbit.json | jq -r .version)
-built=$(jq -r .version "$app/app/src/main/assets/map/orbit.json")
-
-if [ "$committed" != "$built" ]; then
-    echo "orbit.json says Orbit $committed, but the commit it names is Orbit $built: rebuild the pages, and commit orbit.json with them." >&2
-    exit 1
-fi
-
-echo "The pages and protocol examples of $short are what its web/ builds, with Orbit $built ($orbit_commit)."
+echo "The pages and protocol examples of $short are what its web/ builds, with Orbit $(jq -r .version "$app/app/src/main/assets/map/orbit.json") ($orbit_commit)."

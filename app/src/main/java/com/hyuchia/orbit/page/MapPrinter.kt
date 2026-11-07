@@ -1,6 +1,7 @@
 package com.hyuchia.orbit.page
 
 import android.app.Activity
+import android.content.Context
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.Handler
@@ -14,6 +15,7 @@ import android.print.PrintJobInfo
 import android.print.PrintManager
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.annotation.MainThread
@@ -23,6 +25,9 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import kotlinx.serialization.Serializable
+import java.io.File
+import java.io.IOException
+import java.util.UUID
 
 /** What a printed map's picture shows: web/print.ts's PrintRequest. */
 @Serializable
@@ -40,11 +45,22 @@ data class PrintRequest(
  * The map's web page ([WebPage]) is laid out for paper in a web view no one
  * sees, which says when its pictures are in. The view's print adapter then
  * makes the pages, and the view goes once the job is done with it, or with
- * the window that printed it.
+ * the window that printed it. The page comes from a file, which the view
+ * reads as it loads: with a map's pictures inside, it can be tens of
+ * megabytes, too much to keep in memory.
  */
 object MapPrinter {
     /** How long laying out a big map may take before printing gives up, in ms. */
     private const val READY_TIMEOUT = 30_000L
+
+    /** The cache's folder for pages to print, each in a file of its own until its print is done with it. */
+    private const val PAGES = "print-pages"
+
+    /** How long a page to print stays when its print never ended, as when Orbit stopped during it, in ms: a day. */
+    private const val PAGE_KEPT = 24 * 60 * 60 * 1000L
+
+    /** Where the page is, for the view: on the app's own host, where it says it's ready. */
+    private const val PAGE_PATH = "/print/"
 
     /** The views printing now: each stays alive until its job is done with it. */
     private val printing = mutableSetOf<WebView>()
@@ -67,14 +83,33 @@ object MapPrinter {
     }
 
     /**
-     * Prints `html`, a page from [WebPage.build] with a [PrintRequest], as
-     * `title`. `then` hears true once the print dialog opens, or false when the
-     * page couldn't be laid out, or `goes`, asked right before the dialog
-     * opens, says it mustn't: a private map that locked while its page loaded.
+     * A new file for a page to print ([print] takes it), in the cache; pages
+     * of prints that never ended go after a day.
+     */
+    fun pageFile(context: Context): File {
+        val folder = File(context.cacheDir, PAGES)
+
+        if (!folder.mkdirs() && !folder.isDirectory) {
+            throw IOException("Couldn't make a folder for pages to print")
+        }
+
+        val now = System.currentTimeMillis()
+        folder.listFiles().orEmpty().filter { now - it.lastModified() > PAGE_KEPT }.forEach { it.delete() }
+        return File(folder, "${UUID.randomUUID()}.html")
+    }
+
+    /**
+     * Prints `page`, a file from [pageFile] with the map's page laid out for
+     * paper ([WebPage.write] with a [PrintRequest]), as `title`, and deletes
+     * it once it's done with it. `then` hears true once the print dialog
+     * opens, or false when the page couldn't be laid out, or `goes`, asked
+     * right before the dialog opens, says it mustn't: a private map that
+     * locked while its page loaded.
      */
     @MainThread
-    fun print(activity: Activity, title: String, html: String, goes: () -> Boolean = { true }, then: (Boolean) -> Unit) {
+    fun print(activity: Activity, title: String, page: File, goes: () -> Boolean = { true }, then: (Boolean) -> Unit) {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            page.delete()
             then(false)
             return
         }
@@ -92,6 +127,7 @@ object MapPrinter {
             if (printing.remove(view)) {
                 lifecycle?.removeObserver(closing)
                 view.destroy()
+                page.delete()
             }
         }
 
@@ -151,6 +187,19 @@ object MapPrinter {
         }
 
         view.webViewClient = object : WebViewClient() {
+            // The page itself, read from its file as the view loads it; nothing else is anywhere for it to load.
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                if (!request.isForMainFrame || request.url.host != PAGE_HOST || request.url.path != PAGE_PATH) {
+                    return null
+                }
+
+                return try {
+                    WebResourceResponse("text/html", "utf-8", page.inputStream())
+                } catch (gone: IOException) {
+                    null
+                }
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = true
 
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
@@ -168,7 +217,7 @@ object MapPrinter {
         }
 
         handler.postDelayed(timeout, READY_TIMEOUT)
-        view.loadDataWithBaseURL("https://$PAGE_HOST/print/", html, "text/html", "utf-8", null)
+        view.loadUrl("https://$PAGE_HOST$PAGE_PATH")
     }
 }
 

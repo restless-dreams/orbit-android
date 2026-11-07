@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Os lembretes das datas das ideias: o canal de notificações, o que cada lembrete diz e a seção nas configurações. Veja TRANSLATING.md. -->
+<resources>
+    <string name="reminders_channel">Lembretes</string>
+    <string name="reminders_channel_description">Quando chega a data de uma ideia</string>
+    <string name="reminders_from_a_private_map">Um lembrete de um mapa privado</string>
+    <string name="reminders_a_reminder">Um lembrete</string>
+    <string name="settings_reminders_heading">Lembretes</string>
+    <string name="settings_reminders">Lembrar as datas das ideias</string>
+    <string name="settings_reminders_description">Neste dispositivo, no horário da ideia, ou às %1$s do dia dela. O lembrete de um mapa privado só diz que ele é de um mapa privado.</string>
+    <string name="settings_reminders_notifications_off">As notificações do Orbit estão desativadas</string>
+    <string name="settings_reminders_notifications_off_description">Os lembretes só aparecem quando o Orbit puder enviar notificações.</string>
+</resources>

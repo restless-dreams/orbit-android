@@ -7,6 +7,8 @@ import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.study.StudyCard
+import com.hyuchia.orbit.study.StudyChange
+import com.hyuchia.orbit.study.notCards
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,13 +50,24 @@ data class MapSummary(
     /** The map's words, to search in. */
     val searchText: String,
 
-    /** Changes whenever the map's text does, for thumbnails. */
+    /** Changes whenever the map's text does: what the folder maps are kept in is compared by. */
     val contentKey: String,
 
     /** Its file couldn't be read: the map shows as such, and nothing writes over it. */
     val unreadable: Boolean = false,
+
+    /**
+     * The pictures, videos and sounds its text points at that its folder
+     * doesn't have, as when they're still on their way from the folder maps
+     * are kept in, or a zip: its picture is drawn again as they come
+     * ([pictureKey]).
+     */
+    val missingMedia: Set<String> = emptySet(),
 ) {
     val title: String get() = outline.title
+
+    /** Changes whenever the map's picture would: with its text, and as media it was missing comes (see [missingMedia]). */
+    val pictureKey: String by lazy { if (missingMedia.isEmpty()) contentKey else "$contentKey-${digest(missingMedia.sorted().joinToString("/"))}" }
 }
 
 /** How a write went. */
@@ -74,6 +87,9 @@ sealed interface WriteResult {
     /** The text couldn't be written, as when the device's storage is full: the map's file is as it was. */
     data object NotWritten : WriteResult
 }
+
+/** Ideas of map `map` that new text gave new ids, `renames` from the old to the new (see [MapRepository.change]). */
+data class IdeasRenamed(val map: String, val renames: Map<String, String>)
 
 /** When a write keeps the map as it was in its history first. */
 enum class Checkpoint {
@@ -192,6 +208,11 @@ class MapRepository(
 
     /** Maps replaced by a newer version from elsewhere (another device, the folder, a quick capture), by id, so a screen showing one can catch up. */
     val replaced: SharedFlow<String> = replacedMaps.asSharedFlow()
+
+    private val renamedIdeas = MutableSharedFlow<IdeasRenamed>(extraBufferCapacity = 16)
+
+    /** Ideas a change from outside their map's screen gave new ids (see [change]), so a screen showing the map follows them. */
+    val ideasRenamed: SharedFlow<IdeasRenamed> = renamedIdeas.asSharedFlow()
 
     /** Every map, or null until they are read. */
     val maps: StateFlow<List<MapSummary>?> = summaries.asStateFlow()
@@ -388,18 +409,43 @@ class MapRepository(
     /**
      * Changes a map's text from outside its screen, as quick capture does,
      * while it's still `base` (the caller tries again otherwise): a screen
-     * showing the map catches up at once, and undo brings it back.
+     * showing the map catches up at once, and undo brings it back. Ideas the
+     * new text gives new ids (`renamed`, from the old to the new, as a new
+     * name gives the center one) keep what the map's details keep about them,
+     * as the text is written, and a screen showing the map follows them.
      */
-    suspend fun change(id: String, markdown: String, base: String, reason: VersionReason = VersionReason.Caught): WriteResult {
+    suspend fun change(id: String, markdown: String, base: String, reason: VersionReason = VersionReason.Caught, renamed: Map<String, String> = emptyMap()): WriteResult {
         val result = withContext(Dispatchers.IO) {
-            mutex.withLock { writeLocked(id, markdown, base, Checkpoint.Always, reason, keepRefused = false) }
+            mutex.withLock {
+                writeLocked(id, markdown, base, Checkpoint.Always, reason, keepRefused = false).also { result ->
+                    if (result == WriteResult.Written && renamed.isNotEmpty()) {
+                        renameIdeasLocked(id, renamed)
+                    }
+                }
+            }
         }
 
         if (result == WriteResult.Written) {
+            if (renamed.isNotEmpty()) {
+                renamedIdeas.tryEmit(IdeasRenamed(id, renamed))
+            }
+
             replacedMaps.tryEmit(id)
         }
 
         return result
+    }
+
+    /** The map's details with ideas that got new ids following them (see [MapMetadata.withIdeasRenamed]); details that can't be read for now stay as they are. */
+    private fun renameIdeasLocked(id: String, renamed: Map<String, String>) {
+        val folder = folder(id)
+
+        try {
+            writeMetadata(folder, readMetadataToChange(folder).withIdeasRenamed(renamed))
+            replace(summarize(folder))
+        } catch (failed: IOException) {
+            Logs.warn("MapRepository", "Couldn't keep the map's details as its ideas got new ids", failed)
+        }
     }
 
     /**
@@ -452,7 +498,9 @@ class MapRepository(
                     )
                     writeAtomically(File(staging, MAP_FILE), markdown)
 
-                    pictures.filterKeys(::isMediaName).forEach { (name, bytes) ->
+                    val files = fileNamesIn(markdown)
+
+                    pictures.filterKeys { isCarriedName(it, files) }.forEach { (name, bytes) ->
                         writeAtomically(fileInside(File(staging, MEDIA_DIRECTORY), name, words), bytes)
                     }
                 }
@@ -503,14 +551,14 @@ class MapRepository(
     /** Brings a map back from the trash (see [MapTrash.restore]); the id it's back under, or null when it's gone. */
     suspend fun restore(item: TrashedMap): String? = trashing.restore(item)
 
-    /** Deletes a map in the trash for good. */
-    suspend fun deleteForever(item: TrashedMap) = trashing.deleteForever(item)
+    /** Deletes a map in the trash for good, and says whether it's gone: files that don't all delete keep it there (see [MapTrash.deleteForever]). */
+    suspend fun deleteForever(item: TrashedMap): Boolean = trashing.deleteForever(item)
 
-    /** Deletes every map in the trash for good but those `keeping` keeps (see [MapTrash.emptyTrash]). */
-    suspend fun emptyTrash(keeping: (TrashedMap) -> Boolean = { false }) = trashing.emptyTrash(keeping)
+    /** Deletes every map in the trash for good but those `keeping` keeps, and says how many stayed, their files not all deleting (see [MapTrash.emptyTrash]). */
+    suspend fun emptyTrash(keeping: (TrashedMap) -> Boolean = { false }): Int = trashing.emptyTrash(keeping)
 
-    /** The note saying which maps the folder sent to the trash has been read (see [MapTrash.seeFolderRemovals]). */
-    suspend fun seeFolderRemovals() = trashing.seeFolderRemovals()
+    /** The note saying which maps the folder sent to the trash has been read, but for those `keeping` keeps (see [MapTrash.seeFolderRemovals]). */
+    suspend fun seeFolderRemovals(keeping: (TrashedMap) -> Boolean = { false }) = trashing.seeFolderRemovals(keeping)
 
     // The folder maps are kept in (see FolderSync)
 
@@ -553,12 +601,12 @@ class MapRepository(
     }
 
     /**
-     * Gives the map's picture, video or sound `name` the name `renamed`, in
-     * its media and in its text, for a name the folder maps are kept in holds
-     * another file under (see [FolderSync]): a screen showing the map catches
-     * up. Returns the map's new text, or null when the map isn't here or its
-     * text isn't `expected` anymore. The file stays under its old name too,
-     * for earlier versions, until nothing points at it.
+     * Gives the map's picture, video, sound or file `name` the name
+     * `renamed`, in its media and in its text, for a name the folder maps are
+     * kept in holds another file under (see [FolderSync]): a screen showing
+     * the map catches up. Returns the map's new text, or null when the map
+     * isn't here or its text isn't `expected` anymore. The file stays under
+     * its old name too, for earlier versions, until nothing points at it.
      */
     suspend fun renameMedia(id: String, name: String, renamed: String, expected: String): String? = withContext(Dispatchers.IO) {
         mutex.withLock {
@@ -567,7 +615,10 @@ class MapRepository(
             val source = File(media, name)
             val current = File(folder, MAP_FILE).takeIf { it.isFile }?.readTextSafely()
 
-            if (!canWrite.value || current != expected || !isMediaName(name) || !isMediaName(renamed) || !source.isFile) {
+            val files = current?.let(::fileNamesIn).orEmpty()
+
+            // An idea's file keeps being one under its new name, of any kind; a picture, video or sound keeps its kind.
+            if (!canWrite.value || current != expected || !isCarriedName(name, files) || !(isMediaName(renamed) || (name in files && MediaNames.NAME.matches(renamed))) || !source.isFile) {
                 return@withLock null
             }
 
@@ -585,20 +636,26 @@ class MapRepository(
         }
     }
 
-    /** A picture or video in the map's media folder, if it's there. */
-    fun picture(id: String, name: String): File? =
-        File(File(folder(id), MEDIA_DIRECTORY), name).takeIf { isMediaName(name) && it.isFile }
+    /** A picture, video, sound or idea's file in the map's media folder, if it's there: one of a kind it keeps, or a file its text names (`files`). */
+    fun picture(id: String, name: String, files: Collection<String> = emptySet()): File? =
+        File(File(folder(id), MEDIA_DIRECTORY), name).takeIf { isCarriedName(name, files) && it.isFile }
 
     /**
      * Puts a picture or video the map points at into its media folder, unless
      * it's there already. `copy` writes it out, and says false when there's
      * nothing to copy after all; it's written whole or not at all. One that
      * comes to more than `room` bytes is refused with a
-     * [MediaRefusedException], leaving nothing behind. Returns its size in
-     * the map, 0 when it isn't there.
+     * [MediaRefusedException], leaving nothing behind. One of `size` bytes
+     * (when it's known) that this device hasn't room for, and some to spare,
+     * isn't started: [NoRoomForMedia]. Once it's there, the map's picture on
+     * Home is drawn again with it ([MapStore.mediaArrived]). Returns its size
+     * in the map, 0 when it isn't there.
      */
-    suspend fun addMediaFile(id: String, name: String, room: Long = Long.MAX_VALUE, copy: (OutputStream) -> Boolean): Long = withContext(Dispatchers.IO) {
-        if (!isMediaName(name) || !canWrite.value) {
+    suspend fun addMediaFile(id: String, name: String, room: Long = Long.MAX_VALUE, size: Long = -1, files: Collection<String> = emptySet(), copy: (OutputStream) -> Boolean): Long = withContext(Dispatchers.IO) {
+        // An idea's file, of any kind, comes in while the map's text names it (`files`, else what its text says now).
+        val named = if (isMediaName(name) || name in files) files else runCatching { fileNamesIn(File(folder(id), MAP_FILE).readTextSafely()) }.getOrDefault(emptyList())
+
+        if (!isCarriedName(name, named) || !canWrite.value) {
             return@withContext 0L
         }
 
@@ -610,12 +667,20 @@ class MapRepository(
         }
 
         if (!file.exists()) {
+            // A big file isn't started where it can't be finished: the maps and their saves need room too.
+            if (size > 0 && this@MapRepository.room(folder(id)) < size + ROOM_LEFT_FREE) {
+                throw NoRoomForMedia(name)
+            }
+
             try {
                 writeAtomically(file) { output ->
                     if (!copy(CappedOutput(output, room, words))) {
                         throw NothingToCopy()
                     }
                 }
+
+                // Here now, it's in the map's picture on Home, drawn again with it.
+                mutex.withLock { store.mediaArrived(id, setOf(name)) }
             } catch (missing: NothingToCopy) {
                 // The file went from where it was coming from: the next sync tries again.
             }
@@ -628,6 +693,26 @@ class MapRepository(
 
     /** How many bytes the pictures, videos and sounds the map's text, or `markdown`, points at come to (see [MapStore.mediaSize]). */
     fun mediaSize(id: String, markdown: String? = null): Long = store.mediaSize(id, markdown)
+
+    /** What the map's pictures, videos and sounds come to now, read off the main thread. */
+    suspend fun mediaSizeNow(id: String): Long = withContext(Dispatchers.IO) { store.mediaSize(id) }
+
+    /** The sizes of the pictures, videos and sounds the map's text points at that are here: reads its text, so off the main thread. */
+    fun mediaFileSizes(id: String): List<Long> {
+        val folder = folder(id)
+        return mediaFiles(folder, runCatching { File(folder, MAP_FILE).readTextSafely() }.getOrDefault("")).map { it.length() }
+    }
+
+    /**
+     * Whether the map's zip is past what Orbit 0.4.0, and every release
+     * before it, takes in: one that unpacks to more than 96 MiB, or holds a
+     * file of more than 64 MiB, which they refuse. Sharing one says to update
+     * Orbit wherever it's opened.
+     */
+    suspend fun pastOlderZips(id: String): Boolean = withContext(Dispatchers.IO) {
+        val sizes = mediaFileSizes(id)
+        File(folder(id), MAP_FILE).length() + sizes.sum() > BUNDLE_SIZE_UP_TO_0_4_0 || sizes.any { it > ZIP_ENTRY_LIMIT_UP_TO_0_4_0 }
+    }
 
     suspend fun setPinned(id: String, pinned: Boolean) = updateMetadata(id) { it.copy(pinned = pinned) }
 
@@ -657,8 +742,23 @@ class MapRepository(
     /** Seconds the last rehearsal spent on each idea. */
     suspend fun saveRehearsal(id: String, seconds: Map<String, Int>) = updateMetadata(id) { it.copy(rehearsal = seconds) }
 
-    /** This device's answers to the map's cards in study mode, by idea id: in its details, never its text. */
+    /**
+     * This device's answers to the map's cards in study mode, by idea id, all
+     * of them: in its details, never its text. What changes them as they're
+     * studied goes through [changeStudy], which never writes back a copy.
+     */
     suspend fun saveStudy(id: String, cards: Map<String, StudyCard>) = updateMetadata(id) { it.copy(study = cards.ifEmpty { null }) }
+
+    /**
+     * Makes a change to this device's answers to the map's cards (an answer,
+     * one taken back, the progress of ideas gone from the map), against them
+     * as its details have them now, under the lock every change to the maps
+     * is made under: whatever changed them since the change was made stays.
+     */
+    suspend fun changeStudy(id: String, change: StudyChange) = updateMetadata(id) { metadata ->
+        val study = change.applyTo(metadata.study.orEmpty(), metadata.studyElsewhere.orEmpty())
+        if (study == metadata.study.orEmpty()) metadata else metadata.copy(study = study.ifEmpty { null })
+    }
 
     /** The other devices' answers to the map's cards, by device, as the folder the maps are kept in says (see [FolderStudy]). */
     suspend fun saveStudyElsewhere(id: String, elsewhere: Map<String, Map<String, StudyCard>>) =
@@ -676,6 +776,35 @@ class MapRepository(
     }
 
     /**
+     * The other devices' answers to the map's cards join this device's own,
+     * against its details as they are now, as the map comes to another folder:
+     * what the devices in the one it was kept in studied stays the map's.
+     * Gives this device's answers then; null when the map's details can't be
+     * changed (it's gone, or a newer Orbit keeps the maps).
+     */
+    suspend fun takeStudyElsewhere(id: String): Map<String, StudyCard>? {
+        var taken: Map<String, StudyCard>? = null
+
+        updateMetadata(id) { metadata ->
+            val all = metadata.studyProgress
+            taken = all
+            metadata.copy(study = all.ifEmpty { null })
+        }
+
+        return taken
+    }
+
+    /**
+     * Which of the ideas the map's cards have answers for, here or on another
+     * device, aren't cards now, given its `cards` as its page read them, whole:
+     * Home's count of the cards due leaves them out ([MapMetadata.studyNotCards]).
+     */
+    suspend fun setStudyCards(id: String, cards: Set<String>) = updateMetadata(id) { metadata ->
+        val aside = notCards(metadata.studyProgress, cards).sorted().ifEmpty { null }
+        if (aside == metadata.studyNotCards) metadata else metadata.copy(studyNotCards = aside)
+    }
+
+    /**
      * An idea's new id, after new text gave it one: the path, the rehearsal
      * and the study keep the idea. Its card goes on as its latest answer on
      * any device left it, kept as this device's own, over what an idea that
@@ -683,15 +812,7 @@ class MapRepository(
      * and find the card under the new id in this device's record in the
      * folder. Their own answers stay as their records say.
      */
-    suspend fun renameIdea(id: String, from: String, to: String) = updateMetadata(id) { metadata ->
-        val card = metadata.studyProgress[from]
-
-        metadata.copy(
-            path = metadata.path?.map { if (it == from) to else it },
-            rehearsal = metadata.rehearsal?.mapKeys { (idea, _) -> if (idea == from) to else idea },
-            study = if (card != null) metadata.study.orEmpty() - from + (to to card) else metadata.study,
-        )
-    }
+    suspend fun renameIdea(id: String, from: String, to: String) = updateMetadata(id) { it.withIdeasRenamed(mapOf(from to to)) }
 
     /** Copies a picture into the map's folder (see [MapMediaIntake.addPicture]). */
     suspend fun addPicture(id: String, uri: Uri, resolver: ContentResolver): AddedPicture = intake.addPicture(id, uri, resolver)
@@ -711,11 +832,35 @@ class MapRepository(
     /** Copies a video from the phone into the map's folder, with a frame of it as its poster (see [MapMediaIntake.addVideo]). */
     suspend fun addVideo(id: String, uri: Uri, resolver: ContentResolver, onProgress: (Float) -> Unit): AddedVideo = intake.addVideo(id, uri, resolver, onProgress)
 
+    /** A video from the phone made smaller into the map's folder by `make`, about `estimate` bytes (see [MapMediaIntake.addMadeVideo]). */
+    suspend fun addMadeVideo(id: String, estimate: Long, make: suspend (File) -> Unit): AddedVideo = intake.addMadeVideo(id, estimate, make)
+
+    /** How big the file at `uri` is, as its app says, or as its file is when it doesn't; -1 when neither can tell. */
+    suspend fun sizeOf(uri: Uri, resolver: ContentResolver): Long = withContext(Dispatchers.IO) {
+        val said = fromProvider { nameAndSize(uri, resolver).second } ?: -1L
+
+        if (said >= 0) {
+            return@withContext said
+        }
+
+        try {
+            fromProvider { resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } } ?: -1L
+        } catch (unknown: IOException) {
+            -1L
+        }
+    }
+
     /** Copies a sound from the phone into the map's folder (see [MapMediaIntake.addSound]). */
     suspend fun addSound(id: String, uri: Uri, resolver: ContentResolver, onProgress: (Float) -> Unit): AddedSound = intake.addSound(id, uri, resolver, onProgress)
 
+    /** Copies a file from the phone into the map's folder for one of its ideas (see [MapMediaIntake.addFile]). */
+    suspend fun addFile(id: String, uri: Uri, resolver: ContentResolver, onProgress: (Float) -> Unit): AddedFile = intake.addFile(id, uri, resolver, onProgress)
+
     /** Keeps a voice memo recorded in Orbit in the map's folder (see [MapMediaIntake.addRecording]). */
     suspend fun addRecording(id: String, recording: File): String = intake.addRecording(id, recording)
+
+    /** Keeps a sketch drawn in Orbit in the map's folder (see [MapMediaIntake.addSketch]). */
+    suspend fun addSketch(id: String, svg: ByteArray): String = intake.addSketch(id, svg)
 
     /**
      * Deletes pictures in the map's folder that neither the map nor an
@@ -725,7 +870,8 @@ class MapRepository(
      * stays, whatever points at it. The map's own text is looked at first,
      * and most often points at every file there is; only then are the
      * versions read, one at a time, so a big map's history is never all in
-     * memory. A version that can't be read keeps every file.
+     * memory. A version that can't be read keeps every file, and so does a
+     * history that can't be listed: its versions may point at any of them.
      */
     suspend fun removeUnusedPictures(id: String) = withContext(Dispatchers.IO) {
         mutex.withLock {
@@ -737,11 +883,14 @@ class MapRepository(
             val markdown = File(folder, MAP_FILE).takeIf { it.isFile }?.readTextSafely() ?: return@withLock
             val recent = clock() - PICTURE_GRACE
 
+            // Ideas' files Orbit named go too (`file-…`), of any kind: one named some other way stays, as other files do.
             val unused = File(folder, MEDIA_DIRECTORY).listFiles().orEmpty()
-                .filter { file -> file.isFile && isMediaName(file.name) && file.lastModified() < recent && !pointsAtMedia(markdown, file.name) }
+                .filter { file -> file.isFile && (isMediaName(file.name) || isIdeaFileName(file.name)) && file.lastModified() < recent && !pointsAtMedia(markdown, file.name) }
                 .toMutableList()
 
-            for ((_, version) in histories.versionFiles(id)) {
+            val versions = histories.versionFilesOrNull(id) ?: return@withLock
+
+            for ((_, version) in versions) {
                 if (unused.isEmpty()) {
                     return@withLock
                 }
@@ -764,7 +913,7 @@ class MapRepository(
         val folder = folder(id)
         val text = runCatching { File(folder, MAP_FILE).readTextSafely() }.getOrDefault("")
         val files = mediaFiles(folder, text).filter { it.name !in leavingOut }
-        MediaSummary.of(files.associate { it.name to it.length() }, audio = soundNamesIn(text).toSet())
+        MediaSummary.of(files.associate { it.name to it.length() }, audio = soundNamesIn(text).toSet(), ideaFiles = fileNamesIn(text).toSet())
     }
 
     /** The map's own files that can't go to other people clean, which every way out leaves here unless the person chooses otherwise: see [Uncleaned]. */
@@ -772,31 +921,47 @@ class MapRepository(
         val folder = folder(id)
         val text = runCatching { File(folder, MAP_FILE).readTextSafely() }.getOrDefault("")
         val files = mediaFiles(folder, text)
-        Uncleaned.of(files.filter { OutgoingMedia.of(it) == null }.map { it.name }, all = files.map { it.name }, sounds = soundNamesIn(text).toSet())
+        Uncleaned.of(files.filter { OutgoingMedia.of(it) == null }.map { it.name }, all = files.map { it.name }, sounds = soundNamesIn(text).toSet(), files = fileNamesIn(text).toSet(), labels = fileLabelsIn(text))
     }
 
     /**
-     * How many of the map's sounds go inside a web page of it: those that
+     * How many of the map's pictures stay out of a web page of it, past what
+     * a page carries of them ([picturesFitting]): counted as the rest of what
+     * goes is ([MediaSummary]), a video's poster with its video.
+     */
+    suspend fun picturesOutOfPage(id: String): Int = withContext(Dispatchers.IO) {
+        val folder = folder(id)
+        val text = runCatching { File(folder, MAP_FILE).readTextSafely() }.getOrDefault("")
+        val fitting = picturesFitting(text, folder)
+        val sizes = mediaFiles(folder, text).associate { it.name to it.length() }
+        val sounds = soundNamesIn(text).toSet()
+        val files = fileNamesIn(text).toSet()
+        val inPage = sizes.filterKeys { name -> isVideoName(name) || isSoundName(name) || name in sounds || name in fitting }
+        MediaSummary.of(sizes, audio = sounds, ideaFiles = files).pictures - MediaSummary.of(inPage, audio = sounds, ideaFiles = files).pictures
+    }
+
+    /**
+     * The map's sounds that go inside a web page of it, by name: those that
      * fit its room, the rest stay on this device ([soundsFitting]), with
      * those of `asTheyAre` that can't go clean.
      */
-    suspend fun soundsInPage(id: String, asTheyAre: Set<String> = emptySet()): Int = withContext(Dispatchers.IO) {
+    suspend fun soundsInPage(id: String, asTheyAre: Set<String> = emptySet()): Set<String> = withContext(Dispatchers.IO) {
         val folder = folder(id)
-        soundsFitting(runCatching { File(folder, MAP_FILE).readTextSafely() }.getOrDefault(""), folder, asTheyAre = asTheyAre).size
+        soundsFitting(runCatching { File(folder, MAP_FILE).readTextSafely() }.getOrDefault(""), folder, asTheyAre = asTheyAre).mapTo(LinkedHashSet()) { it.file.name }
     }
 
     /**
-     * How many of the map's live photos' motions go inside a web page of it:
-     * those that fit its room, the rest stay on this device
+     * The map's live photos' motions that go inside a web page of it, by
+     * name: those that fit its room, the rest stay on this device
      * ([motionsFitting]), with those of `asTheyAre` that can't go clean.
      */
-    suspend fun motionsInPage(id: String, asTheyAre: Set<String> = emptySet()): Int = withContext(Dispatchers.IO) {
+    suspend fun motionsInPage(id: String, asTheyAre: Set<String> = emptySet()): Set<String> = withContext(Dispatchers.IO) {
         val folder = folder(id)
-        motionsFitting(runCatching { File(folder, MAP_FILE).readTextSafely() }.getOrDefault(""), folder, asTheyAre = asTheyAre).size
+        motionsFitting(runCatching { File(folder, MAP_FILE).readTextSafely() }.getOrDefault(""), folder, asTheyAre = asTheyAre).mapTo(LinkedHashSet()) { it.name }
     }
 
     /** Writes the map as a bundle for another device, in a zip [readBundle] reads back (see [MapBundles.writeZip]). */
-    suspend fun writeZip(id: String, output: OutputStream, asTheyAre: Set<String> = emptySet()) = bundles.writeZip(id, output, asTheyAre)
+    suspend fun writeZip(id: String, output: OutputStream, asTheyAre: Set<String> = emptySet(), room: (Long) -> Unit = {}) = bundles.writeZip(id, output, asTheyAre, room)
 
     /** The map's lasting identity, given one now if it's older than identities (see [MapBundles.identity]). */
     suspend fun identity(id: String): String = bundles.identity(id)
@@ -804,8 +969,15 @@ class MapRepository(
     /** The map with this identity, if it's here. Reads the disk when the list of maps doesn't know it: call it off the main thread (see [MapBundles.findByIdentity]). */
     fun findByIdentity(uuid: String): String? = bundles.findByIdentity(uuid)
 
-    /** A bundle read from a zip, or null when there's no map in it (see [MapBundles.readBundle]). */
-    suspend fun readBundle(input: InputStream, withPictures: Boolean = true): MapBundle? = bundles.readBundle(input, withPictures)
+    /** A bundle read from a zip, or null when there's no map in it, unpacked while `room` says there's room (see [MapBundles.readBundle]). */
+    suspend fun readBundle(input: InputStream, withPictures: Boolean = true, room: (() -> Long)? = null): MapBundle? =
+        if (room != null) bundles.readBundle(input, withPictures, room) else bundles.readBundle(input, withPictures)
+
+    /** Lets go of a bundle that isn't taken in: the files it was unpacked to go now (see [MapBundles.discard]). */
+    fun discard(bundle: MapBundle) = bundles.discard(bundle)
+
+    /** Why a map's zip of `size` bytes can't be unpacked here, or null when there's room for it (see [MapBundles.noRoomForBundle]). */
+    fun noRoomForBundle(size: Long): String? = bundles.noRoomForBundle(size)
 
     /** Whether a zip holds maps a folder each, as [exportAll] writes them, rather than one map's bundle (see [MapBundles.holdsManyMaps]). */
     suspend fun holdsManyMaps(input: InputStream): Boolean = bundles.holdsManyMaps(input)

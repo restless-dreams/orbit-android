@@ -3,6 +3,7 @@ package com.hyuchia.orbit.data
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -92,12 +93,41 @@ class OutgoingMediaTest {
         text("SEFH" + "Samsung's own trailer, $place")
 
     @Test
+    fun `how a file goes is worked out once while it's the same file, and again once it's written over`() {
+        val file = temporary.newFile("video-1.mp4").apply { writeBytes(cameraVideo()) }
+        val first = OutgoingMedia.of(file)!!
+        assertSame(first, OutgoingMedia.of(file))
+
+        // Written over, as a sync or an import replaces a file: another size, or another time, is another file.
+        file.writeBytes(cameraVideo() + ByteArray(8))
+        file.setLastModified(file.lastModified() + 2_000)
+        val again = OutgoingMedia.of(file)!!
+        assertNotSame(first, again)
+        assertEquals(first.size, again.size)
+    }
+
+    @Test
+    fun `a drawing bigger than any a map has isn't read whole to be cleaned, and goes only as it is`() {
+        val drawing = temporary.newFile("plan.svg")
+        drawing.writeText("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\"/></svg>")
+        assertTrue(OutgoingMedia.of(drawing) is OutgoingFile.Cleaned)
+
+        // 33 MiB that start as a drawing does: never read past its start.
+        java.io.RandomAccessFile(drawing, "rw").use { it.setLength(33L * 1024 * 1024) }
+        assertNull(OutgoingMedia.of(drawing))
+        assertTrue(OutgoingMedia.of(drawing, setOf("plan.svg")) is OutgoingFile.AsIs)
+    }
+
+    @Test
     fun `a JPEG goes without where it was taken, with the same picture`() {
         val photo = file("photo.jpg", cameraJpeg())
         val outgoing = OutgoingMedia.of(photo)
 
-        assertTrue(outgoing is OutgoingFile.Cleaned)
+        // Written from its file as it's read, so a big one is never whole in memory, and the same as cleaned in memory.
+        assertTrue(outgoing is OutgoingFile.Pieced)
         val bytes = sent(outgoing!!)
+        assertEquals(bytes.size.toLong(), outgoing.size)
+        assertArrayEquals(OutgoingMedia.picture(cameraJpeg()), bytes)
         assertFalse(bytes.says(place))
         assertTrue(photo.readBytes().says(place))
 
@@ -313,6 +343,116 @@ class OutgoingMediaTest {
     fun `an AVIF picture from ffmpeg, with nothing to take out, goes as it is`() {
         val avif = File("src/test/resources/outgoing/plain.avif")
         assertArrayEquals(avif.readBytes(), sent(OutgoingMedia.of(avif)!!))
+    }
+
+    /**
+     * A Pixel's HEIC motion photo: its coded picture at 464 (2,149 bytes)
+     * and its XMP, saying where the video is, at 2,613 (854 bytes), as its
+     * item locations put them, then the video in an `mpvd` box.
+     */
+    private val motionPhoto = File("src/test/resources/live/google-motion-photo.heic")
+
+    /** Where its `mpvd` box starts, and its picture's file ends. */
+    private val motionPhotoVideo = 3467
+
+    @Test
+    fun `a HEIC motion photo goes without the video it keeps, and its picture as it was`() {
+        val photo = motionPhoto.readBytes()
+        val bytes = sent(OutgoingMedia.of(motionPhoto)!!)
+
+        assertEquals(motionPhotoVideo, String(photo, Charsets.ISO_8859_1).indexOf("mpvd") - 4)
+        // Up to where the video started: its type, its items and their properties, and its coded picture, byte for byte.
+        assertEquals(motionPhotoVideo, bytes.size)
+        assertArrayEquals(photo.copyOfRange(0, 2613), bytes.copyOfRange(0, 2613))
+        // Its XMP is zeros.
+        assertArrayEquals(ByteArray(854), bytes.copyOfRange(2613, motionPhotoVideo))
+        assertFalse(bytes.says("mpvd"))
+        assertFalse(bytes.says("moov"))
+        // Inside a page or a drawing too.
+        assertArrayEquals(bytes, OutgoingMedia.picture(photo))
+    }
+
+    @Test
+    fun `what follows a motion photo's video in its box goes with it`() {
+        // As the review's probe made one: the motion photo, with something after its video's last box, inside the `mpvd` box.
+        val photo = motionPhoto.readBytes()
+        val trailer = text("Test trailer, $place")
+        val video = photo.copyOfRange(motionPhotoVideo, photo.size)
+        val longer = photo.copyOfRange(0, motionPhotoVideo) + box("mpvd", video.copyOfRange(8, video.size), trailer)
+        val bytes = sent(OutgoingMedia.of(file("probe.heic", longer))!!)
+
+        assertFalse(bytes.says(place))
+        assertFalse(bytes.says("Test"))
+        assertArrayEquals(sent(OutgoingMedia.of(motionPhoto)!!), bytes)
+    }
+
+    @Test
+    fun `an AVIF motion photo, with Samsung's trailer after its video, goes as the picture alone`() {
+        val avif = File("src/test/resources/outgoing/plain.avif").readBytes()
+        val video = File("src/test/resources/live/motion.mp4").readBytes()
+        val samsung = box("sefd", text("MotionPhoto_Data"), video, text("Image_UTC_Data1761040800000"), text("SEFH Test trailer, $place SEFT"))
+        val photo = avif + box("mpvd", video) + samsung
+
+        assertArrayEquals(avif, sent(OutgoingMedia.of(file("motion.avif", photo))!!))
+    }
+
+    @Test
+    fun `boxes beside a HEIF picture's own become free space where they are, and a box its items are in stays`() {
+        val heif = cameraHeif(locationsVersion = 0)
+        val mediaAt = String(heif, Charsets.ISO_8859_1).indexOf("mdat") - 4
+        // Content credentials and a video between its items and their data, in no box of a kind a picture is made of; an editor's leftovers after it.
+        val credentials = box("uuid", ByteArray(16) { (0xD8 - it).toByte() }, text("c2pa Test editor, $place"))
+        val between = credentials + box("mpvd", text("ftypisom $place"))
+        val moved = heif.copyOfRange(0, mediaAt) + between + heif.copyOfRange(mediaAt, heif.size) + box("free", text("Test leftover"))
+        // The item locations (version 0: an id, a data reference, an extent count, then its offset and length), moved with the media data.
+        val items = String(moved, Charsets.ISO_8859_1).indexOf("iloc") + 4 + 4 + 2 + 2
+        val imageAt = ByteBuffer.wrap(moved, items + 6, 4).int + between.size
+        ByteBuffer.wrap(moved).putInt(items + 6, imageAt).putInt(items + 14 + 6, imageAt + image.size)
+        val bytes = sent(OutgoingMedia.of(file("credentials.heic", moved))!!)
+
+        assertFalse(bytes.says(place))
+        assertFalse(bytes.says("Test"))
+        // Free space where they were, so the picture's data stays where its items say; the leftovers after it, left out.
+        assertEquals(moved.size - box("free", text("Test leftover")).size, bytes.size)
+        assertEquals(credentials.size, ByteBuffer.wrap(bytes, mediaAt, 4).int)
+        assertEquals("free", String(bytes, mediaAt + 4, 4, Charsets.ISO_8859_1))
+        assertEquals("free", String(bytes, mediaAt + credentials.size + 4, 4, Charsets.ISO_8859_1))
+        assertEquals(imageAt, bytes.indexOf(image))
+
+        // A picture whose data is in a box of another kind keeps it: what it shows is there.
+        val elsewhere = heif.copyOfRange(0, mediaAt) + box("abcd", heif.copyOfRange(mediaAt + 8, heif.size))
+        val kept = sent(OutgoingMedia.of(file("elsewhere.heic", elsewhere))!!)
+        assertEquals(elsewhere.size, kept.size)
+        assertEquals(mediaAt + 8, kept.indexOf(image))
+        assertFalse(kept.says(place))
+    }
+
+    @Test
+    fun `an animated AVIF keeps every frame where it is, and goes without when it was made`() {
+        // As ffmpeg writes one, made on 21 October 2026: its movie's, track's and media's headers say so.
+        val avif = File("src/test/resources/outgoing/animated.avif")
+        val original = avif.readBytes()
+        val made = int(0xE6FE3DA0.toInt())
+        assertTrue(original.indexOf(made) > 0)
+
+        val bytes = sent(OutgoingMedia.of(avif)!!)
+        assertEquals(original.size, bytes.size)
+        assertEquals(-1, bytes.indexOf(made))
+        // The encoder named in its frames' description, and its track's handler named, say nothing; the picture's own handler stays as the picture is.
+        assertFalse(bytes.says("Lavc"))
+        assertEquals(2, Regex("PictureHandler").findAll(String(original, Charsets.ISO_8859_1)).count())
+        assertEquals(1, Regex("PictureHandler").findAll(String(bytes, Charsets.ISO_8859_1)).count())
+        // Its picture, its frames, and how they play, byte for byte.
+        val movie = String(original, Charsets.ISO_8859_1).indexOf("moov") - 4
+        assertArrayEquals(original.copyOfRange(0, movie), bytes.copyOfRange(0, movie))
+        val media = String(original, Charsets.ISO_8859_1).indexOf("mdat") - 4
+        assertArrayEquals(original.copyOfRange(media, original.size), bytes.copyOfRange(media, original.size))
+
+        for (table in listOf("stts", "stss", "stsc", "stsz", "stco")) {
+            val at = String(original, Charsets.ISO_8859_1).indexOf(table) - 4
+            val size = ByteBuffer.wrap(original, at, 4).int
+            assertArrayEquals(table, original.copyOfRange(at, at + size), bytes.copyOfRange(at, at + size))
+        }
     }
 
     @Test

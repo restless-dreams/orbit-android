@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    A map on the home screen; which one is asked as it's placed, and can be changed later.
+    A map on the home screen; which one is asked as it's placed from the launcher's list, and can be changed
+    later from the widget's settings. One put there from a map's menu shows that map: the launcher doesn't ask.
     The sizes in cells and the largest size are Android 12's; before, the smallest sizes stand in.
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
@@ -20,5 +21,5 @@
     android:updatePeriodMillis="0"
     android:previewImage="@drawable/ic_shortcut_map"
     android:configure="com.hyuchia.orbit.widget.MapWidgetConfigureActivity"
-    android:widgetFeatures="reconfigurable|configuration_optional"
+    android:widgetFeatures="reconfigurable"
     tools:ignore="UnusedAttribute" />

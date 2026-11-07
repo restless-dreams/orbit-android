@@ -58,7 +58,7 @@
 
     <string name="data_sound_too_big">Ese audio pesa %1$s, y un mapa guarda audios de hasta %2$s para que pueda seguir llegando a tus otros dispositivos. Recórtalo, o agrégalo como dirección web.</string>
     <string name="data_sound_past_limit">Ese audio pesa más de %1$s, y un mapa guarda audios de hasta eso para que pueda seguir llegando a tus otros dispositivos. Recórtalo, o agrégalo como dirección web.</string>
-    <string name="data_sound_past_map_room">Las imágenes, los videos y los audios de este mapa ya suman %1$s. Con este audio pasarían de los %2$s que un mapa puede llevar al compartirse o respaldarse. Elige uno más corto, o agrégalo como dirección web.</string>
+    <string name="data_sound_past_map_room">Las imágenes, los videos y los audios de este mapa ya suman %1$s. Con este audio pasarían del máximo de %2$s que un mapa puede llevar al compartirse o respaldarse. Elige uno más corto, o agrégalo como dirección web.</string>
     <string name="data_sound_kind_refused">Orbit guarda los audios como archivos MP3, MP4, AAC, Ogg, Opus, WAV, FLAC o WebM, y este es %1$s.</string>
     <string name="data_sound_kind_unknown">Orbit guarda los audios como archivos MP3, MP4, AAC, Ogg, Opus, WAV, FLAC o WebM, y este es de un tipo que no conoce.</string>
     <string name="data_no_room_for_sound">No hay espacio en este dispositivo para ese audio.</string>

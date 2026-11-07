@@ -404,4 +404,48 @@ class FolderStudyTest {
         assertEquals(FolderStudy.NAMES_KEPT, FolderStudy.record("Z.md", emptyMap(), null, (1..20).map { "$it.md" }).was.size)
         assertNull(FolderStudy.decode("{}"))
     }
+
+    @Test
+    fun `this device's own record that a newer Orbit says this one would misread is never written over or deleted`() = runTest {
+        val phone = Device(phoneId, "Pixel 8").start()
+        val verbs = phone.maps.add("# Spanish verbs\n- Ser\n  - soy\n")
+        phone.maps.saveStudy(verbs, mapOf("ser" to card(box = 1, due = today + 1, at = now - day)))
+        phone.sync.syncNow()
+        val file = "${phone.map("Spanish verbs").metadata.sync!!.file}.json"
+
+        // A newer Orbit on this phone wrote it so this one would misread it, before the phone went back to this version.
+        val newer = """{"format":2,"compatible":2,"map":"${file.removeSuffix(".json")}","cards":{"ser":{"stage":"known","at":$now}}}"""
+        folder.writeStudyRecord(phoneId, file, newer)
+
+        // Studied again here, the record stays as the newer Orbit left it.
+        phone.maps.saveStudy(verbs, mapOf("ser" to card(box = 2, due = today + 3, at = now)))
+        phone.sync.syncNow()
+        assertEquals(newer, folder.study.getValue(phoneId).getValue(file).first)
+
+        // With nothing studied here, it isn't deleted either.
+        phone.maps.saveStudy(verbs, emptyMap())
+        phone.sync.syncNow()
+        assertEquals(newer, folder.study.getValue(phoneId).getValue(file).first)
+    }
+
+    @Test
+    fun `a map renamed in the folder leaves this device's record by the old name as a newer Orbit wrote it`() = runTest {
+        val phone = Device(phoneId, "Pixel 8").start()
+        val verbs = phone.maps.add("# Spanish verbs\n- Ser\n  - soy\n")
+        phone.maps.saveStudy(verbs, mapOf("ser" to card(box = 1, due = today + 1, at = now - day)))
+        phone.sync.syncNow()
+        val before = phone.map("Spanish verbs").metadata.sync!!.file
+        val newer = """{"format":2,"compatible":2,"map":"$before","cards":{"ser":{"stage":"known","at":$now}},"streak":3}"""
+        folder.writeStudyRecord(phoneId, "$before.json", newer)
+
+        folder.rename(before, "Verbs.md")
+        phone.sync.syncNow()
+
+        // The record by the old name stays as it was, and the map's answers go to one of this version's own by the new name,
+        // which takes nothing from a record this version would misread.
+        assertEquals(newer, folder.study.getValue(phoneId).getValue("$before.json").first)
+        val written = Json.parseToJsonElement(folder.study.getValue(phoneId).getValue("Verbs.md.json").first).jsonObject
+        assertEquals("1", written.getValue("compatible").jsonPrimitive.content)
+        assertNull(written["streak"])
+    }
 }

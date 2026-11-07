@@ -39,6 +39,25 @@ class LivePairsTest {
     }
 
     @Test
+    fun `a still and a movie whose ids differ are never joined, by their names or their times, nor offered to be`() {
+        val other = "9F0B3C11-2D7A-4E55-8B2E-6A1C0D9E7F21"
+        // The same name and the same moment, but each carries its own live photo's id: halves of two of them.
+        val apart = LivePairs.match(listOf(still("IMG_0911.HEIC", id, taken = noon)), listOf(movie("IMG_0911.MOV", other, created = noon)))
+        assertEquals(emptyList<Pair<String, String>>(), apart.pairs)
+        assertNull(apart.offer)
+
+        // The movie goes on to the still its time says, which lost its id on the way, and the other still stays alone.
+        val crossed = LivePairs.match(
+            listOf(still("IMG_0911.HEIC", id, taken = noon.plusSeconds(30)), still("IMG_0912.JPG", taken = noon)),
+            listOf(movie("IMG_0911.MOV", other, created = noon)),
+        )
+        assertEquals(listOf("IMG_0912.JPG" to "IMG_0911.MOV"), crossed.pairs)
+
+        // A movie without an id says nothing against a still's, and the name joins them.
+        assertEquals(listOf("IMG_0911.HEIC" to "IMG_0911.MOV"), LivePairs.match(listOf(still("IMG_0911.HEIC", id)), listOf(movie("IMG_0911.MOV"))).pairs)
+    }
+
+    @Test
     fun `one picture and one live photo's movie that nothing ties together are offered, and a plain video never is`() {
         val left = LivePairs.match(listOf(still("photo.jpg")), listOf(movie("clip.mov")))
         assertEquals(emptyList<Pair<String, String>>(), left.pairs)

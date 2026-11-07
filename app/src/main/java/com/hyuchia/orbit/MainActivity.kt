@@ -21,8 +21,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.hyuchia.orbit.data.AppSettings
+import com.hyuchia.orbit.data.importable
 import com.hyuchia.orbit.page.MapPrinter
 import com.hyuchia.orbit.privacy.keepPrivateMapsOutOfRecents
+import com.hyuchia.orbit.reminders.EXTRA_IDEA_DUE
+import com.hyuchia.orbit.reminders.EXTRA_IDEA_NAME
+import com.hyuchia.orbit.reminders.EXTRA_IDEA_PATH
+import com.hyuchia.orbit.reminders.IdeaToShow
 import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.theme.OrbitTheme
 import com.hyuchia.orbit.theme.ThemedSystemBars
@@ -140,7 +145,9 @@ class MainActivity : ComponentActivity() {
     /**
      * Shortcuts whose keys no text field uses come first, wherever the focus
      * is; the others get the keys nothing on screen used. Keys the map's page
-     * doesn't use come back through [OrbitPage]'s own route.
+     * doesn't use come back through [OrbitPage]'s own route, and dialogs and
+     * sheets, windows of their own, pass theirs on the same way
+     * ([com.hyuchia.orbit.ui.EscapeCloses]).
      *
      * `Activity.dispatchKeyEvent` is the platform's own; AndroidX only marks
      * its override restricted, and the keys still go through it.
@@ -175,17 +182,47 @@ class MainActivity : ComponentActivity() {
  * file opened with Orbit, or a file or text shared to it. Null for anything
  * else, or one that's missing what it needs.
  */
-internal fun appRequestOf(context: Context, intent: Intent?): AppRequest? = when (intent?.action) {
+internal fun appRequestOf(context: Context, intent: Intent?): AppRequest? = when {
+    intent?.component?.className == ATTACH_FILES -> attachedFiles(intent)?.let(AppRequest::AttachFiles)
+    else -> requestOf(context, intent)
+}
+
+/** The alias files of any kind are shared to, to join an idea ([AppRequest.AttachFiles]). */
+private const val ATTACH_FILES = "com.hyuchia.orbit.AttachFiles"
+
+/** The files a share to [ATTACH_FILES] hands over: its stream, or its streams for several; null for none. */
+private fun attachedFiles(intent: Intent): List<Uri>? {
+    val streams = when (intent.action) {
+        Intent.ACTION_SEND -> listOfNotNull(IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java))
+        Intent.ACTION_SEND_MULTIPLE -> IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
+        else -> emptyList()
+    }
+
+    // Only other apps' files: never a path on the device, nor Orbit's own, which would have Orbit read its private files.
+    return streams.filter { importable(it.scheme, it.authority, "${BuildConfig.APPLICATION_ID}.files") }.takeIf { it.isNotEmpty() }
+}
+
+private fun requestOf(context: Context, intent: Intent?): AppRequest? = when (intent?.action) {
     ACTION_NEW_MAP -> AppRequest.NewMap
-    ACTION_OPEN_MAP -> intent.getStringExtra(EXTRA_MAP_ID)?.let { id -> AppRequest.OpenMap(id, ownMark = intent.getStringExtra(EXTRA_OPEN_MARK) == OpenMark.of(context)) }
+    ACTION_OPEN_MAP -> intent.getStringExtra(EXTRA_MAP_ID)?.let { id ->
+        val ownMark = intent.getStringExtra(EXTRA_OPEN_MARK) == OpenMark.of(context)
+
+        // A reminder's idea, which only Orbit's own intents carry.
+        val idea = intent.getStringExtra(EXTRA_IDEA_DUE)?.takeIf { ownMark }?.let { due ->
+            IdeaToShow(id, intent.getStringExtra(EXTRA_IDEA_NAME).orEmpty(), due, intent.getIntArrayExtra(EXTRA_IDEA_PATH)?.toList().orEmpty())
+        }
+
+        AppRequest.OpenMap(id, ownMark, idea)
+    }
     Intent.ACTION_VIEW -> intent.data?.let(AppRequest::ImportFile)
     Intent.ACTION_SEND -> {
         val stream = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
-        val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+        // Text with styles, as a notes app or a browser shares it, comes as a CharSequence that isn't a String: its words come all the same.
+        val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
 
         when {
             stream != null -> AppRequest.ImportFile(stream)
-            text != null -> AppRequest.ImportText(text, intent.getStringExtra(Intent.EXTRA_SUBJECT))
+            text != null -> AppRequest.ImportText(text, intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString())
             else -> null
         }
     }

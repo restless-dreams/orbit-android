@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerializationException
 import java.io.File
 import java.io.IOException
 
@@ -19,6 +20,9 @@ private const val TRASH_SEEN_EXPIRED = ".expired"
 
 /** In a map in the trash, its history, so it comes back with its versions. */
 internal const val TRASHED_HISTORY = ".history"
+
+/** [MapMetadata.removedByFolder]'s field in `meta.json`. */
+private const val REMOVED_BY_FOLDER = "removedByFolder"
 
 /** A deleted map in the trash, until it's restored or [TRASH_DAYS] go by. */
 data class TrashedMap(
@@ -166,40 +170,91 @@ internal class MapTrash(store: MapStore) : MapPart(store) {
         }
     }
 
-    /** Deletes a map in the trash for good. */
-    suspend fun deleteForever(item: TrashedMap) = withContext(Dispatchers.IO) {
+    /**
+     * Deletes a map in the trash for good. Returns whether it's gone: one
+     * whose files don't all delete stays in the trash, listed as it is now,
+     * to delete again ([deleteTrashedFolder]). Nothing goes while a newer
+     * version keeps the maps.
+     */
+    suspend fun deleteForever(item: TrashedMap): Boolean = withContext(Dispatchers.IO) {
         mutex.withLock {
-            if (canWrite.value) {
-                item.folder.deleteRecursively()
-                trashed.update { items -> items.filterNot { it.folder == item.folder } }
+            if (!canWrite.value) {
+                return@withLock false
             }
+
+            val gone = deleteTrashedFolder(item.folder)
+            val left = if (gone) null else trashedMap(item.folder)
+            trashed.update { items -> items.mapNotNull { if (it.folder == item.folder) left else it } }
+            gone
         }
     }
 
     /**
      * Deletes every map in the trash for good, but those `keeping` keeps: the ones the trash doesn't
-     * show while private maps hide, which wait for their own time to go.
+     * show while private maps hide, which wait for their own time to go. Returns how many maps stayed,
+     * their files not all deleting: the trash lists them still, to delete again ([deleteTrashedFolder]).
      */
-    suspend fun emptyTrash(keeping: (TrashedMap) -> Boolean = { false }) = withContext(Dispatchers.IO) {
+    suspend fun emptyTrash(keeping: (TrashedMap) -> Boolean = { false }): Int = withContext(Dispatchers.IO) {
         mutex.withLock {
-            if (canWrite.value) {
-                val kept = trashed.value.filter(keeping)
-                val keptFolders = kept.mapTo(HashSet()) { it.folder.name }
-                trashDirectory.listFiles().orEmpty().filter { it.name !in keptFolders }.forEach { it.deleteRecursively() }
-                trashed.value = kept
+            if (!canWrite.value) {
+                return@withLock 0
             }
+
+            val kept = trashed.value.filter(keeping)
+            val keptFolders = kept.mapTo(HashSet()) { it.folder.name }
+            // A trash that can't be listed now can't be emptied either: every map it shows stays.
+            val entries = trashDirectory.listFiles() ?: return@withLock trashed.value.count { it.folder.name !in keptFolders }
+            val stayed = mutableListOf<TrashedMap>()
+
+            for (entry in entries.filter { it.name !in keptFolders }) {
+                val gone = if (entry.isDirectory) deleteTrashedFolder(entry) else entry.delete() || !entry.exists()
+
+                if (!gone) {
+                    trashedMap(entry)?.let { stayed += it }
+                }
+            }
+
+            trashed.value = (kept + stayed).sortedByDescending { it.deleted }
+            stayed.size
         }
     }
 
     /**
-     * The note saying which maps the folder sent to the trash has been read:
-     * from now on, each has the trash's usual [TRASH_DAYS], counted from now.
+     * Deletes the folder of a map in the trash, its text and then its
+     * details last: should any of its other files not delete (storage that
+     * fails, say), its text and details stay, and the map with them, listed
+     * in the trash as it was, private if it was, to delete again rather than
+     * said to be gone. Every file that will go goes all the same. Returns
+     * whether the map is gone.
      */
-    suspend fun seeFolderRemovals() = withContext(Dispatchers.IO) {
+    private fun deleteTrashedFolder(folder: File): Boolean {
+        // A folder that can't be listed now can't be deleted either: it stays as it is.
+        val files = folder.listFiles() ?: return !folder.exists()
+        val text = File(folder, MAP_FILE)
+        val details = File(folder, METADATA_FILE)
+        val others = files.filter { it != text && it != details }.fold(true) { whole, file -> file.deleteRecursively() && whole }
+
+        if (!others || !(text.delete() || !text.exists())) {
+            return false
+        }
+
+        // Its text gone, the map is: details or a folder that stay all the same hold no map, and the trash lists none.
+        details.delete()
+        folder.delete()
+        return true
+    }
+
+    /**
+     * The note saying which maps the folder sent to the trash has been read:
+     * from now on, each has the trash's usual [TRASH_DAYS], counted from now,
+     * but those `keeping` keeps, whose note wasn't shown (a private map's,
+     * while private maps hide): they wait until it's read too.
+     */
+    suspend fun seeFolderRemovals(keeping: (TrashedMap) -> Boolean = { false }) = withContext(Dispatchers.IO) {
         mutex.withLock {
             val now = clock()
 
-            for (item in listTrash().filter { removedByFolder(it.folder) }) {
+            for (item in listTrash().filter { removedByFolder(it.folder) && !keeping(it) }) {
                 runCatching { writeMetadata(item.folder, readMetadataToChange(item.folder).copy(removedByFolder = false)) }
                 restamp(item, now)
             }
@@ -251,7 +306,9 @@ internal class MapTrash(store: MapStore) : MapPart(store) {
                 now - item.deleted < TRASH_DAYS * DAY_MILLISECONDS -> seen.delete()
                 !clockTrusted() -> Unit
                 !seen.isFile -> runCatching { writeAtomically(seen, now.toString()) }
-                (seen.readText().trim().toLongOrNull() ?: now) <= now - DAY_MILLISECONDS -> item.folder.deleteRecursively()
+                (seen.readText().trim().toLongOrNull() ?: now) <= now - DAY_MILLISECONDS -> if (!deleteTrashedFolder(item.folder)) {
+                    Logs.warn("MapRepository", "A map past its days in the trash couldn't be deleted: it stays, to go at the next start")
+                }
             }
         }
     }
@@ -270,6 +327,28 @@ internal class MapTrash(store: MapStore) : MapPart(store) {
         }
     }
 
-    private fun removedByFolder(folder: File): Boolean =
-        runCatching { MetadataFile.decode(File(folder, METADATA_FILE).readText()).removedByFolder }.getOrDefault(false)
+    /**
+     * Whether the folder sent the map in `folder` to the trash, to wait there
+     * until the note saying so is read ([MapMetadata.removedByFolder]). Only
+     * details that say it didn't, or a map that has none, let it go when its
+     * days are up: details that can't be read, now or at all, or whose
+     * `removedByFolder` this version can't read, may have said it did, and
+     * the map waits rather than go for good unseen.
+     */
+    private fun removedByFolder(folder: File): Boolean {
+        val file = File(folder, METADATA_FILE)
+
+        if (!file.exists()) {
+            return false
+        }
+
+        return try {
+            val metadata = MetadataFile.decode(file.readText())
+            metadata.removedByFolder || REMOVED_BY_FOLDER in metadata.extras
+        } catch (unreadable: IOException) {
+            true
+        } catch (damaged: SerializationException) {
+            true
+        }
+    }
 }

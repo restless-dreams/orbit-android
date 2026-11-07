@@ -8,14 +8,24 @@ import java.io.IOException
 import java.io.OutputStream
 import java.util.zip.ZipInputStream
 
-/** The most an entry of a zip may hold: anything larger isn't a map's text, picture or video. */
-internal const val ZIP_ENTRY_LIMIT = 64L * 1024 * 1024
+/**
+ * The most an entry of a zip may hold: anything larger isn't a map's text,
+ * picture, video or sound, which may be up to [MEDIA_FILE_LIMIT], a cleaned
+ * picture a little more.
+ */
+internal const val ZIP_ENTRY_LIMIT = 256L * 1024 * 1024
+
+/** The most an entry of a zip may hold in Orbit 0.4.0, and every release before it: they refuse a zip with a bigger one. */
+internal const val ZIP_ENTRY_LIMIT_UP_TO_0_4_0 = 64L * 1024 * 1024
 
 /** The most a map's text, or one of its versions, may be in a zip: what it may be anywhere. */
 internal const val ZIP_TEXT_LIMIT = MAP_TEXT_LIMIT
 
 /** A zip Orbit won't take in: too big once unpacked, too many files, or files that point outside it. Its message says which, for people. */
-class RefusedZipException(message: String) : IOException(message)
+open class RefusedZipException(message: String) : IOException(message)
+
+/** A zip there's no room on the device for, found as it was unpacked: what it unpacked to so far is gone. */
+class NoRoomForZipException(message: String) : RefusedZipException(message)
 
 /**
  * What a zip may still unpack to: so many files, so many bytes. A zip can
@@ -81,10 +91,17 @@ internal fun ZipInputStream.readLimited(budget: ZipBudget, limit: Long = ZIP_ENT
     return output.toByteArray()
 }
 
-/** Copies an entry of a zip into `output`, refusing one bigger than `limit`, and counting it in `budget`. */
-internal fun ZipInputStream.copyLimited(output: OutputStream?, budget: ZipBudget, limit: Long = ZIP_ENTRY_LIMIT) {
-    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+/**
+ * Copies an entry of a zip into `output`, refusing one bigger than `limit`,
+ * and counting it in `budget`. `checkRoom` looks at the room left where it's
+ * written, before the first byte and after each megabyte, and throws once
+ * there's too little, so a big file never fills the storage.
+ */
+internal fun ZipInputStream.copyLimited(output: OutputStream?, budget: ZipBudget, limit: Long = ZIP_ENTRY_LIMIT, checkRoom: () -> Unit = {}) {
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 8)
     var total = 0L
+    var sinceLook = 0L
+    checkRoom()
 
     while (true) {
         val read = read(buffer)
@@ -101,8 +118,17 @@ internal fun ZipInputStream.copyLimited(output: OutputStream?, budget: ZipBudget
 
         budget.take(read)
         output?.write(buffer, 0, read)
+        sinceLook += read
+
+        if (sinceLook >= ROOM_LOOK_BYTES) {
+            checkRoom()
+            sinceLook = 0
+        }
     }
 }
+
+/** How much of a zip's file is written between looks at the room left where it goes. */
+private const val ROOM_LOOK_BYTES = 1024L * 1024
 
 /** Reads past an entry of a zip, counting it in `budget`: skipping one unpacks it all the same. */
 internal fun ZipInputStream.skipEntry(budget: ZipBudget) = copyLimited(null, budget, Long.MAX_VALUE)

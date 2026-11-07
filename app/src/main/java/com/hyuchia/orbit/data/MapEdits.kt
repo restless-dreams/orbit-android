@@ -34,8 +34,14 @@ enum class MapEditResult {
     KeptChanging,
 }
 
-/** How a tag renamed in every map went: how many maps `changed`, and how many Orbit `left` as they were, which it can only show. */
-data class TagRename(val changed: Int, val left: Int)
+/**
+ * How a tag renamed in every map went: how many maps `changed`, and the maps
+ * that kept it, by id, with why: Orbit can only show them
+ * ([MapEditResult.Newer], [MapEditResult.Unreadable]), or couldn't change
+ * them ([MapEditResult.Refused], [MapEditResult.NotWritten],
+ * [MapEditResult.KeptChanging]).
+ */
+data class TagRename(val changed: Int, val kept: Map<String, MapEditResult> = emptyMap())
 
 /** A copy of a map ([MapEdits.duplicate]): its id, or null with why there's none. */
 data class MapCopy(val id: String?, val result: MapEditResult)
@@ -72,13 +78,14 @@ class MapEdits(private val maps: MapRepository, private val editor: MapTextEdito
 
     /**
      * Renames a tag in every map that has it, whatever its capitals, as one
-     * tag with any it's renamed to; `to` null takes it out of them.
+     * tag with any it's renamed to; `to` null takes it out of them. A map it
+     * couldn't change keeps the tag, and says why.
      */
     suspend fun renameTag(from: String, to: String?): TagRename {
         val key = MapTags.key(from)
         val tagged = maps.maps.value.orEmpty().filter { map -> !map.unreadable && map.outline.tags.any { MapTags.key(it) == key } }
         var changed = 0
-        var left = 0
+        val kept = LinkedHashMap<String, MapEditResult>()
 
         for (map in tagged) {
             val result = edit(map.id, VersionReason.Tags) { text ->
@@ -88,12 +95,13 @@ class MapEdits(private val maps: MapRepository, private val editor: MapTextEdito
 
             when (result) {
                 MapEditResult.Written -> changed += 1
-                MapEditResult.Newer, MapEditResult.Unreadable -> left += 1
-                else -> Unit
+                // Gone meanwhile, it has no tag to keep.
+                MapEditResult.Missing -> Unit
+                else -> kept[map.id] = result
             }
         }
 
-        return TagRename(changed, left)
+        return TagRename(changed, kept)
     }
 
     /**
@@ -132,7 +140,8 @@ class MapEdits(private val maps: MapRepository, private val editor: MapTextEdito
                 return MapEditResult.Written
             }
 
-            when (maps.change(id, markdown, base = text, reason = reason)) {
+            // A new name gives the center a new id: its place on the path, its rehearsal's time and its card follow it.
+            when (maps.change(id, markdown, base = text, reason = reason, renamed = edited.renamed.associate { it.from to it.to })) {
                 WriteResult.Written -> return MapEditResult.Written
                 WriteResult.Changed -> Unit
                 WriteResult.Refused -> return MapEditResult.Refused

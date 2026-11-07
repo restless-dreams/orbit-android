@@ -18,6 +18,11 @@
         <item quantity="one">a sound</item>
         <item quantity="other">%1$d sounds</item>
     </plurals>
+    <!-- Files an idea holds: PDFs, documents, any file. -->
+    <plurals name="sharing_files">
+        <item quantity="one">a file</item>
+        <item quantity="other">%1$d files</item>
+    </plurals>
     <!-- A live photo's motion that stays behind while its picture goes, as in a web page without room left for it. -->
     <plurals name="sharing_motions">
         <item quantity="one">a live photo\'s motion</item>
@@ -53,6 +58,11 @@
         <item quantity="one">%1$s stays on this device: Orbit can\'t take out where it was taken or recorded.</item>
         <item quantity="other">%1$s stay on this device: Orbit can\'t take out where they were taken or recorded.</item>
     </plurals>
+    <!-- Ideas' files, which may say more than they show, alone or with pictures, videos or sounds. -->
+    <plurals name="sharing_uncleaned_stay_hidden">
+        <item quantity="one">%1$s stays on this device: Orbit can\'t take out what may be hidden in it.</item>
+        <item quantity="other">%1$s stay on this device: Orbit can\'t take out what may be hidden in them.</item>
+    </plurals>
     <!-- The same files, once the person chose to share them as they are. -->
     <plurals name="sharing_uncleaned_go_taken">
         <item quantity="one">%1$s goes as it is, with where it was taken.</item>
@@ -65,6 +75,10 @@
     <plurals name="sharing_uncleaned_go_taken_or_recorded">
         <item quantity="one">%1$s goes as it is, with where it was taken or recorded.</item>
         <item quantity="other">%1$s go as they are, with where they were taken or recorded.</item>
+    </plurals>
+    <plurals name="sharing_uncleaned_go_hidden">
+        <item quantity="one">%1$s goes as it is, with whatever may be hidden in it.</item>
+        <item quantity="other">%1$s go as they are, with whatever may be hidden in them.</item>
     </plurals>
 
     <!-- Asked once as a way out starts at the phone, when some of the map's files can't go clean, in the viewer's words (media_share_video_as_it_is_title). %1$s is a list such as “a video” or “2 pictures and a video”. -->
@@ -84,6 +98,10 @@
         <item quantity="one">Orbit couldn\'t take out where and when it was taken or recorded and on what device, so they\'d go with it.</item>
         <item quantity="other">Orbit couldn\'t take out where and when they were taken or recorded and on what devices, so they\'d go with them.</item>
     </plurals>
+    <plurals name="sharing_as_they_are_hidden">
+        <item quantity="one">Orbit couldn\'t take out what it may say beyond what it shows, such as who made it, when and where, so that would go with it.</item>
+        <item quantity="other">Orbit couldn\'t take out what they may say beyond what they show, such as who made them, when and where, so that would go with them.</item>
+    </plurals>
     <!-- The choice the question starts on: the files stay on this device. -->
     <plurals name="sharing_leave_them_out">
         <item quantity="one">Leave it out</item>
@@ -101,7 +119,11 @@
     <string name="sharing_map_alone">The map</string>
     <string name="sharing_map_with_description">A zip that opens in Orbit\u00A0· %1$s</string>
     <string name="sharing_just_the_text">Just the text</string>
+    <!-- Under a map's zip, when it's bigger than versions of Orbit before this one open: 96 MB, or a file over 64 MB. -->
+    <string name="sharing_zip_past_older_orbits">Older versions of Orbit can\'t open a zip this big: update Orbit wherever it\'s opened</string>
     <string name="sharing_markdown_file">A markdown file</string>
+    <!-- In place of sharing_markdown_file for a map written in YAML, whose text goes as the YAML it is. -->
+    <string name="sharing_yaml_file">A YAML file</string>
 
     <!-- Sending a map to a device, and showing it to browsers. -->
     <string name="sharing_send_copy">Sends a copy of the map.</string>

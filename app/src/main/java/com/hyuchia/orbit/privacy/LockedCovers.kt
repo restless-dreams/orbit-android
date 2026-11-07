@@ -112,80 +112,83 @@ fun CoverDialog(map: MapSummary, onDismiss: () -> Unit) {
 
     fun chosen(): LockedCover = (current ?: LockedCover()).copy(icon = icon?.takeIf { it.isNotBlank() }, name = name.trim().ifBlank { null })
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            EscapeCloses(onDismiss)
-            Text(stringResource(R.string.private_cover_while_locked))
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                Text(stringResource(R.string.private_cover_explanation), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    // Written for a private map, its name asks keyboards not to learn from it, as what's typed into the map does.
+    KeyboardsDontLearn(enabled = true) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = {
+                EscapeCloses(onDismiss)
+                Text(stringResource(R.string.private_cover_while_locked))
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                    Text(stringResource(R.string.private_cover_explanation), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    val choose = if (icon.isNullOrBlank()) {
-                        stringResource(R.string.private_cover_choose_emoji)
-                    } else {
-                        stringResource(R.string.private_cover_change_emoji, icon.orEmpty())
-                    }
-
-                    // The map's own lock, as its locked card will show it, named as the field beside it is: a tap chooses its emoji.
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Box(
-                            Modifier
-                                .size(64.dp)
-                                .clickable(interactionSource = null, indication = ripple(bounded = false, radius = 36.dp)) { picking = true }
-                                .clearAndSetSemantics {
-                                    contentDescription = choose
-                                    role = Role.Button
-                                    onClick { picking = true; true }
-                                },
-                        ) {
-                            LockEmblem(open = false, Modifier.fillMaxSize(), iconSize = 28.dp, look = look, icon = icon)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        val choose = if (icon.isNullOrBlank()) {
+                            stringResource(R.string.private_cover_choose_emoji)
+                        } else {
+                            stringResource(R.string.private_cover_change_emoji, icon.orEmpty())
                         }
 
-                        Text(
-                            stringResource(R.string.private_cover_emoji),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.clearAndSetSemantics {},
+                        // The map's own lock, as its locked card will show it, named as the field beside it is: a tap chooses its emoji.
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Box(
+                                Modifier
+                                    .size(64.dp)
+                                    .clickable(interactionSource = null, indication = ripple(bounded = false, radius = 36.dp)) { picking = true }
+                                    .clearAndSetSemantics {
+                                        contentDescription = choose
+                                        role = Role.Button
+                                        onClick { picking = true; true }
+                                    },
+                            ) {
+                                LockEmblem(open = false, Modifier.fillMaxSize(), iconSize = 28.dp, look = look, icon = icon)
+                            }
+
+                            Text(
+                                stringResource(R.string.private_cover_emoji),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.clearAndSetSemantics {},
+                            )
+                        }
+
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it.take(COVER_NAME_LIMIT) },
+                            label = { Text(stringResource(R.string.private_cover_name)) },
+                            placeholder = { Text(stringResource(R.string.private_cover_name_example)) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { save(chosen()) }),
+                            modifier = Modifier.weight(1f),
                         )
                     }
-
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it.take(COVER_NAME_LIMIT) },
-                        label = { Text(stringResource(R.string.private_cover_name)) },
-                        placeholder = { Text(stringResource(R.string.private_cover_name_example)) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { save(chosen()) }),
-                        modifier = Modifier.weight(1f),
-                    )
                 }
-            }
-        },
-        confirmButton = { TextButton(onClick = { save(chosen()) }) { Text(stringResource(R.string.private_cover_save)) } },
-        dismissButton = {
-            Row {
-                if (current != null) {
-                    TextButton(onClick = { save(null) }) { Text(stringResource(R.string.private_cover_remove)) }
-                }
-
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) }
-            }
-        },
-    )
-
-    if (picking) {
-        EmojiPickerSheet(
-            title = stringResource(R.string.private_cover_emoji_title),
-            hasIcon = !icon.isNullOrBlank(),
-            onPick = { emoji ->
-                picking = false
-                icon = emoji
             },
-            onDismiss = { picking = false },
+            confirmButton = { TextButton(onClick = { save(chosen()) }) { Text(stringResource(R.string.private_cover_save)) } },
+            dismissButton = {
+                Row {
+                    if (current != null) {
+                        TextButton(onClick = { save(null) }) { Text(stringResource(R.string.private_cover_remove)) }
+                    }
+
+                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) }
+                }
+            },
         )
+
+        if (picking) {
+            EmojiPickerSheet(
+                title = stringResource(R.string.private_cover_emoji_title),
+                hasIcon = !icon.isNullOrBlank(),
+                onPick = { emoji ->
+                    picking = false
+                    icon = emoji
+                },
+                onDismiss = { picking = false },
+            )
+        }
     }
 }

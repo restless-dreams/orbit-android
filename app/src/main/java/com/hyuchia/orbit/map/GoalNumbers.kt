@@ -79,7 +79,12 @@ object GoalNumbers {
         return NumberReading.Number(tidy(value))
     }
 
-    /** A number's digits with `.` as its decimal point, or null when the text isn't a number. */
+    /**
+     * A number's digits with `.` as its decimal point, or null when the text
+     * isn't a number: the language's decimal point comes once, so 1.2.3 is
+     * none (rather than 12.3), and marks before it group the digits as
+     * people group them (see [ungrouped]).
+     */
     private fun plainNumber(text: String, decimal: Char, grouping: Char): String? {
         val marks = setOf(decimal, grouping, '.', ',')
 
@@ -91,12 +96,13 @@ object GoalNumbers {
 
         if (point >= 0) {
             val fraction = text.substring(point + 1)
+            val before = text.substring(0, point)
 
-            if (fraction.any { it !in '0'..'9' }) {
+            if (fraction.any { it !in '0'..'9' } || decimal in before) {
                 return null
             }
 
-            val whole = ungrouped(text.substring(0, point)) ?: return null
+            val whole = ungrouped(before) ?: return null
             return "${whole.ifEmpty { "0" }}.${fraction.ifEmpty { "0" }}"
         }
 
@@ -109,14 +115,28 @@ object GoalNumbers {
         return ungrouped(text)
     }
 
-    /** Digits grouped by marks (1,250,000, or 12,34,567 as in India), as plain digits; null when a mark has no digits on one side. */
+    /**
+     * Digits grouped by one mark, as plain digits: in threes (1,250,000), or
+     * in twos before the last three as in India (12,34,567), the first group
+     * no longer than the others. Null for marks anywhere else (1.2.3, 12,34,
+     * 1,2345), or two kinds of mark at once: a number typed another way,
+     * which reading would make another number.
+     */
     private fun ungrouped(text: String): String? {
         if (text.isEmpty()) {
             return ""
         }
 
         val groups = text.split(NOT_A_DIGIT)
-        return if (groups.any { it.isEmpty() }) null else groups.joinToString("")
+
+        if (groups.size == 1) {
+            return text
+        }
+
+        val inside = groups.subList(1, groups.size - 1)
+        val size = if (inside.isNotEmpty() && inside.all { it.length == 2 }) 2 else 3
+        val grouped = text.filterNot { it in '0'..'9' }.toSet().size == 1 && groups.first().length in 1..size && groups.last().length == 3 && inside.all { it.length == size }
+        return if (grouped) groups.joinToString("") else null
     }
 
     /** A number for a text field: the language's decimal point and no grouping, so it's easy to change. */

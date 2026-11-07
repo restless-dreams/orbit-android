@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Orbit, which the journeys open and send files and text to, as any app on the phone may. -->
+    <queries>
+        <package android:name="com.hyuchia.orbit" />
+    </queries>
+
+    <application>
+        <!-- The files the journeys open with Orbit and share to it, as another app's would come: content addresses, each lent for its intent. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.hyuchia.orbit.journeys.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/journey_files" />
+        </provider>
+    </application>
+</manifest>

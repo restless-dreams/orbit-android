@@ -6,8 +6,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 
 class FirstFramesTest {
@@ -22,6 +25,9 @@ class FirstFramesTest {
     }
 
     private fun picture(name: String, from: String = name) = File("src/test/resources/animations/$from").copyTo(File(media, name), overwrite = true)
+
+    /** What the map's page gets of a picture made in place of a map's file. */
+    private fun StandIn.bytes(): ByteArray = open()!!.use { it.readBytes() }
 
     @After
     fun clean() {
@@ -50,6 +56,8 @@ class FirstFramesTest {
         assertArrayEquals("frame of orbit.gif".toByteArray(), frames.of(gif)!!.readBytes())
         assertArrayEquals("frame of orbit.webp".toByteArray(), frames.of(webp)!!.readBytes())
         assertEquals(frames.of(gif), frames.of(gif))
+        // The map's page gets the same file the cache keeps.
+        assertArrayEquals(frames.of(gif)!!.readBytes(), frames.standIn(gif)!!.bytes())
         assertEquals(listOf("orbit.gif", "orbit.webp"), made)
     }
 
@@ -79,6 +87,35 @@ class FirstFramesTest {
 
         gif.delete()
         assertNull(frames.of(gif))
+    }
+
+    @Test
+    fun `a first frame or a HEIC picture's JPEG the cache can't keep, full or unwritable, still goes to the map's page, made each time`() {
+        // Where the cache's folder would be, there's a file: nothing can be written there, as on a full disk.
+        val cache = File(folder, "full").apply { writeText("") }
+        val drawn = mutableListOf<String>()
+        val full = FirstFrames(cache, drawn = { file -> drawn += file.name; "jpeg of ${file.name}".toByteArray() }) { file -> made += file.name; "frame of ${file.name}".toByteArray() }
+        val gif = picture("orbit.gif")
+        val heic = File("src/test/resources/live/iphone-live.heic").copyTo(File(media, "picture-1.heic"))
+
+        val frame = full.standIn(gif)!!
+        assertArrayEquals("frame of orbit.gif".toByteArray(), frame.bytes())
+        assertEquals("png", frame.name.substringAfterLast('.'))
+        assertEquals("frame of orbit.gif".length.toLong(), frame.length)
+        assertArrayEquals("jpeg of picture-1.heic".toByteArray(), full.standIn(heic)!!.bytes())
+        // Nothing was kept, so each is made again when it's asked for again.
+        assertArrayEquals("frame of orbit.gif".toByteArray(), full.standIn(gif)!!.bytes())
+        assertEquals(listOf("orbit.gif", "orbit.gif"), made)
+        assertEquals(listOf("picture-1.heic"), drawn)
+        assertTrue(cache.isFile)
+
+        // What keeps a file, as a web page's pictures do, hears that it couldn't, and sends the picture as it is.
+        try {
+            full.of(heic)
+            fail("A picture that can't be kept has no file")
+        } catch (unkept: IOException) {
+            // As WebPage's pictures expect.
+        }
     }
 
     @Test

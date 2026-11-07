@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Files on ideas: PDFs, documents, spreadsheets, any file an idea holds, opened in another app. See TRANSLATING.md. -->
+<resources>
+    <string name="files_title">Archivos</string>
+    <string name="files_add">Agregar archivos</string>
+    <string name="files_add_a_file">Agregar un archivo</string>
+    <string name="files_open_in_another_app">Abrir en otra app</string>
+    <string name="files_remove">Quitar %1$s</string>
+    <string name="files_removed">Se quitó “%1$s”</string>
+    <plurals name="files_added">
+        <item quantity="one">Se agregó un archivo a “%1$s”</item>
+        <item quantity="many">Se agregaron %2$d archivos a “%1$s”</item>
+        <item quantity="other">Se agregaron %2$d archivos a “%1$s”</item>
+    </plurals>
+    <string name="files_copying">Copiando %1$s…</string>
+    <plurals name="files_left">
+        <item quantity="one">%1$d más después</item>
+        <item quantity="many">%1$d más después</item>
+        <item quantity="other">%1$d más después</item>
+    </plurals>
+
+    <string name="files_open_title">¿Abrir “%1$s” en otra app?</string>
+    <string name="files_open_text">Llega a esa app tal como está. Orbit no puede quitar lo que un archivo así puede decir además de lo que muestra, como quién lo hizo, cuándo y dónde.</string>
+    <string name="files_open_text_private">Llega a esa app tal como está. Orbit no puede quitar lo que un archivo así puede decir además de lo que muestra, como quién lo hizo, cuándo y dónde. La copia que lee esa app se borra cuando este mapa privado se bloquea.</string>
+    <string name="files_open">Abrir</string>
+    <string name="files_no_app">Ninguna app de este dispositivo abre un archivo así (%1$s).</string>
+    <string name="files_open_failed">No se pudo abrir ese archivo.</string>
+    <string name="files_missing">Ese archivo no está en este dispositivo.</string>
+    <string name="files_not_here">No está en este dispositivo</string>
+    <string name="files_unreadable">No se pudo copiar ese archivo.</string>
+
+    <string name="files_kind_pdf">PDF</string>
+    <string name="files_kind_document">Documento</string>
+    <string name="files_kind_spreadsheet">Hoja de cálculo</string>
+    <string name="files_kind_presentation">Presentación</string>
+    <string name="files_kind_picture">Imagen</string>
+    <string name="files_kind_video">Video</string>
+    <string name="files_kind_sound">Audio</string>
+    <string name="files_kind_archive">Archivo comprimido</string>
+    <string name="files_kind_text">Texto</string>
+    <string name="files_kind_other">Archivo</string>
+
+    <string name="data_file_too_big">Ese archivo pesa %1$s, y un mapa guarda archivos de hasta %2$s para que pueda seguir llegando a tus otros dispositivos.</string>
+    <string name="data_file_past_limit">Ese archivo pesa más de %1$s, y un mapa guarda archivos de hasta eso para que pueda seguir llegando a tus otros dispositivos.</string>
+    <string name="data_file_past_map_room">Las imágenes, los videos, los audios y los archivos de este mapa ya suman %1$s. Con este archivo pasarían del máximo de %2$s que un mapa puede llevar al compartirse o respaldarse.</string>
+    <string name="data_no_room_for_file">No hay espacio en este dispositivo para ese archivo.</string>
+</resources>

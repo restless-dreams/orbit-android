@@ -87,15 +87,16 @@ internal object QuickTimeMovies {
         val format = sampleFormat(bytes, table) ?: return null
         val offsets = chunkTable(bytes, table)?.entries ?: return null
         val runs = chunkRuns(bytes, table) ?: return null
-        // The track's samples, each as many frames as the format says.
+        // The track's samples: each a frame where they last a tick each, as QuickTime long counted uncompressed sound, else a packet of the format's frames.
+        val framesPerSample = if (firstSampleTicks(bytes, table) == 1L) 1L else format.framesPerPacket
         val count = bytes.read((child(bytes, table, "stsz") ?: return null).body + 8, 4).takeIf { it.size == 4 }?.unsigned(0, 4) ?: return null
         val frameBytes = format.channels * format.bits / 8
-        var frames = count * format.framesPerSample
+        var frames = count * framesPerSample
         val sound = ByteArrayOutputStream()
 
         for ((index, offset) in offsets.withIndex()) {
             // Each run of chunks holds as many samples, from its first chunk (counted from 1) to the next run's.
-            val inChunk = minOf(runs.last { it.first <= index + 1 }.second * format.framesPerSample, frames)
+            val inChunk = minOf(runs.last { it.first <= index + 1 }.second * framesPerSample, frames)
 
             if (inChunk <= 0) {
                 break
@@ -118,14 +119,15 @@ internal object QuickTimeMovies {
         return Pcm(sound.toByteArray(), format.rate, format.channels).takeIf { it.samples.isNotEmpty() }
     }
 
-    /** How a track's samples are written: their rate and channels, their bits, whether they're floats or big-endian, and frames to a sample. */
-    private class SampleFormat(val rate: Int, val channels: Int, val bits: Int, val float: Boolean, val bigEndian: Boolean, val framesPerSample: Long)
+    /** How a track's samples are written: their rate and channels, their bits, whether they're floats or big-endian, and the frames in a packet. */
+    private class SampleFormat(val rate: Int, val channels: Int, val bits: Int, val float: Boolean, val bigEndian: Boolean, val framesPerPacket: Long)
 
     /**
      * The sound's format, from its sample description: QuickTime's first two
      * versions give the channels, bits and rate in 16 bits each (the second
-     * adds what a packet holds); the third gives them in fields of their own,
-     * after the first version's, with flags for floats and byte order.
+     * adds what a packet holds, its frames first); the third gives them in
+     * fields of their own, after the first version's, with flags for floats
+     * and byte order, and a packet's frames last.
      */
     private fun sampleFormat(bytes: Bytes, table: IsoBox): SampleFormat? {
         val descriptions = child(bytes, table, "stsd") ?: return null
@@ -137,7 +139,7 @@ internal object QuickTimeMovies {
             return null
         }
 
-        val format = when (fields.unsigned(8, 2).toInt()) {
+        val format = when (val version = fields.unsigned(8, 2).toInt()) {
             2 -> {
                 if (fields.size < DESCRIPTION_BYTES) {
                     return null
@@ -149,7 +151,10 @@ internal object QuickTimeMovies {
                 val rate = Double.fromBits(fields.unsigned(32, 8))
                 SampleFormat(rate.toInt(), fields.unsigned(40, 4).toInt(), fields.unsigned(48, 4).toInt(), float, bigEndian, fields.unsigned(60, 4).coerceAtLeast(1))
             }
-            else -> SampleFormat((fields.unsigned(24, 4) shr 16).toInt(), fields.unsigned(16, 2).toInt(), fields.unsigned(18, 2).toInt(), false, entry.type == "twos", 1)
+            else -> {
+                val framesPerPacket = if (version == 1 && fields.size >= SECOND_VERSION_BYTES) fields.unsigned(28, 4).coerceAtLeast(1) else 1
+                SampleFormat((fields.unsigned(24, 4) shr 16).toInt(), fields.unsigned(16, 2).toInt(), fields.unsigned(18, 2).toInt(), false, entry.type == "twos", framesPerPacket)
+            }
         }
 
         val known = if (format.float) format.bits == 32 || format.bits == 64 else format.bits in setOf(8, 16, 24, 32)
@@ -221,6 +226,18 @@ internal object QuickTimeMovies {
         return (0 until count.toInt()).map { entries.unsigned(it * 12, 4) to entries.unsigned(it * 12 + 4, 4) }.takeIf { it.first().first == 1L }
     }
 
+    /**
+     * How many ticks of its time scale a track's first sample lasts, from its
+     * `stts`: 1 where its uncompressed sound is counted a frame at a time, as
+     * QuickTime long wrote it, whatever a packet holds. Null without one.
+     */
+    private fun firstSampleTicks(bytes: Bytes, table: IsoBox): Long? {
+        val box = child(bytes, table, "stts") ?: return null
+        // Its version and flags, how many runs of samples it has, then the first run's samples and how long each lasts.
+        val first = bytes.read(box.body + 4, 12).takeIf { it.size == 12 && box.body + 16 <= box.end } ?: return null
+        return first.unsigned(8, 4).takeIf { first.unsigned(0, 4) > 0 }
+    }
+
     private fun child(bytes: Bytes, parent: IsoBox, type: String): IsoBox? = IsoBoxes.children(bytes, parent)?.firstOrNull { it.type == type }
 
     /** The `ftyp` a QuickTime movie starts with: QuickTime's brand, version 0, and QuickTime as what it's compatible with. */
@@ -231,8 +248,10 @@ internal object QuickTimeMovies {
     /** The kinds of uncompressed sound QuickTime describes. */
     private val UNCOMPRESSED = setOf("lpcm", "sowt", "twos")
 
-    /** A sound description's fields: QuickTime's first version's, and the third's. */
+    /** A sound description's fields: QuickTime's first version's, the second's, and the third's. */
     private const val FIRST_VERSION_BYTES = 28
+
+    private const val SECOND_VERSION_BYTES = 44
 
     private const val DESCRIPTION_BYTES = 64
 

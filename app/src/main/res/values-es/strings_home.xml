@@ -17,6 +17,19 @@
         <item quantity="many">La etiqueta se queda en %1$d mapas que Orbit solo puede mostrar: los hizo una versión más reciente o no puede leerlos todos.</item>
         <item quantity="other">La etiqueta se queda en %1$d mapas que Orbit solo puede mostrar: los hizo una versión más reciente o no puede leerlos todos.</item>
     </plurals>
+    <string name="home_tag_stays_on_map_only_shown">La etiqueta se queda en “%1$s”, que Orbit solo puede mostrar: lo hizo una versión más reciente o no puede leerlo todo.</string>
+    <string name="home_tag_stays_on_map_not_saved">La etiqueta se queda en “%1$s”: Orbit no pudo guardar el cambio. ¿Está lleno el almacenamiento de este dispositivo?</string>
+    <plurals name="home_tag_stays_on_maps_not_saved">
+        <item quantity="one">La etiqueta se queda en %1$d mapa: Orbit no pudo guardar el cambio. ¿Está lleno el almacenamiento de este dispositivo?</item>
+        <item quantity="many">La etiqueta se queda en %1$d mapas: Orbit no pudo guardar el cambio. ¿Está lleno el almacenamiento de este dispositivo?</item>
+        <item quantity="other">La etiqueta se queda en %1$d mapas: Orbit no pudo guardar el cambio. ¿Está lleno el almacenamiento de este dispositivo?</item>
+    </plurals>
+    <string name="home_tag_stays_on_map_not_changed">La etiqueta se queda en “%1$s”: Orbit no pudo cambiarlo. Vuelve a intentarlo.</string>
+    <plurals name="home_tag_stays_on_maps_not_changed">
+        <item quantity="one">La etiqueta se queda en %1$d mapa: Orbit no pudo cambiarlo. Vuelve a intentarlo.</item>
+        <item quantity="many">La etiqueta se queda en %1$d mapas: Orbit no pudo cambiarlos. Vuelve a intentarlo.</item>
+        <item quantity="other">La etiqueta se queda en %1$d mapas: Orbit no pudo cambiarlos. Vuelve a intentarlo.</item>
+    </plurals>
     <string name="home_pinned_maps">Fijados</string>
     <string name="home_everything_else">Todo lo demás</string>
     <string name="home_clear_the_search">Borrar la búsqueda</string>

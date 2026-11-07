@@ -118,6 +118,29 @@
         "amount": 25.5
       },
       {
+        "type": "checkNote",
+        "id": "tokyo",
+        "line": 2,
+        "checked": true
+      },
+      {
+        "type": "addFiles",
+        "id": "tokyo",
+        "files": [
+          {
+            "src": "media/file-hotel.pdf",
+            "name": "Hotel: booking, final.pdf",
+            "type": "application/pdf",
+            "size": 1250000
+          }
+        ]
+      },
+      {
+        "type": "removeFile",
+        "id": "tokyo",
+        "src": "media/file-rail-pass.pdf"
+      },
+      {
         "type": "remove",
         "id": "tokyo"
       },
@@ -289,6 +312,10 @@
         ]
       },
       {
+        "type": "cancel",
+        "job": 3
+      },
+      {
         "type": "hideChildren",
         "ids": [
           "trip-to-japan",
@@ -298,6 +325,25 @@
       {
         "type": "revealChildren",
         "ids": null
+      },
+      {
+        "type": "spotlight",
+        "id": "tokyo",
+        "insets": {
+          "top": 64,
+          "right": 0,
+          "bottom": 112,
+          "left": 0
+        },
+        "share": null
+      },
+      {
+        "type": "endSpotlight"
+      },
+      {
+        "type": "pictureShown",
+        "job": 14,
+        "src": "media/sketch-m4k2x9.svg"
       }
     ],
     "messages": [
@@ -321,6 +367,7 @@
               "drawnColor": "var(--_orbit-color-0)",
               "status": null,
               "priority": null,
+              "due": null,
               "tags": [],
               "collapsed": false,
               "type": null,
@@ -332,7 +379,8 @@
               "video": null,
               "embed": null,
               "attrs": null,
-              "audio": null
+              "audio": null,
+              "files": []
             },
             {
               "id": "tokyo",
@@ -346,6 +394,7 @@
               "drawnColor": "#e91e63",
               "status": "todo",
               "priority": 2,
+              "due": "2027-04-02 09:30",
               "tags": [
                 "city"
               ],
@@ -387,7 +436,21 @@
                 "provider": null,
                 "thumbnail": null,
                 "motion": null
-              }
+              },
+              "files": [
+                {
+                  "src": "media/file-rail-pass.pdf",
+                  "name": "Rail pass.pdf",
+                  "type": "application/pdf",
+                  "size": 48213
+                },
+                {
+                  "src": "media/budget.xlsx",
+                  "name": null,
+                  "type": null,
+                  "size": null
+                }
+              ]
             },
             {
               "id": "someday",
@@ -401,6 +464,7 @@
               "drawnColor": "var(--_orbit-color-1)",
               "status": null,
               "priority": -2147483648,
+              "due": null,
               "tags": [],
               "collapsed": false,
               "type": "goal",
@@ -412,7 +476,8 @@
               "video": null,
               "embed": null,
               "attrs": null,
-              "audio": null
+              "audio": null,
+              "files": []
             }
           ],
           "options": {
@@ -461,6 +526,7 @@
               "drawnColor": "var(--_orbit-color-0)",
               "status": null,
               "priority": null,
+              "due": null,
               "tags": [],
               "collapsed": false,
               "type": null,
@@ -472,7 +538,8 @@
               "video": null,
               "embed": null,
               "attrs": null,
-              "audio": null
+              "audio": null,
+              "files": []
             },
             {
               "id": "tokyo",
@@ -486,6 +553,7 @@
               "drawnColor": "#e91e63",
               "status": "todo",
               "priority": 2,
+              "due": "2027-04-02 09:30",
               "tags": [
                 "city"
               ],
@@ -527,7 +595,21 @@
                 "provider": null,
                 "thumbnail": null,
                 "motion": null
-              }
+              },
+              "files": [
+                {
+                  "src": "media/file-rail-pass.pdf",
+                  "name": "Rail pass.pdf",
+                  "type": "application/pdf",
+                  "size": 48213
+                },
+                {
+                  "src": "media/budget.xlsx",
+                  "name": null,
+                  "type": null,
+                  "size": null
+                }
+              ]
             },
             {
               "id": "someday",
@@ -541,6 +623,7 @@
               "drawnColor": "var(--_orbit-color-1)",
               "status": null,
               "priority": -2147483648,
+              "due": null,
               "tags": [],
               "collapsed": false,
               "type": "goal",
@@ -552,7 +635,8 @@
               "video": null,
               "embed": null,
               "attrs": null,
-              "audio": null
+              "audio": null,
+              "files": []
             }
           ],
           "options": {
@@ -606,6 +690,7 @@
               "drawnColor": "var(--_orbit-color-0)",
               "status": null,
               "priority": null,
+              "due": null,
               "tags": [],
               "collapsed": false,
               "type": null,
@@ -617,7 +702,8 @@
               "video": null,
               "embed": null,
               "attrs": null,
-              "audio": null
+              "audio": null,
+              "files": []
             },
             {
               "id": "tokyo",
@@ -631,6 +717,7 @@
               "drawnColor": "#e91e63",
               "status": "todo",
               "priority": 2,
+              "due": "2027-04-02 09:30",
               "tags": [
                 "city"
               ],
@@ -672,7 +759,21 @@
                 "provider": null,
                 "thumbnail": null,
                 "motion": null
-              }
+              },
+              "files": [
+                {
+                  "src": "media/file-rail-pass.pdf",
+                  "name": "Rail pass.pdf",
+                  "type": "application/pdf",
+                  "size": 48213
+                },
+                {
+                  "src": "media/budget.xlsx",
+                  "name": null,
+                  "type": null,
+                  "size": null
+                }
+              ]
             },
             {
               "id": "someday",
@@ -686,6 +787,7 @@
               "drawnColor": "var(--_orbit-color-1)",
               "status": null,
               "priority": -2147483648,
+              "due": null,
               "tags": [],
               "collapsed": false,
               "type": "goal",
@@ -697,7 +799,8 @@
               "video": null,
               "embed": null,
               "attrs": null,
-              "audio": null
+              "audio": null,
+              "files": []
             }
           ],
           "options": {
@@ -807,6 +910,15 @@
       {
         "type": "dragOut",
         "id": "tokyo"
+      },
+      {
+        "type": "spotlight",
+        "id": "tokyo",
+        "phase": "rest",
+        "x": 180,
+        "y": 271.5,
+        "radius": 154.8,
+        "scrim": "rgba(15, 23, 42, 0.45)"
       }
     ]
   },

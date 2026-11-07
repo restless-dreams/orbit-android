@@ -5,6 +5,7 @@
     <string name="shortcut_new_map_long">Start a new map</string>
     <string name="share_new_map">New Orbit map</string>
     <string name="share_add_to_map">Add to an Orbit map</string>
+    <string name="share_attach_to_idea">Attach to an Orbit idea</string>
     <string name="capture_label">Add an idea</string>
     <!-- The Quick Settings tile's label: short, since a tile cuts what doesn't fit beside its icon. -->
     <string name="tile_capture">Add an idea</string>

@@ -230,6 +230,28 @@ class FolderSyncTest {
     }
 
     @Test
+    fun `a file that holds the text this device was writing to it is its own, not a change from elsewhere`() {
+        // Written, but not seen there whole yet, as when reading it back failed: the record still says it's being written.
+        val record = SyncRecord(folder, "Plan.md", digest("# Plan"), 1, 1, writing = digest("# Plan\n- Sent"))
+        val there = file("Plan.md", "# Plan\n- Sent")
+
+        // Changed again since: its file takes its text, rather than both being kept.
+        assertEquals(listOf(SyncStep.Write("plan", "Plan.md")), planSync(folder, listOf(LocalMap("plan", digest("# Plan\n- Again"), record)), listOf(there), emptyList()))
+        // Not changed since: the record catches up.
+        assertEquals(listOf(SyncStep.Link("plan", there)), planSync(folder, listOf(LocalMap("plan", digest("# Plan\n- Sent"), record)), listOf(there), emptyList()))
+        // Renamed in the folder since, it's still the map's.
+        val renamed = file("Bakery plan.md", "# Plan\n- Sent")
+        val trip = map("trip", "# Trip", file = "Trip.md")
+        val steps = planSync(folder, listOf(LocalMap("plan", digest("# Plan\n- Again"), record), trip), listOf(renamed, file("Trip.md", null)), emptyList())
+        assertEquals(listOf(SyncStep.Link("plan", renamed), SyncStep.Write("plan", "Bakery plan.md")), steps)
+        // Deleted here, its file goes with it.
+        assertEquals(listOf(SyncStep.DeleteFile(record)), planSync(folder, emptyList(), listOf(there), listOf(record)))
+        // Anyone else's text there is still a change from elsewhere.
+        val other = file("Plan.md", "# Plan\n- From the laptop")
+        assertEquals(listOf(SyncStep.KeepBoth("plan", other)), planSync(folder, listOf(LocalMap("plan", digest("# Plan\n- Again"), record)), listOf(other), emptyList()))
+    }
+
+    @Test
     fun `file names follow titles, without what files can't hold, and never repeat`() {
         assertEquals("Bakery relaunch.md", MapText.fileName("Bakery relaunch", emptyList(), words))
         assertEquals("Q3 plan v2.md", MapText.fileName("Q3: plan/v2", emptyList(), words))

@@ -13,8 +13,9 @@ import java.security.MessageDigest
 /**
  * iPhones' movies as Android's reader can't take them, made small by
  * `scripts/live-photos/make-samples.py` in `resources/live/`: one as newer
- * iPhones write it, and one as older ones do, without an `ftyp` and with its
- * sound described as `lpcm`.
+ * iPhones write it, one as older ones do, without an `ftyp` and with its
+ * sound described as `lpcm`, and the first with its sound described in
+ * QuickTime's second version, four frames to a packet.
  */
 class QuickTimeMoviesTest {
     private fun sample(name: String) = File(javaClass.getResource("/live/$name")!!.toURI())
@@ -55,6 +56,18 @@ class QuickTimeMoviesTest {
         assertEquals("042d9b75969efa68f6aea78c381fba8a", md5(sowt.samples))
         assertArrayEquals(sowt.samples, lpcm.samples)
         assertEquals(8000, lpcm.rate)
+    }
+
+    @Test
+    fun `sound described in QuickTime's second version reads whole, its samples counted a packet of frames at a time or a frame at a time`() {
+        val whole = QuickTimeMovies.sound(sample("iphone-live.mov"))!!.samples
+        // Each of the track's samples a packet of four frames, lasting four ticks: every frame, in order, as ffmpeg decodes them.
+        val packets = QuickTimeMovies.sound(sample("iphone-live-packets.mov"))!!
+        assertEquals(12_000 * 2, packets.samples.size)
+        assertEquals("042d9b75969efa68f6aea78c381fba8a", md5(packets.samples))
+        assertEquals(8000, packets.rate)
+        // The same description with the samples counted a frame at a time, as QuickTime long wrote uncompressed sound.
+        assertArrayEquals(whole, QuickTimeMovies.sound(sample("iphone-live-frames.mov"))!!.samples)
     }
 
     @Test

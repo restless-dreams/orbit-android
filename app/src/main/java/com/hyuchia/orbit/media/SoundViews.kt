@@ -71,12 +71,15 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -464,15 +467,29 @@ fun SoundPage(item: GalleryItem, sound: SoundState?, controls: SoundControls, so
 /** A page shorter than this, wider than tall, is a phone on its side. */
 private val SidewaysPage = 500.dp
 
-/** Ten seconds back, play and pause, and ten on, with the sound's switch beside them. */
+/** The room between the sound's buttons, where there's room. */
+private val SoundButtonGap = 20.dp
+
+/** The least room between them, as a narrow window closes it up. */
+private val SoundButtonLeastGap = 4.dp
+
+/**
+ * Ten seconds back, play and pause, and ten on, with the sound's switch
+ * beside them: play in the middle, under the sound's name and time, and the
+ * switch at the end. A narrower window closes up the room between them, and
+ * one too narrow for that has all four in a row, so none ever covers
+ * another.
+ */
 @Composable
-private fun SoundButtons(item: GalleryItem, state: SoundState?, controls: SoundControls) {
+internal fun SoundButtons(item: GalleryItem, state: SoundState?, controls: SoundControls) {
     val seconds = (SOUND_SKIP_MILLISECONDS / 1_000).toInt()
     val back = pluralStringResource(R.plurals.media_seek_back, seconds, seconds)
     val forward = pluralStringResource(R.plurals.media_seek_forward, seconds, seconds)
+    val muted = state?.muted == true
+    val switch = stringResource(if (muted) R.string.audio_unmute else R.string.audio_mute)
 
-    Box(Modifier.fillMaxWidth()) {
-        Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.align(Alignment.Center)) {
+    Layout(
+        content = {
             Hint(back) {
                 IconButton(onClick = { controls.skip(-SOUND_SKIP_MILLISECONDS) }, enabled = state != null, modifier = Modifier.size(56.dp)) {
                     Icon(Icons.Rounded.Replay10, contentDescription = back, modifier = Modifier.size(32.dp))
@@ -493,15 +510,42 @@ private fun SoundButtons(item: GalleryItem, state: SoundState?, controls: SoundC
                     Icon(Icons.Rounded.Forward10, contentDescription = forward, modifier = Modifier.size(32.dp))
                 }
             }
-        }
 
-        val muted = state?.muted == true
-        val switch = stringResource(if (muted) R.string.audio_unmute else R.string.audio_mute)
-
-        Box(Modifier.align(Alignment.CenterEnd)) {
             Hint(switch) {
                 IconButton(onClick = controls::toggleMute, enabled = state != null, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                     Icon(if (muted) Icons.AutoMirrored.Rounded.VolumeOff else Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = switch)
+                }
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    ) { measurables, constraints ->
+        val buttons = measurables.map { it.measure(Constraints()) }
+        val (backButton, playButton, forwardButton, muteButton) = buttons
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else buttons.sumOf { it.width } + 3 * SoundButtonGap.roundToPx()
+        val rowHeight = buttons.maxOf { it.height }
+        val gap = SoundButtonGap.roundToPx()
+        val least = SoundButtonLeastGap.roundToPx()
+        // Play in the middle, with the room between it and the skips that leaves the switch its own at the end.
+        val beside = minOf(gap, width / 2 - playButton.width / 2 - forwardButton.width - muteButton.width - least)
+
+        layout(width, rowHeight) {
+            fun Placeable.placeAt(x: Int) = placeRelative(x, (rowHeight - height) / 2)
+
+            if (beside >= least) {
+                val start = width / 2 - playButton.width / 2 - beside - backButton.width
+                backButton.placeAt(start)
+                playButton.placeAt(start + backButton.width + beside)
+                forwardButton.placeAt(start + backButton.width + beside + playButton.width + beside)
+                muteButton.placeAt(width - muteButton.width)
+            } else {
+                // Too narrow for that: the four in a row, as close as they must be, the row in the middle.
+                val row = buttons.sumOf { it.width }
+                val between = ((width - row) / 3).coerceIn(0, gap)
+                var x = ((width - row - 3 * between) / 2).coerceAtLeast(0)
+
+                for (button in buttons) {
+                    button.placeAt(x)
+                    x += button.width + between
                 }
             }
         }

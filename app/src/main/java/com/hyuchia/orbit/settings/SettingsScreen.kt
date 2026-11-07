@@ -168,6 +168,9 @@ fun SettingsScreen(onAbout: () -> Unit, onTrash: () -> Unit, onBack: () -> Unit)
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).widthIn(max = 420.dp).fillMaxWidth(),
             )
 
+            Heading(stringResource(R.string.settings_reminders_heading))
+            RemindersSetting(settings, ::change)
+
             Heading(stringResource(R.string.settings_nearby_devices))
 
             Toggle(

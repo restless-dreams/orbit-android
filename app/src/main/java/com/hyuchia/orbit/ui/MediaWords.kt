@@ -4,7 +4,7 @@ import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.data.MediaSummary
 import com.hyuchia.orbit.data.Uncleaned
-import com.hyuchia.orbit.data.megabytes
+import com.hyuchia.orbit.data.readableSize
 import java.util.Locale
 
 /**
@@ -28,6 +28,7 @@ object MediaWords {
             livePhotos.takeIf { it > 0 }?.let { words.plural(R.plurals.sharing_live_photos, it, it) },
             media.videos.takeIf { it > 0 }?.let { words.plural(R.plurals.sharing_videos, it, it) },
             media.audio.takeIf { it > 0 }?.let { words.plural(R.plurals.sharing_audio, it, it) },
+            media.files.takeIf { it > 0 }?.let { words.plural(R.plurals.sharing_files, it, it) },
         )
     }
 
@@ -44,7 +45,7 @@ object MediaWords {
         media.takeIf { !it.isEmpty }?.let { words.string(R.string.sharing_with, list(it, words), size(it.bytes, words)) }
 
     /** A size as people read it, "12.4 MB", that never breaks between the number and its unit. */
-    fun size(bytes: Long, words: Words): String = megabytes(bytes, words).replace(' ', '\u00A0')
+    fun size(bytes: Long, words: Words): String = readableSize(bytes, words)
 
     /**
      * "With 3 pictures, a live photo and an audio file inside": a page's
@@ -88,6 +89,7 @@ object MediaWords {
             Made.Taken -> if (asTheyAre) R.plurals.sharing_uncleaned_go_taken else R.plurals.sharing_uncleaned_stay_taken
             Made.Recorded -> if (asTheyAre) R.plurals.sharing_uncleaned_go_recorded else R.plurals.sharing_uncleaned_stay_recorded
             Made.TakenOrRecorded -> if (asTheyAre) R.plurals.sharing_uncleaned_go_taken_or_recorded else R.plurals.sharing_uncleaned_stay_taken_or_recorded
+            Made.Unknown -> if (asTheyAre) R.plurals.sharing_uncleaned_go_hidden else R.plurals.sharing_uncleaned_stay_hidden
         }
 
         return capitalized(words.plural(resource, count, list), words)
@@ -102,7 +104,7 @@ object MediaWords {
     fun uncleanedList(files: Uncleaned, words: Words): Pair<String, Int>? {
         val livePhotos = files.livePhotos
         val motions = files.motions.size - livePhotos
-        val media = MediaSummary(pictures = files.pictures.size, videos = files.videos.size, audio = files.sounds.size, motions = livePhotos)
+        val media = MediaSummary(pictures = files.pictures.size, videos = files.videos.size, audio = files.sounds.size, motions = livePhotos, files = files.files.size)
         val count = media.count + motions
 
         if (count == 0) {
@@ -113,19 +115,24 @@ object MediaWords {
         return joined(named, words) to count
     }
 
-    /** How files that can't go clean were made: what the words say would go with them. */
+    /**
+     * How files that can't go clean were made: what the words say would go
+     * with them. With ideas' files among them, which may say anything of who
+     * made them, when and where, the words say that, for all of them.
+     */
     fun how(files: Uncleaned): Made {
         val recorded = files.videos.isNotEmpty() || files.sounds.isNotEmpty() || files.motions.size > files.livePhotos
 
         return when {
+            files.files.isNotEmpty() -> Made.Unknown
             files.pictures.isNotEmpty() && recorded -> Made.TakenOrRecorded
             files.pictures.isNotEmpty() -> Made.Taken
             else -> Made.Recorded
         }
     }
 
-    /** How a file was made, as the words name it: a picture taken, or a video or sound recorded. */
-    enum class Made { Taken, Recorded, TakenOrRecorded }
+    /** How a file was made, as the words name it: a picture taken, a video or sound recorded, or an idea's file, made who knows how. */
+    enum class Made { Taken, Recorded, TakenOrRecorded, Unknown }
 
     /** File types as a list: ".mp3", ".mp3 and .ogg", ".mp3, .ogg and .opus". */
     fun types(extensions: Collection<String>, words: Words): String {

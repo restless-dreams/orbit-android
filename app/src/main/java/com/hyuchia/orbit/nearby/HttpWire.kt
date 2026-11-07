@@ -2,6 +2,7 @@ package com.hyuchia.orbit.nearby
 
 import com.hyuchia.orbit.data.readUpTo
 import java.io.ByteArrayOutputStream
+import java.io.EOFException
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -157,6 +158,54 @@ private fun copyExactly(input: InputStream, output: OutputStream, length: Long):
     return true
 }
 
+/**
+ * A request's body that stopped coming before its end: its connection
+ * ended, or failed, as it was read. Nothing about what it held, which may
+ * come whole in another request.
+ */
+internal class BodyCutShortException(message: String, cause: Throwable? = null) : IOException(message, cause)
+
+/**
+ * A body read as it arrives on `input`: exactly `length` bytes, then its
+ * end, whatever follows on the connection. One whose connection ends or
+ * fails first throws [BodyCutShortException] where it stops, so it's never
+ * taken for a whole body, nor for one that holds something wrong.
+ */
+internal class BodyInput(private val input: InputStream, private var left: Long) : InputStream() {
+    override fun read(): Int {
+        val one = ByteArray(1)
+        return if (read(one, 0, 1) < 0) -1 else one[0].toInt() and 0xFF
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        if (left <= 0) {
+            return -1
+        }
+
+        if (length == 0) {
+            return 0
+        }
+
+        val count = try {
+            input.read(buffer, offset, minOf(length.toLong(), left).toInt())
+        } catch (failed: IOException) {
+            throw BodyCutShortException("The connection failed $left bytes before the body's end", failed)
+        }
+
+        if (count < 0) {
+            throw BodyCutShortException("The body ended $left bytes early", EOFException())
+        }
+
+        left -= count
+        return count
+    }
+
+    override fun available(): Int = minOf(input.available().toLong(), left).toInt()
+
+    /** The connection is the server's: it closes it once it has answered. */
+    override fun close() = Unit
+}
+
 /** The request line and headers, up to the blank line after them. */
 internal fun readHead(input: InputStream): String? {
     val head = ByteArrayOutputStream()
@@ -218,5 +267,5 @@ internal val REASONS = mapOf(
     200 to "OK", 206 to "Partial Content", 302 to "Found", 303 to "See Other", 400 to "Bad Request", 403 to "Forbidden",
     404 to "Not Found", 405 to "Method Not Allowed", 409 to "Conflict", 410 to "Gone", 413 to "Payload Too Large",
     416 to "Range Not Satisfiable", 421 to "Misdirected Request", 429 to "Too Many Requests", 500 to "Internal Server Error",
-    503 to "Service Unavailable",
+    503 to "Service Unavailable", 507 to "Insufficient Storage",
 )

@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -43,15 +44,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.page.PictureRequest
 import com.hyuchia.orbit.page.ViewMode
+import com.hyuchia.orbit.theme.MapPalette
 import com.hyuchia.orbit.theme.MapPalettes
 import com.hyuchia.orbit.theme.MapStyle
 import com.hyuchia.orbit.theme.MapStyles
@@ -105,35 +110,7 @@ fun StylePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
                 }
             }
 
-            Column(Modifier.padding(horizontal = 24.dp).selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(stringResource(R.string.map_colors), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-
-                MapPalettes.forEach { palette ->
-                    val hexes = palette.colors?.map { it.hex() }
-                    val selected = options?.palette?.map { it.uppercase() } == hexes
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .border(2.dp, if (selected) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(16.dp))
-                            .selectable(selected = selected, role = Role.RadioButton) {
-                                set("palette", hexes?.let { JsonArray(it.map(::JsonPrimitive)) })
-                            }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                    ) {
-                        Text(stringResource(palette.nameResource), style = MaterialTheme.typography.bodyLarge, modifier = if (palette.colors == null) Modifier.weight(1f) else Modifier.width(120.dp))
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            (palette.colors ?: emptyList()).forEach { color ->
-                                Box(Modifier.size(22.dp).background(color, CircleShape).border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape))
-                            }
-                        }
-                    }
-                }
-            }
+            PaletteRows(options?.palette) { palette -> set("palette", palette.colors?.map { it.hex() }?.let { hexes -> JsonArray(hexes.map(::JsonPrimitive)) }) }
 
             Column(Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.map_layout), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
@@ -192,6 +169,88 @@ fun StylePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
 
                     (1..4).forEach { depth ->
                         FilterChip(selected = options?.maxDepth == depth, onClick = { set("maxDepth", JsonPrimitive(depth)) }, label = { Text("$depth") })
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A swatch of a color set at its full size, and the room between two. */
+private val SwatchSize = 22.dp
+private val SwatchGap = 6.dp
+
+/** The least a swatch and the room between two come to on a narrow window, as a row's name takes what it needs. */
+private val SmallestSwatch = 14.dp
+private val SmallestSwatchGap = 3.dp
+
+/** A row's room around what it holds, and between its name and its colors. */
+private val RowPadding = 12.dp
+private val NameGap = 12.dp
+
+/** What the longest name gets beyond its measured width, so rounding never wraps it. */
+private val NameSlack = 2.dp
+
+/** What tells a swatch in tests. */
+internal const val PALETTE_SWATCH = "palette-swatch"
+
+/**
+ * The map's color sets, to pick from (`picked` is the map's): a row each,
+ * its name, then its colors as swatches at the row's end, in a column with
+ * every other row's. On a narrow window (320 or 360 dp, or larger text),
+ * the swatches come closer together, then get smaller, so every one shows,
+ * leaving the names the room the longest takes; a name that still doesn't
+ * fit goes over two lines.
+ */
+@Composable
+internal fun PaletteRows(picked: List<String>?, onPick: (MapPalette) -> Unit) {
+    val measurer = rememberTextMeasurer()
+    val style = MaterialTheme.typography.bodyLarge
+    val density = LocalDensity.current
+    val names = MapPalettes.associateWith { stringResource(it.nameResource) }
+    val slots = MapPalettes.maxOf { it.colors?.size ?: 0 }
+    // With a little to spare: a pixel lost to rounding would break the longest name before its last letter.
+    val longest = with(density) { names.filterKeys { it.colors != null }.values.maxOfOrNull { measurer.measure(it, style).size.width.toDp() } ?: 0.dp } + NameSlack
+
+    BoxWithConstraints(Modifier.padding(horizontal = 24.dp)) {
+        // The swatches' strip: as wide as they are at full size, less on a narrow window, never under the smallest.
+        val natural = SwatchSize * slots + SwatchGap * (slots - 1)
+        val smallest = SmallestSwatch * slots + SmallestSwatchGap * (slots - 1)
+        val strip = (maxWidth - RowPadding * 2 - NameGap - longest).coerceIn(smallest, natural)
+        val gap = ((strip - SwatchSize * slots) / (slots - 1)).coerceIn(SmallestSwatchGap, SwatchGap)
+        val swatch = ((strip - gap * (slots - 1)) / slots).coerceAtMost(SwatchSize)
+
+        Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(R.string.map_colors), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+
+            MapPalettes.forEach { palette ->
+                val selected = picked?.map { it.uppercase() } == palette.colors?.map { it.hex() }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(NameGap),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(2.dp, if (selected) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(16.dp))
+                        .selectable(selected = selected, role = Role.RadioButton) { onPick(palette) }
+                        .padding(horizontal = RowPadding, vertical = 10.dp),
+                ) {
+                    Text(names.getValue(palette), style = style, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+
+                    palette.colors?.let { colors ->
+                        // A set of fewer colors keeps its swatches in the others' columns.
+                        Row(horizontalArrangement = Arrangement.spacedBy(gap), modifier = Modifier.width(strip)) {
+                            colors.forEach { color ->
+                                Box(
+                                    Modifier
+                                        .size(swatch)
+                                        .background(color, CircleShape)
+                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                                        .testTag(PALETTE_SWATCH),
+                                )
+                            }
+                        }
                     }
                 }
             }

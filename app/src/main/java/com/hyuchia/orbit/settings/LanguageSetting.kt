@@ -27,6 +27,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.ui.ConnectedChoice
+import java.text.Collator
 import java.util.Locale
 
 /**
@@ -69,15 +70,25 @@ fun LanguageSetting() {
     )
 }
 
-/** The languages the app speaks, by tag: "en", "es". */
+/** The languages the app speaks, by tag: "en", "es", "pt". */
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 private fun appLanguages(context: Context): List<String> {
     val supported = LocaleConfig(context).supportedLocales ?: return emptyList()
-    return (0 until supported.size()).map { supported[it].language }.distinct()
+    return inNameOrder((0 until supported.size()).map { supported[it].language })
+}
+
+/**
+ * Languages by tag, each once, in the order of their names in themselves: English, Español,
+ * Português. Android's locale config hands them over in an order of its own making, which
+ * changes as languages come.
+ */
+internal fun inNameOrder(tags: List<String>): List<String> {
+    val collator = Collator.getInstance(Locale.ROOT)
+    return tags.distinct().sortedWith(compareBy(collator) { languageName(it) })
 }
 
 /** A language's name in itself, as people look for it: "English", "Español". */
-private fun languageName(tag: String): String {
+internal fun languageName(tag: String): String {
     val locale = Locale.forLanguageTag(tag)
     return locale.getDisplayLanguage(locale).replaceFirstChar { it.titlecase(locale) }
 }

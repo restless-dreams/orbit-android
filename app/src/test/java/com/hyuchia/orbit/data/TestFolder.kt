@@ -38,8 +38,17 @@ internal class TestFolder : SyncFolder {
     /** What writing a file of these names throws, as a provider failing would. */
     val failWrites = mutableMapOf<String, Throwable>()
 
+    /** What reading a file of these names throws, as a provider failing would. */
+    val failReads = mutableMapOf<String, Throwable>()
+
     /** The pictures, videos and sounds in `media/`, by name. */
     val mediaFiles = mutableMapOf<String, ByteArray>()
+
+    /** The names of the pictures, videos and sounds as `media/` was last listed: one written by another name is made anew. */
+    private var mediaListed = emptySet<String>()
+
+    /** The name the folder's app gives a picture, video or sound it makes, by the name asked for: as an app that renames them would. */
+    var mediaNamed: ((String) -> String)? = null
 
     /** Sizes the media listing says, for files still arriving: what's there of them is shorter; -1 for one the folder can't tell the size of. */
     val mediaListedSizes = mutableMapOf<String, Long>()
@@ -50,6 +59,9 @@ internal class TestFolder : SyncFolder {
     /** The pictures, videos and sounds read from `media/`, by name, in the order they were. */
     val mediaReads = mutableListOf<String>()
 
+    /** The room the storage the folder is on has free: a new picture, video or sound past it, and some to spare, is refused as [DocumentFolder] refuses it. */
+    var room = Long.MAX_VALUE
+
     override fun files(): List<FolderFile> {
         failListing?.let { throw it }
         val listing = texts.keys.map { describeNow(it) }
@@ -58,6 +70,7 @@ internal class TestFolder : SyncFolder {
     }
 
     override fun read(name: String): String {
+        failReads[name]?.let { throw it }
         val partial = bytes[name]
 
         if (partial != null) {
@@ -75,17 +88,26 @@ internal class TestFolder : SyncFolder {
 
     override fun write(name: String, text: String, create: Boolean): FolderFile {
         failWrites[name]?.let { throw it }
+        // A file made by a name that's taken gets another, as a folder's app numbers it.
+        val made = if (create) free(name, texts.keys) else name
 
         if (cutNextWrite) {
             cutNextWrite = false
-            change(name, text.take(text.length / 2))
+            change(made, text.take(text.length / 2))
             throw IOException("Cut short")
         }
 
-        change(name, text)
-        val written = describeNow(name)
-        afterWrite?.invoke(name)
+        change(made, text)
+        val written = describeNow(made)
+        afterWrite?.invoke(made)
         return written
+    }
+
+    /** `name`, or numbered as a folder's app numbers a copy (`Trip (1).md`) when `taken` has it. */
+    private fun free(name: String, taken: Set<String>): String {
+        val stem = name.substringBeforeLast('.')
+        val extension = name.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
+        return generateSequence(0) { it + 1 }.map { if (it == 0) name else "$stem ($it)$extension" }.first { it !in taken }
     }
 
     override fun delete(name: String) {
@@ -105,7 +127,10 @@ internal class TestFolder : SyncFolder {
         devices[name] = text
     }
 
-    override fun media() = mediaFiles.mapValues { (name, bytes) -> FolderFile(name, mediaTimes[name] ?: 0, mediaListedSizes[name] ?: bytes.size.toLong()) }
+    override fun media(): Map<String, FolderFile> {
+        mediaListed = mediaFiles.keys.toSet()
+        return mediaFiles.mapValues { (name, bytes) -> FolderFile(name, mediaTimes[name] ?: 0, mediaListedSizes[name] ?: bytes.size.toLong()) }
+    }
 
     override fun readMedia(name: String, into: OutputStream): Boolean {
         val bytes = mediaFiles[name] ?: return false
@@ -113,21 +138,38 @@ internal class TestFolder : SyncFolder {
         into.write(bytes)
         val listed = mediaListedSizes[name] ?: bytes.size.toLong()
 
-        // As DocumentFolder reads it: one that isn't the size it was listed at is still arriving.
-        if (listed > 0 && listed != bytes.size.toLong()) {
+        // As DocumentFolder reads it: one that isn't the size it was listed at (an empty one too) is still arriving.
+        if (listed >= 0 && listed != bytes.size.toLong()) {
             throw IOException("$name is still arriving")
         }
 
         return true
     }
 
+    /**
+     * As DocumentFolder writes one: over the one by its name when `media/`
+     * was listed with it, or else made anew, which a file by that name since
+     * makes the folder's app number (`photo (1).jpg`), as may [mediaNamed].
+     */
     override fun writeMedia(name: String, from: File): FolderFile {
+        if (name !in mediaListed && from.length() + ROOM_LEFT_FREE > room) {
+            throw NoRoomForMedia(name)
+        }
+
         val bytes = from.readBytes()
-        mediaFiles[name] = bytes
-        mediaListedSizes -= name
+        val made = if (name in mediaListed) name else free(mediaNamed?.invoke(name) ?: name, mediaFiles.keys)
+        mediaListed = mediaListed + made
+        mediaFiles[made] = bytes
+        mediaListedSizes -= made
         time += 1_000
-        mediaTimes[name] = time
-        return FolderFile(name, time, bytes.size.toLong())
+        mediaTimes[made] = time
+        return FolderFile(made, time, bytes.size.toLong())
+    }
+
+    override fun deleteMedia(name: String) {
+        mediaFiles -= name
+        mediaListedSizes -= name
+        mediaTimes -= name
     }
 
     fun change(name: String, text: String) {

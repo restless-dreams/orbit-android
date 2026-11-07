@@ -100,6 +100,34 @@ describe('renaming a map from Home', () => {
   });
 });
 
+describe('the ids a change from Home gives ideas', () => {
+  test('a new name gives the center a new id, which the app follows', () => {
+    expect(editedMap('# Trip\n## Food\n', { title: 'Voyage', tags: null }, UNTITLED).renamed).toEqual([{ from: 'trip', to: 'voyage' }]);
+    expect(editedMap(YAML_MAP, { title: 'Plants', tags: null }, UNTITLED).renamed).toEqual([{ from: 'photosynthesis', to: 'plants' }]);
+  });
+
+  test('the center Orbit made up for several top ideas takes the id of the title that names it', () => {
+    const text = '## Monday\n- Gym\n\n## Tuesday\n- Piano\n';
+    const center = parseOrbit(text, { untitled: UNTITLED }).root.id;
+
+    expect(editedMap(text, { title: 'Week plan', tags: null }, UNTITLED).renamed).toEqual([{ from: center, to: 'week-plan' }]);
+  });
+
+  test('tags, a center with a name of its own and one with an id of its own keep every id', () => {
+    expect(editedMap('# Trip\n## Food\n', { title: null, tags: ['travel'] }, UNTITLED).renamed).toEqual([]);
+    expect(editedMap('---\ntitle: Week\n---\n# Monday\n- Gym\n', { title: 'Plan', tags: null }, UNTITLED).renamed).toEqual([]);
+    expect(editedMap('# Trip <!-- orbit id: journey -->\n## Food\n', { title: 'Voyage', tags: null }, UNTITLED).renamed).toEqual([]);
+  });
+
+  test('only the center gets a new id, even when its new name is another idea\'s', () => {
+    const after = editedMap('# Trip\n## Food\n- Tacos\n', { title: 'Food', tags: null }, UNTITLED);
+    const read = parseOrbit(after.markdown ?? '');
+
+    expect(read.root.children.map((child) => child.id)).toEqual(['food']);
+    expect(after.renamed).toEqual([{ from: 'trip', to: read.root.id }]);
+  });
+});
+
 describe('tagging a map from Home', () => {
   test('puts its tags in its frontmatter, and writes the rest as it was', () => {
     const text = '# Trip\n\n## Food\n- *Tacos*  al pastor\n\n<!-- a comment -->\n';
@@ -171,12 +199,12 @@ describe('a map Orbit can only show', () => {
   test('from a newer Orbit is never changed, and says so', () => {
     const newer = `---\nschemaVersion: ${SUPPORTED_SCHEMA_VERSION + 1}\n---\n# Plan\n## A\n`;
 
-    expect(editedMap(newer, { title: 'Roadmap', tags: null }, UNTITLED)).toEqual({ markdown: null, refused: 'newer' });
-    expect(editedMap(newer, { title: null, tags: ['work'] }, UNTITLED)).toEqual({ markdown: null, refused: 'newer' });
+    expect(editedMap(newer, { title: 'Roadmap', tags: null }, UNTITLED)).toEqual({ markdown: null, refused: 'newer', renamed: [] });
+    expect(editedMap(newer, { title: null, tags: ['work'] }, UNTITLED)).toEqual({ markdown: null, refused: 'newer', renamed: [] });
     expect(editedMap(`schemaVersion: ${SUPPORTED_SCHEMA_VERSION + 1}\nnodes:\n  - text: Plan\n`, { title: 'Roadmap', tags: null }, UNTITLED).refused).toBe('newer');
   });
 
   test('that Orbit can\'t read all of is never changed, and says so', () => {
-    expect(editedMap('nodes:\n  - text: Plan\n   bad: indentation\n', { title: 'Roadmap', tags: null }, UNTITLED)).toEqual({ markdown: null, refused: 'unreadable' });
+    expect(editedMap('nodes:\n  - text: Plan\n   bad: indentation\n', { title: 'Roadmap', tags: null }, UNTITLED)).toEqual({ markdown: null, refused: 'unreadable', renamed: [] });
   });
 });

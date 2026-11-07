@@ -1,5 +1,6 @@
 package com.hyuchia.orbit.page
 
+import com.hyuchia.orbit.data.IdeaDate
 import com.hyuchia.orbit.media.MediaKind
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
@@ -52,6 +53,20 @@ data class Media(
     val motion: MediaMotion? = null,
 )
 
+/**
+ * One of an idea's files (Orbit's `files`): its address (`media/file-…`),
+ * its name as people know it, its media type and its size in bytes, when
+ * the map says them. The page sends a size only when it's a whole number
+ * of bytes, so it always fits.
+ */
+@Serializable
+data class MapFile(
+    val src: String,
+    val name: String? = null,
+    val type: String? = null,
+    val size: Long? = null,
+)
+
 /** A live photo's motion: its video's address, and where in it the still was taken, in seconds, when that's known. */
 @Serializable
 data class MediaMotion(val src: String, val still: Double? = null)
@@ -78,6 +93,14 @@ data class MapNode(
 
     val status: String? = null,
     @Serializable(with = MapWholeNumberSerializer::class) val priority: Int? = null,
+
+    /**
+     * Its date, as Orbit writes it: `2026-11-20`, or `2026-11-20 09:30` with
+     * a time (see [com.hyuchia.orbit.data.IdeaDate]). One Orbit can't read
+     * stays in [attrs], as written.
+     */
+    val due: String? = null,
+
     val tags: List<String> = emptyList(),
     val collapsed: Boolean = false,
     val type: String? = null,
@@ -97,6 +120,9 @@ data class MapNode(
 
     /** Its sound: a voice memo, music or a recording. */
     val audio: Media? = null,
+
+    /** The files it holds: PDFs, spreadsheets, any file. */
+    val files: List<MapFile> = emptyList(),
 ) {
     val isRoot: Boolean get() = parentId == null
 
@@ -111,10 +137,13 @@ data class MapNode(
     /** The node's text with its icon, as the map shows it, with `untitled` for text it doesn't have. */
     fun label(untitled: String): String = listOfNotNull(icon, text.ifBlank { untitled }).joinToString(" ")
 
+    /** Its date, read as Orbit reads it; null without one, or with one Orbit can't read. */
+    val date: IdeaDate? get() = IdeaDate.parse(due)
+
     /** Whether the details sheet has something to show beyond the title. */
     val hasDetails: Boolean
         get() = !note.isNullOrBlank() || image != null || video != null || audio != null || embed != null || link != null ||
-            tags.isNotEmpty() || status != null || priority != null || isGoal
+            tags.isNotEmpty() || status != null || priority != null || date != null || isGoal || files.isNotEmpty()
 }
 
 /** The map's frontmatter options the app shows and changes, by the names Orbit and the file give them. */
@@ -198,10 +227,11 @@ data class CheckedMap(val title: String, val nodes: Int, val diagnostics: List<D
 /**
  * A map's text with a change made from outside its screen ([MapCommand.EditMap]),
  * or null, with why it was `refused`: Orbit can only show the map, which a
- * newer Orbit made (`newer`) or it can't read all of (`unreadable`).
+ * newer Orbit made (`newer`) or it can't read all of (`unreadable`). The ideas
+ * the change gave new ids are `renamed`: a new name gives the center one.
  */
 @Serializable
-data class EditedMap(val markdown: String? = null, val refused: String? = null)
+data class EditedMap(val markdown: String? = null, val refused: String? = null, val renamed: List<Renamed> = emptyList())
 
 /** What a file from another app makes: its maps (one, or one for each sheet of an XMind workbook), or why it makes none. */
 @Serializable
@@ -307,13 +337,22 @@ sealed interface MapMessage {
     @Serializable @SerialName("error")
     data class Error(val message: String) : MapMessage
 
-    /** Orbit didn't make a change the app asked for (`add`, `update` or `options`): a value in it can't be read. The map is as it was. */
+    /**
+     * Orbit didn't make a change the app asked for (`add`, `update` or
+     * `options`): a value in it can't be read. Or a box to check
+     * (`checkNote`) isn't on that line of the note any more. The map is as it
+     * was.
+     */
     @Serializable @SerialName("declined")
     data class Declined(val change: String, val message: String) : MapMessage
 
     /** The system stopped the page's process (to free memory, say): the map has to load again. */
     @Serializable @SerialName("stopped")
     data object Stopped : MapMessage
+
+    /** The page itself didn't load, so it can't draw the map: a new page has to load it. The app says it, as [Stopped]. */
+    @Serializable @SerialName("didNotLoad")
+    data object DidNotLoad : MapMessage
 
     /**
      * How the video an audience's screen shows is going (web/audience.ts):
@@ -337,6 +376,24 @@ sealed interface MapMessage {
     /** Idea `id`, dragged on the map, went out of the window: it goes on as a drag another app can take. */
     @Serializable @SerialName("dragOut")
     data class DragOut(val id: String) : MapMessage
+
+    /**
+     * Idea `id`, brought up close to sketch on ([MapCommand.Spotlight]): its
+     * circle on the page, its middle at (`x`, `y`) dp from the page's top left
+     * and `radius` dp across, as the flight to it starts (`start`), once it
+     * rests there, and again whenever it rests somewhere new (`rest`), and
+     * once the map is back as it was (`end`, at once for an idea the map
+     * doesn't draw). `scrim` is the CSS color the map dims with.
+     */
+    @Serializable @SerialName("spotlight")
+    data class Spotlight(
+        val id: String,
+        val phase: String,
+        val x: Float = 0f,
+        val y: Float = 0f,
+        val radius: Float = 0f,
+        val scrim: String? = null,
+    ) : MapMessage
 }
 
 /** Commands for the page. */
@@ -402,6 +459,27 @@ sealed interface MapCommand {
      */
     @Serializable @SerialName("addToGoal")
     data class AddToGoal(val id: String, val amount: JsonPrimitive) : MapCommand
+
+    /**
+     * Checks or unchecks the box of a checklist on `line` of idea `id`'s note
+     * (from 0). The page changes that box in the note it has now, so quick
+     * presses all count, and the map's file changes on that line alone. A
+     * line without a box is `declined`.
+     */
+    @Serializable @SerialName("checkNote")
+    data class CheckNote(val id: String, val line: Int, val checked: Boolean) : MapCommand
+
+    /**
+     * Adds `files` to idea `id`'s, after the ones it has. The page adds them
+     * to the files it has now, so files added one after another all stay, and
+     * one it has already, by its address, isn't added again.
+     */
+    @Serializable @SerialName("addFiles")
+    data class AddFiles(val id: String, val files: List<MapFile>) : MapCommand
+
+    /** Takes the file at `src` off idea `id`, its other files as they are. */
+    @Serializable @SerialName("removeFile")
+    data class RemoveFile(val id: String, val src: String) : MapCommand
 
     @Serializable @SerialName("remove")
     data class Remove(val id: String) : MapCommand
@@ -483,6 +561,14 @@ sealed interface MapCommand {
         val focus: String? = null,
         val baseUrl: String? = null,
     ) : MapCommand
+
+    /**
+     * Calls off job `job`, which no one waits for any more: given up on, or
+     * no longer wanted, as a thumbnail that scrolled away. The page stops its
+     * work at its next step, its pictures stop loading, and it answers nothing.
+     */
+    @Serializable @SerialName("cancel")
+    data class Cancel(val job: Int) : MapCommand
 
     /** Converts a map's text to orbit-md (`markdown`), `yaml` or `opml`. */
     @Serializable @SerialName("convert")
@@ -568,6 +654,23 @@ sealed interface MapCommand {
     /** Shows the ideas hidden under `ids` again, growing out of their ideas; null shows every hidden idea. */
     @Serializable @SerialName("revealChildren")
     data class RevealChildren(val ids: List<String>? = null) : MapCommand
+
+    /**
+     * Brings idea `id` up close to sketch on: the map flies until it fills
+     * `share` of the room `insets` leave (the page's own when null), dims
+     * around it, and takes no input until [EndSpotlight] takes it back. The
+     * page says where it is ([MapMessage.Spotlight]).
+     */
+    @Serializable @SerialName("spotlight")
+    data class Spotlight(val id: String, val insets: MapInsets, val share: Float? = null) : MapCommand
+
+    /** Takes the idea brought up close back: the map flies back where it was, and takes input again. */
+    @Serializable @SerialName("endSpotlight")
+    data object EndSpotlight : MapCommand
+
+    /** Answers true once the picture at `src`, in the map's media, has loaded and been drawn; false when it can't load. */
+    @Serializable @SerialName("pictureShown")
+    data class PictureShown(val job: Int, val src: String) : MapCommand
 }
 
 /** The idea something dropped from another app goes into: the one under it, or the one in focus. None on a map that can't change. */

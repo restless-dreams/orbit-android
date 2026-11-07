@@ -1,0 +1,24 @@
+{
+  "uniqueId": "hyph-utf8:hyph-pt",
+  "artifactVersion": "1.4",
+  "name": "Hyphenation patterns for Portuguese",
+  "description": "Where long Portuguese words break across lines in the map's names: the hyph-utf8 package's patterns, which Orbit includes.",
+  "website": "https://www.hyphenation.org/tex",
+  "developers": [
+    {
+      "name": "Pedro J. de Rezende"
+    },
+    {
+      "name": "J. Joao Dias Almeida"
+    },
+    {
+      "name": "Leonardo Araujo"
+    },
+    {
+      "name": "Aline Benevides"
+    }
+  ],
+  "licenses": [
+    "BSD-3-Clause-hyph-pt"
+  ]
+}

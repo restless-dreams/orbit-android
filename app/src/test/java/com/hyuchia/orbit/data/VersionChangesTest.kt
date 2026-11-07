@@ -103,6 +103,53 @@ class VersionChangesTest {
     }
 
     @Test
+    fun `a YAML map that gains a second idea at its top added that idea, and losing it removed it`() {
+        // Orbit's YAML has one idea at the top; with two, it makes up a center named by the title, with both under it.
+        val one = "title: Biology\nnodes:\n  - text: Biology\n    children:\n      - Cells\n"
+        val two = one + "  - text: Plants\n    children: [Leaves]\n"
+
+        assertEquals(VersionChanges(added = listOf("Plants", "Leaves")), VersionChanges.between(one, two))
+        assertEquals(VersionChanges(removed = listOf("Plants", "Leaves")), VersionChanges.between(two, one))
+
+        // Without a title, the same.
+        assertEquals(VersionChanges(added = listOf("Plants", "Leaves")), VersionChanges.between(one.removePrefix("title: Biology\n"), two.removePrefix("title: Biology\n")))
+    }
+
+    @Test
+    fun `the first idea of an empty YAML map is added, and a center named by the title is the same as markdown's`() {
+        assertEquals(VersionChanges(added = listOf("Tokyo")), VersionChanges.between("title: Trip\nnodes: []\n", "title: Trip\nnodes:\n  - Tokyo\n"))
+        assertEquals(VersionChanges(added = listOf("Tokyo", "Kyoto")), VersionChanges.between("", "nodes:\n  - Tokyo\n  - Kyoto\n"))
+        assertEquals(VersionChanges(details = true), VersionChanges.between("# Trip\n- Tokyo\n- Kyoto\n", "title: Trip\nnodes:\n  - Tokyo\n  - Kyoto\n"))
+    }
+
+    @Test
+    fun `a YAML map's made-up center written down as markdown is still its center, whatever its top ideas are called`() {
+        // Several ideas at the top, one named as the title names the made-up center; then the map's page writes it as markdown.
+        val yaml = "title: Roadmap\nnodes:\n  - text: Roadmap\n    children: [Research]\n  - text: Marketing\n"
+        val markdown = "# Roadmap\n## Roadmap\n- Research\n## Marketing\n## Press kit\n"
+
+        assertEquals(VersionChanges(added = listOf("Press kit")), VersionChanges.between(yaml, markdown))
+        assertEquals(VersionChanges(removed = listOf("Press kit")), VersionChanges.between(markdown, yaml))
+    }
+
+    @Test
+    fun `ideas added in flow style to a YAML map are named`() {
+        val before = "nodes:\n  - text: Trip\n    children: [Tokyo]\n"
+
+        assertEquals(VersionChanges(added = listOf("Kyoto")), VersionChanges.between(before, "nodes:\n  - text: Trip\n    children: [Tokyo, Kyoto]\n"))
+        assertEquals(VersionChanges(added = listOf("Kyoto", "Gion")), VersionChanges.between(before, before + "  - { text: Kyoto, children: [Gion] }\n"))
+    }
+
+    @Test
+    fun `tags added to an idea, or a YAML map's tags written as hashtags, change its details, not its name`() {
+        assertEquals(VersionChanges(details = true), VersionChanges.between("# Trip\n- Launch\n", "# Trip\n- Launch #web\n"))
+
+        // A YAML map written as markdown, as the map's page writes it.
+        val yaml = "nodes:\n  - text: Trip\n    children:\n      - text: Launch\n        tags: [web, ads]\n"
+        assertEquals(VersionChanges(details = true), VersionChanges.between(yaml, "# Trip\n- Launch #web #ads\n"))
+    }
+
+    @Test
     fun `a map of 2,400 ideas compares in a moment`() {
         val library = File("src/debug/assets/samples/city-library.md").readText()
         val lines = library.lines()

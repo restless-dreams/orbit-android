@@ -93,9 +93,10 @@ fun rememberAsTheyAre(): AsTheyAre {
 
 /**
  * Asks whether files Orbit couldn't clean go as they are, with what they'd
- * say: where and when they were taken or recorded, and on what. It names
- * them, by kind and by file, in the viewer's words. Leaving them out is
- * the choice it starts on.
+ * say: where and when they were taken or recorded, and on what, or for
+ * ideas' files, who made them, when and where. It names them, by kind and
+ * by file, ideas' files by the names they came with, in the viewer's
+ * words. Leaving them out is the choice it starts on.
  */
 @Composable
 fun AsTheyAreDialog(files: Uncleaned, onChoice: (asTheyAre: Boolean) -> Unit, onDismiss: () -> Unit) {
@@ -106,6 +107,7 @@ fun AsTheyAreDialog(files: Uncleaned, onChoice: (asTheyAre: Boolean) -> Unit, on
         MediaWords.Made.Taken -> R.plurals.sharing_as_they_are_taken
         MediaWords.Made.Recorded -> R.plurals.sharing_as_they_are_recorded
         MediaWords.Made.TakenOrRecorded -> R.plurals.sharing_as_they_are_taken_or_recorded
+        MediaWords.Made.Unknown -> R.plurals.sharing_as_they_are_hidden
     }
 
     AlertDialog(
@@ -117,7 +119,7 @@ fun AsTheyAreDialog(files: Uncleaned, onChoice: (asTheyAre: Boolean) -> Unit, on
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(words.plural(text, count))
-                Text(files.names.sorted().joinToString("\n"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(files.names.map(files::label).sortedWith(String.CASE_INSENSITIVE_ORDER).joinToString("\n"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         // Enter leaves them out: what they say goes only when someone chooses it.

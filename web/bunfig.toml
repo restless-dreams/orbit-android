@@ -1,5 +1,6 @@
 # The tests' timeout, 60 seconds, is on bun test's command line, in package.json's test script (bun run test), not
 # in a preload: Bun gives a timeout set there only to the last test file. Under load, reading every release's maps
-# took longer than Bun's own 5 seconds.
+# took longer than Bun's own 5 seconds. So is --isolate: each test file runs with a document and modules of its own,
+# so a page's script (the audience's, a web page's) runs once per file, on the page that file puts in.
 [test]
 preload = ["./dom-for-tests.ts", "./orbit-for-tests.ts"]

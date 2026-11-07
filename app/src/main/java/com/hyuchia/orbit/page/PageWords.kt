@@ -1,9 +1,11 @@
 package com.hyuchia.orbit.page
 
 import android.content.Context
+import android.text.format.DateFormat
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
 import kotlinx.serialization.Serializable
+import java.util.IllformedLocaleException
 import java.util.Locale
 
 /**
@@ -96,8 +98,23 @@ data class PageWords(
     }
 }
 
-/** The pages' words in the language of `context`: the app's, or the screen's a page is in. */
-fun pageWords(context: Context): PageWords = PageWords.from(pageLanguage(context)) { context.getString(it) }
+/**
+ * The pages' words in the language of `context`: the app's, or the screen's
+ * a page is in, on the phone's 12- or 24-hour clock, so a time a map writes
+ * (an idea's date today, on its planet) reads as the app's own times do.
+ */
+fun pageWords(context: Context): PageWords = PageWords.from(withHourCycle(pageLanguage(context), DateFormat.is24HourFormat(context))) { context.getString(it) }
+
+/**
+ * `tag` with an hour cycle (`-u-hc-h23` for a 24-hour clock, `-u-hc-h12` for
+ * a 12-hour one), which the pages' `Intl` writes times on; `tag` as it is
+ * when it can't hold one.
+ */
+fun withHourCycle(tag: String, is24Hour: Boolean): String = try {
+    Locale.Builder().setLanguageTag(tag).setUnicodeLocaleKeyword("hc", if (is24Hour) "h23" else "h12").build().toLanguageTag()
+} catch (unreadable: IllformedLocaleException) {
+    tag
+}
 
 /** The language the pages of `context` speak (see the other [pageLanguage]). */
 fun pageLanguage(context: Context): String {

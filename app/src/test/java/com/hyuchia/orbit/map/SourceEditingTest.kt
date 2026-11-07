@@ -27,6 +27,9 @@ class SourceEditingTest {
     private val drawn = mutableListOf<String>()
     private val kept = mutableListOf<String>()
 
+    /** What was kept in the map's history: text typed on the map as it was before a change made outside the editor. */
+    private val setAside = mutableListOf<String>()
+
     /** While true, conversions wait in `waiting` until each is let through. */
     private var holding = false
 
@@ -57,6 +60,7 @@ class SourceEditingTest {
             draw = { drawn += it },
             convert = ::convert,
             keep = { kept += it },
+            keepAside = { setAside += it },
         )
 
     private val source: SourceState get() = ui.value.source!!
@@ -164,7 +168,7 @@ class SourceEditingTest {
     fun aFlushSavesYamlStillConvertingOnceTheScreensWorkHasStopped() = runTest {
         inYaml()
         val screen = CoroutineScope(StandardTestDispatcher(testScheduler))
-        val editing = SourceEditing(screen, ui, draw = { drawn += it }, convert = ::convert, keep = { kept += it })
+        val editing = SourceEditing(screen, ui, draw = { drawn += it }, convert = ::convert, keep = { kept += it }, keepAside = { setAside += it })
         holding = true
         editing.edit("$YAML$trip\n- Tram")
         advanceTimeBy(300)
@@ -274,19 +278,6 @@ class SourceEditingTest {
     }
 
     @Test
-    fun typingWhileAChangeConvertsToYamlWins() = runTest {
-        inYaml()
-        val editing = editing
-        holding = true
-        editing.follow("# Trip\n- Museums")
-        runCurrent()
-        editing.edit("$YAML$trip\n- Tram")
-        waiting.removeFirst().complete(Unit)
-        runCurrent()
-        assertEquals("$YAML$trip\n- Tram", source.text)
-    }
-
-    @Test
     fun onlyTheNewestChangeLands() = runTest {
         inYaml()
         val editing = editing
@@ -301,21 +292,156 @@ class SourceEditingTest {
         assertEquals("$YAML# Trip\n- Museums\n- Tram", source.text)
     }
 
+    /** Lets every conversion waiting through, each in turn, the oldest first. */
+    private fun TestScope.letConversionsThrough() {
+        while (waiting.isNotEmpty()) {
+            waiting.removeFirst().complete(Unit)
+            runCurrent()
+        }
+    }
+
     @Test
-    fun aChangeThatLandsAfterASwitchToMarkdownShowsAsMarkdown() = runTest {
+    fun `a change that comes as the text switches to markdown is what's typed on, never the text from before it`() = runTest {
         inYaml()
         val editing = editing
         holding = true
-        editing.follow("# Trip\n- Museums")
         editing.setYaml(false)
         runCurrent()
-        // The switch lands first, from the YAML before the change.
-        waiting[1].complete(Unit)
+
+        // The map changes outside the editor as the switch converts: an edit on the map beside it, say.
+        editing.follow("$trip\n- Museums")
         runCurrent()
-        assertEquals(SourceState(trip), source)
-        waiting[0].complete(Unit)
+
+        // The switch, from the YAML before the change, comes back first, and the next keystroke goes on from what the text shows.
+        waiting.removeFirst().complete(Unit)
         runCurrent()
-        assertEquals(SourceState("# Trip\n- Museums"), source)
+        editing.edit(source.text + "\n- Typed")
+        letConversionsThrough()
+        advanceTimeBy(300)
+        letConversionsThrough()
+
+        assertEquals(listOf("$trip\n- Museums\n- Typed"), kept)
+        assertEquals(SourceState("$trip\n- Museums\n- Typed"), source)
+    }
+
+    @Test
+    fun `a switch to markdown as a change converts to YAML shows the change, and typing goes on from it`() = runTest {
+        inYaml()
+        val editing = editing
+        holding = true
+        editing.follow("$trip\n- Museums")
+        runCurrent()
+        editing.setYaml(false)
+        runCurrent()
+
+        // The newest conversion comes back first: the switch's, of the YAML from before the change, when it makes one.
+        waiting.removeLast().complete(Unit)
+        runCurrent()
+        editing.edit(source.text + "\n- Typed")
+        letConversionsThrough()
+        advanceTimeBy(300)
+        letConversionsThrough()
+
+        assertEquals(listOf("$trip\n- Museums\n- Typed"), kept)
+        assertEquals(SourceState("$trip\n- Museums\n- Typed"), source)
+    }
+
+    @Test
+    fun `typing as a change converts to YAML is never saved over the change`() = runTest {
+        inYaml()
+        val editing = editing
+        holding = true
+        editing.follow("$trip\n- Museums")
+        runCurrent()
+
+        // Typed on the YAML from before the change, which the text still shows as it converts.
+        editing.edit("$YAML$trip\n- Tram")
+        letConversionsThrough()
+        advanceTimeBy(300)
+        letConversionsThrough()
+
+        // The change shows, and what was typed on the text before it is in the map's history, not drawn over the change.
+        assertTrue(kept.isEmpty())
+        assertEquals(SourceState("$YAML$trip\n- Museums", yaml = true), source)
+        assertEquals(listOf("$trip\n- Tram"), setAside)
+        assertTrue(drawn.isEmpty())
+    }
+
+    @Test
+    fun `typing in its pause when the map changes outside the editor goes into its history, not over the change`() = runTest {
+        val editing = editing
+        editing.edit("$trip\n- Tram")
+        // An edit on the map beside the text before the typing's pause is over.
+        editing.follow("$trip\n- Museums")
+        advanceTimeBy(300)
+
+        assertTrue(kept.isEmpty())
+        assertEquals(listOf("$trip\n- Tram"), setAside)
+        assertEquals(SourceState("$trip\n- Museums"), source)
+        assertTrue(drawn.isEmpty())
+
+        // The next keystroke edits the map as it is now, and is saved.
+        editing.edit("$trip\n- Museums\n- Tram")
+        advanceTimeBy(300)
+        assertEquals(listOf("$trip\n- Museums\n- Tram"), kept)
+        assertEquals(listOf("$trip\n- Tram"), setAside)
+    }
+
+    @Test
+    fun `typing on the text before a change, then on the change, keeps both`() = runTest {
+        inYaml()
+        val editing = editing
+        holding = true
+        editing.follow("$trip\n- Museums")
+        runCurrent()
+        editing.edit("$YAML$trip\n- Tram")
+        letConversionsThrough()
+
+        // Typed again on the text the change brought, before the pause after the first typing was over.
+        editing.edit(source.text + "\n- Fado")
+        advanceTimeBy(300)
+        letConversionsThrough()
+
+        assertEquals(listOf("$trip\n- Museums\n- Fado"), kept)
+        assertEquals(listOf("$trip\n- Tram"), setAside)
+    }
+
+    @Test
+    fun `the editor opened again starts on the map as it is, whatever was converting`() = runTest {
+        inYaml()
+        val editing = editing
+        holding = true
+        editing.follow("$trip\n- Museums")
+        runCurrent()
+        editing.close { }
+        editing.open("$trip\n- Museums")
+        letConversionsThrough()
+
+        // The change converting as the editor closed doesn't land over the text it opened on, and typing there is saved.
+        assertEquals(SourceState("$trip\n- Museums"), source)
+        editing.edit("$trip\n- Museums\n- Fado")
+        advanceTimeBy(300)
+        assertEquals(listOf("$trip\n- Museums\n- Fado"), kept)
+        assertTrue(setAside.isEmpty())
+    }
+
+    @Test
+    fun `a switch still converting as the editor closes lands nothing in the editor opened again`() = runTest {
+        val editing = editing
+        holding = true
+        editing.setYaml(true)
+        runCurrent()
+
+        // Closed and opened again as the switch converts, after the map changed meanwhile.
+        editing.close { }
+        editing.follow("$trip\n- Museums")
+        editing.open("$trip\n- Museums")
+        letConversionsThrough()
+
+        assertEquals(SourceState("$trip\n- Museums"), source)
+        editing.edit("$trip\n- Museums\n- Fado")
+        advanceTimeBy(300)
+        assertEquals(listOf("$trip\n- Museums\n- Fado"), kept)
     }
 
     @Test
@@ -366,6 +492,8 @@ class SourceEditingTest {
         runCurrent()
         assertTrue(kept.isEmpty())
         assertTrue(closed)
+        // Kept in the map's history instead, so it isn't lost.
+        assertEquals(listOf("$trip\n- Tram"), setAside)
     }
 
     @Test

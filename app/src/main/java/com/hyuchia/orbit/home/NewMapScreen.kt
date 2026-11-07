@@ -231,7 +231,7 @@ private fun TemplateCard(template: MapTemplate, onClick: () -> Unit) {
                 val outline = MapText.outline(text, words)
                 MapThumbnail(
                     id = "template-${template.file.substringBeforeLast('.')}",
-                    contentKey = text.hashCode().toUInt().toString(16),
+                    pictureKey = text.hashCode().toUInt().toString(16),
                     style = outline.style,
                     branches = outline.branches,
                     modifier = Modifier

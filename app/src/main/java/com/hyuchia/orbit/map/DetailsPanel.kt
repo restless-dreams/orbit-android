@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -18,9 +19,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.BrokenImage
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Event
+import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.NearMe
 import androidx.compose.material.icons.outlined.OpenInFull
@@ -29,12 +33,13 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -51,6 +56,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -66,36 +73,46 @@ import com.hyuchia.orbit.media.posterOf
 import com.hyuchia.orbit.media.soundOf
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.Media
+import com.hyuchia.orbit.sketch.isSketchName
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.MarkdownNote
 import com.hyuchia.orbit.ui.openLink
+import com.hyuchia.orbit.ui.rememberTimeWords
 import java.io.File
 
-/** The colors status dots take, by tone. */
-fun statusColor(status: String?): Color? = when (status?.lowercase()?.trim()) {
-    "done", "complete", "completed", "shipped", "finished" -> Color(0xFF2E9E5B)
-    "active", "doing", "in progress" -> Color(0xFF2F7CF6)
-    "blocked", "stuck", "at risk" -> Color(0xFFE5484D)
-    "todo", "to do", "planned", "next" -> Color(0xFF8A93A3)
-    null, "" -> null
-    else -> Color(0xFF8E4EC6)
+/** The color a status's dot takes, by its tone as the map colors it (see [statusTone]); none for no status. */
+fun statusColor(status: String?): Color? = when (statusTone(status)) {
+    StatusTone.Done -> Color(0xFF2E9E5B)
+    StatusTone.Active -> Color(0xFF2F7CF6)
+    StatusTone.Blocked -> Color(0xFFE5484D)
+    StatusTone.ToDo -> Color(0xFF8A93A3)
+    null -> if (status.isNullOrBlank()) null else Color(0xFF8E4EC6)
 }
 
+/** A status in words: one of the app's in its language ("Done"), or as written, without the spaces around it. */
 @Composable
-fun statusLabel(status: String): String =
-    Statuses.firstOrNull { it.first.equals(status, ignoreCase = true) }?.let { stringResource(it.second) } ?: status.replaceFirstChar { it.uppercase() }
+fun statusLabel(status: String): String {
+    val word = status.trim()
+    return Statuses.firstOrNull { it.first.equals(word, ignoreCase = true) }?.let { stringResource(it.second) } ?: word.replaceFirstChar { it.uppercase() }
+}
 
 /** The idea's text with its icon, as the map shows it, and "Untitled" in the app's language when it has no text. */
 val MapNode.label: String
     @Composable @ReadOnlyComposable get() = label(stringResource(R.string.common_untitled))
 
-/** An idea's details, read natively: its goal, note, picture, video, page, link and tags. */
+/**
+ * An idea's details, read natively: its kind, status, priority, date and
+ * tags, its goal, note, picture, video, page, link and files. Its note's checklists
+ * check here. On a map that can only be looked at (`ui.readOnly`), nothing
+ * here offers to change it.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DetailsPanel(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean) {
     val context = LocalContext.current
     val children = ui.map?.nodes.orEmpty().filter { it.parentId == node.id }
-    val kind = NodeKinds.firstOrNull { it.type != null && it.type.equals(node.type, ignoreCase = true) }
+    val changeable = ui.readOnly == null
+    val opening = rememberFileOpening(model)
 
     PanelFrame(
         title = node.label,
@@ -104,10 +121,12 @@ fun DetailsPanel(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean) 
         partial = true,
         scrim = false,
         actions = {
-            val edit = stringResource(R.string.common_edit)
+            if (changeable) {
+                val edit = stringResource(R.string.common_edit)
 
-            Hint(edit) {
-                IconButton(onClick = { model.show(Panel.Editor(node.id)) }) { Icon(Icons.Outlined.Edit, contentDescription = edit) }
+                Hint(edit) {
+                    IconButton(onClick = { model.show(Panel.Editor(node.id)) }) { Icon(Icons.Outlined.Edit, contentDescription = edit) }
+                }
             }
         },
     ) {
@@ -118,31 +137,14 @@ fun DetailsPanel(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean) 
                 .padding(horizontal = 24.dp)
                 .padding(top = 4.dp, bottom = 32.dp),
         ) {
-            val tags = node.tags
-
-            if (kind != null || node.status != null || node.priority != null || tags.isNotEmpty()) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    kind?.let { SuggestionChip(onClick = {}, label = { Text("${it.icon}  ${stringResource(it.label)}") }) }
-
-                    node.status?.let { status ->
-                        SuggestionChip(
-                            onClick = {},
-                            label = { Text(statusLabel(status)) },
-                            icon = { Box(Modifier.size(10.dp).background(statusColor(status) ?: Color.Gray, CircleShape)) },
-                        )
-                    }
-
-                    node.priority?.let { SuggestionChip(onClick = {}, label = { Text(stringResource(R.string.map_priority, it)) }) }
-                    tags.forEach { tag -> SuggestionChip(onClick = {}, label = { Text("#$tag") }) }
-                }
-            }
+            IdeaFacts(node)
 
             val goal = Goal.of(node)
             val following = ui.progress.followsItsIdeas(node)
             val under = ui.progress.under(node)
 
             if (goal != null && (goal.target != null || under.total == 0)) {
-                GoalDetails(model, node, goal)
+                GoalDetails(model, node, goal, changeable)
             } else if (following) {
                 ProgressDetails(under)
             }
@@ -174,14 +176,29 @@ fun DetailsPanel(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean) 
             val note = node.note
 
             if (!note.isNullOrBlank()) {
-                MarkdownNote(note, plain = node.noteFormat == "plain", onNodeLink = { id ->
-                    model.show(null)
-                    model.focus(id, point = true)
-                })
-            } else if (node.image == null && node.video == null && node.audio == null && node.embed == null && node.link == null && !node.isGoal && !following) {
+                // Its checklists check here, on a map that takes changes: that line of its file changes, with Undo.
+                val checkable = changeable && !ui.showingVersion && !ui.pathMaking
+
+                MarkdownNote(
+                    note,
+                    plain = node.noteFormat == "plain",
+                    onNodeLink = { id ->
+                        model.show(null)
+                        model.focus(id, point = true)
+                    },
+                    checks = ui.noteChecks[node.id].orEmpty(),
+                    onCheck = if (checkable) { check -> model.checkNote(node.id, check) } else null,
+                )
+            } else if (node.image == null && node.video == null && node.audio == null && node.embed == null && node.link == null && node.files.isEmpty() && !node.isGoal && !following) {
                 Text(stringResource(R.string.map_no_note_yet), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                FilledTonalButton(onClick = { model.show(Panel.Editor(node.id)) }) { Text(stringResource(R.string.map_write_one)) }
+
+                if (changeable) {
+                    FilledTonalButton(onClick = { model.show(Panel.Editor(node.id)) }) { Text(stringResource(R.string.map_write_one)) }
+                }
             }
+
+            // Its files, after its note, as attachments come after a message: each opens in another app, asking first.
+            DetailsFiles(node, opening)
 
             if (children.isNotEmpty()) {
                 Text(stringResource(R.string.map_in_its_orbit), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
@@ -199,6 +216,79 @@ fun DetailsPanel(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean) 
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * What the idea is, at the top of its details: its kind, status, priority,
+ * date and tags, each a few words after its emoji, dot or icon, as Home's
+ * cards show their tags. They're read, not tapped: the details' Edit changes them.
+ * So they aren't chips, which act, as the ideas in its orbit below do, and
+ * screen readers hear each as words ("Status: Done"), not as a button.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun IdeaFacts(node: MapNode) {
+    // An idea of no kind is an idea like any other: it says nothing of it.
+    val kind = NodeKinds.firstOrNull { it.type != null && it.type.equals(node.type, ignoreCase = true) }
+    val status = node.shownStatus
+    val date = shownDate(node, rememberTimeWords())
+    val tags = node.tags
+
+    if (kind == null && status == null && node.priority == null && date == null && tags.isEmpty()) {
+        return
+    }
+
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp), itemVerticalAlignment = Alignment.CenterVertically) {
+        kind?.let {
+            val name = stringResource(it.label)
+            // The emoji shows, and screen readers say the name alone ("Decision", not "balance scale, Decision").
+            Fact(name, said = name) { Text(it.icon, style = MaterialTheme.typography.titleSmall) }
+        }
+
+        status?.let {
+            val label = statusLabel(it)
+
+            Fact(label, said = stringResource(R.string.map_status_said, label)) {
+                Box(Modifier.size(10.dp).background(statusColor(it) ?: MaterialTheme.colorScheme.outline, CircleShape))
+            }
+        }
+
+        node.priority?.let {
+            val priority = stringResource(R.string.map_priority, it)
+            Fact(priority, said = priority) { Icon(Icons.Outlined.Flag, contentDescription = null, modifier = Modifier.size(18.dp)) }
+        }
+
+        // Its date, past and not done in the error color, saying so in words too.
+        date?.let {
+            val said = stringResource(if (it.overdue) R.string.map_date_overdue_label else R.string.map_date_label, it.text)
+            val color = if (it.overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+
+            Fact(if (it.overdue) said else it.text, said = said, color = color) { Icon(Icons.Outlined.Event, contentDescription = null, modifier = Modifier.size(18.dp)) }
+        }
+
+        if (tags.isNotEmpty()) {
+            Fact(tags.joinToString(" · "), said = stringResource(R.string.ui_tags_list, tags.joinToString(", "))) {
+                Icon(Icons.AutoMirrored.Outlined.Label, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
+/** One of an idea's facts: `text` after its `mark`, in `color`, which screen readers hear as `said`. */
+@Composable
+private fun Fact(text: String, said: String, color: Color = MaterialTheme.colorScheme.onSurfaceVariant, mark: @Composable () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .heightIn(min = 32.dp)
+            .clearAndSetSemantics { contentDescription = said },
+    ) {
+        CompositionLocalProvider(LocalContentColor provides color) {
+            mark()
+            Text(text, style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -245,7 +335,8 @@ private fun Picture(model: MapViewModel, image: Media, onView: () -> Unit) {
             AsyncImage(
                 model = model.mediaModel(image.src),
                 contentDescription = image.alt,
-                contentScale = ContentScale.Crop,
+                // A sketch is round, as its planet: all of it shows.
+                contentScale = if (isSketchName(image.src)) ContentScale.Fit else ContentScale.Crop,
                 onSuccess = { loaded -> still = loaded.result.image.asDrawable(resources) is FirstFrame },
                 onError = { failed = true },
                 modifier = Modifier.fillMaxSize(),

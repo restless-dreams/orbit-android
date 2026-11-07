@@ -1,5 +1,6 @@
 package com.hyuchia.orbit.media
 
+import android.content.Context
 import android.view.TextureView
 import androidx.annotation.OptIn
 import androidx.compose.animation.core.animateFloatAsState
@@ -41,6 +42,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -67,16 +70,25 @@ internal data class LivePlay(val sound: Boolean, val held: Boolean = false, val 
  * still keeps every touch, and fades away over the motion (see
  * [animateStillAlpha]) as `onShowing` says the motion's first frame shows,
  * and back as it ends, or as `play` goes (the finger lifted). Its player is
- * made only once it's asked to play, starts once its texture is laid out,
- * so none of it plays unseen, and lets go of the phone's sound when it plays
- * without any.
+ * made only once it's asked to play (`newPlayer`: Media3's ExoPlayer, or a
+ * stand-in in tests), starts once its texture is laid out, so none of it
+ * plays unseen, and lets go of the phone's sound when it plays without any.
+ * Orbit leaving the screen ends the motion there and then: its sound
+ * doesn't go on out of sight, and the still is back when Orbit is.
  */
 @OptIn(UnstableApi::class)
 @Composable
-internal fun LiveMotion(source: Any?, play: LivePlay?, onShowing: (Boolean) -> Unit, onEnded: () -> Unit, modifier: Modifier = Modifier) {
+internal fun LiveMotion(
+    source: Any?,
+    play: LivePlay?,
+    onShowing: (Boolean) -> Unit,
+    onEnded: () -> Unit,
+    modifier: Modifier = Modifier,
+    newPlayer: (Context) -> Player = { context -> ExoPlayer.Builder(context).build() },
+) {
     val context = LocalContext.current
     val uri = remember(source) { (source as? File)?.toUri() ?: (source as? String)?.toUri() } ?: return
-    var player by remember(uri) { mutableStateOf<ExoPlayer?>(null) }
+    var player by remember(uri) { mutableStateOf<Player?>(null) }
     var showing by remember(uri) { mutableStateOf(false) }
     var textured by remember(uri) { mutableStateOf(false) }
     val ended by rememberUpdatedState(onEnded)
@@ -96,6 +108,14 @@ internal fun LiveMotion(source: Any?, play: LivePlay?, onShowing: (Boolean) -> U
         }
     }
 
+    // Orbit leaving the screen ends the motion at once, sound and all, as a sound or a video pauses then.
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        if (play != null) {
+            player?.pause()
+            ended()
+        }
+    }
+
     LaunchedEffect(uri, play) {
         val playing = player
 
@@ -107,7 +127,7 @@ internal fun LiveMotion(source: Any?, play: LivePlay?, onShowing: (Boolean) -> U
             return@LaunchedEffect
         }
 
-        val motion = playing ?: ExoPlayer.Builder(context).build().also { made ->
+        val motion = playing ?: newPlayer(context).also { made ->
             made.addListener(
                 object : Player.Listener {
                     override fun onRenderedFirstFrame() {
@@ -159,7 +179,7 @@ internal fun animateStillAlpha(motionShowing: Boolean): State<Float> =
  */
 @OptIn(UnstableApi::class)
 @Composable
-private fun MotionFrame(player: ExoPlayer, modifier: Modifier) {
+private fun MotionFrame(player: Player, modifier: Modifier) {
     val context = LocalContext.current
     val presentation = rememberPresentationState(player)
     val texture = remember(context) { TextureView(context).apply { isOpaque = false } }

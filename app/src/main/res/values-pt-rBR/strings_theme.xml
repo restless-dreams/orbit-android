@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Os estilos que os mapas podem ter e os conjuntos de cores dos ramos. Veja TRANSLATING.md, "Styles and colors". -->
+<resources>
+    <string name="theme_style_app_colors_label">Cores do app</string>
+    <string name="theme_style_app_colors_description">As cores do seu plano de fundo, claras ou escuras como o celular</string>
+    <string name="theme_style_paper_label">Papel</string>
+    <string name="theme_style_paper_description">Planetas suaves sobre uma página</string>
+    <string name="theme_style_night_label">Noite</string>
+    <string name="theme_style_night_description">Um céu azul profundo</string>
+    <string name="theme_style_flat_label">Plano</string>
+    <string name="theme_style_flat_description">Cores sólidas, sem sombras</string>
+    <string name="theme_style_flat_night_label">Plano noturno</string>
+    <string name="theme_style_flat_night_description">Cores sólidas à noite</string>
+    <string name="theme_style_material_label">Material</string>
+    <string name="theme_style_material_description">As cores tonais do Material</string>
+    <string name="theme_style_material_night_label">Material noturno</string>
+    <string name="theme_style_material_night_description">As cores tonais do Material, no escuro</string>
+    <string name="theme_style_liquid_glass_label">Vidro líquido</string>
+    <string name="theme_style_liquid_glass_description">Vidro transparente sobre um fundo luminoso</string>
+    <string name="theme_style_liquid_glass_night_label">Vidro líquido noturno</string>
+    <string name="theme_style_liquid_glass_night_description">Vidro que brilha sobre um fundo escuro</string>
+    <string name="theme_style_glass_label">Vidro</string>
+    <string name="theme_style_glass_description">Planetas foscos sobre um brilho claro</string>
+    <string name="theme_style_glass_night_label">Vidro noturno</string>
+    <string name="theme_style_glass_night_description">Planetas foscos à noite</string>
+    <string name="theme_style_cosmos_label">Cosmos</string>
+    <string name="theme_style_cosmos_description">Mundos vibrantes entre as estrelas</string>
+    <string name="theme_style_blueprint_label">Cianótipo</string>
+    <string name="theme_style_blueprint_description">Linhas brancas sobre azul de prancheta</string>
+    <string name="theme_style_ink_label">Tinta</string>
+    <string name="theme_style_ink_description">Preto e branco, para imprimir</string>
+    <string name="theme_style_high_contrast_label">Alto contraste</string>
+    <string name="theme_style_high_contrast_description">Cores e contornos fortes, mais fáceis de ler</string>
+
+    <string name="theme_palette_style_own">As do estilo</string>
+    <string name="theme_palette_sorbet">Sorvete</string>
+    <string name="theme_palette_ocean">Oceano</string>
+    <string name="theme_palette_forest">Floresta</string>
+    <string name="theme_palette_sunset">Pôr do sol</string>
+    <string name="theme_palette_vivid">Vivas</string>
+    <string name="theme_palette_mono">Mono</string>
+</resources>

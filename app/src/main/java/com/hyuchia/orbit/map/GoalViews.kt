@@ -40,7 +40,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -71,6 +70,7 @@ import com.hyuchia.orbit.ui.WavyProgress
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.math.BigDecimal
 import java.util.Currency
@@ -110,7 +110,9 @@ private fun goalNumberProblem(reading: NumberReading, words: Words): String? = w
  * a moment after typing stops, when the keyboard's action is pressed, and
  * as it leaves the screen, once it reads as a number; emptied, it saves
  * null. What doesn't read as one is said under it, and isn't saved. A
- * number changed elsewhere, by a step or an undo, shows at once.
+ * number changed elsewhere, by a step or an undo, shows at once. It saves
+ * as `onCommit` was when its `key` began, what the number meant then; among
+ * `drafts`, a change that would make it mean something else saves it first.
  */
 @Composable
 fun NumberField(
@@ -122,12 +124,13 @@ fun NumberField(
     placeholder: String? = null,
     currency: Currency? = null,
     word: String? = null,
+    drafts: FieldDrafts? = null,
 ) {
     val locale = LocalConfiguration.current.locales[0]
     val words = rememberWords()
     var text by remember(key) { mutableStateOf(value?.let { GoalNumbers.field(it, locale) }.orEmpty()) }
     var committed by remember(key) { mutableStateOf(value) }
-    val commit by rememberUpdatedState(onCommit)
+    val commit by remember(key) { mutableStateOf(onCommit) }.apply { this.value = onCommit }
 
     LaunchedEffect(key, value) {
         if (!sameNumber(value, committed)) {
@@ -156,8 +159,14 @@ fun NumberField(
         save()
     }
 
-    DisposableEffect(key) {
-        onDispose { save() }
+    DisposableEffect(key, drafts) {
+        val saver = ::save
+        drafts?.register(key, saver)
+
+        onDispose {
+            drafts?.unregister(key, saver)
+            save()
+        }
     }
 
     val problem = goalNumberProblem(GoalNumbers.read(text, locale), words)
@@ -188,11 +197,13 @@ fun NumberField(
 /**
  * A goal's numbers in the editor: how it counts (saving up, paying off or
  * counting), the two numbers that way asks for, and its currency or what
- * it counts. The way follows the numbers once there's a target; until
- * then, the one picked stays.
+ * it counts, changed with `onChange`. The way follows the numbers once
+ * there's a target; until then, the one picked stays. What's typed in its
+ * fields and not saved yet is among `drafts`: a change of way saves it
+ * first, as it was typed, and converts the goal from it.
  */
 @Composable
-fun GoalSection(model: MapViewModel, node: MapNode, under: Rollup) {
+fun GoalSection(node: MapNode, under: Rollup, drafts: FieldDrafts, onChange: (Map<String, JsonElement>) -> Unit) {
     val goal = Goal.of(node) ?: return
     val locale = LocalConfiguration.current.locales[0]
     val words = rememberWords()
@@ -220,11 +231,14 @@ fun GoalSection(model: MapViewModel, node: MapNode, under: Rollup) {
     val currency = Currency.getInstance(currencyCode)
     var choosingCurrency by remember { mutableStateOf(false) }
     val money = way != GoalWay.Counting
+    // What the fields saved as a change of way saved their drafts first: the goal is converted from it.
+    val savedFirst = remember(node.id) { LinkedHashMap<String, JsonElement>() }
 
     fun set(changes: Map<String, JsonElement>) {
         // Money's numbers go with their currency.
         val unit = if (money && goal.currency == null) mapOf(GOAL_UNIT to JsonPrimitive(currency.currencyCode)) else emptyMap()
-        model.setGoal(node.id, unit + changes)
+        savedFirst.putAll(unit + changes)
+        onChange(unit + changes)
     }
 
     val (first, second) = goal.fields(way, node.attrs)
@@ -236,8 +250,13 @@ fun GoalSection(model: MapViewModel, node: MapNode, under: Rollup) {
                     selected = way == option,
                     onClick = {
                         if (way != option) {
+                            // A number or word typed a moment ago is saved for the way it was typed in, and the goal turns around from it.
+                            savedFirst.clear()
+                            drafts.saveNow()
+                            val typed = Goal.read(JsonObject(node.attrs.orEmpty() + savedFirst))
+                            savedFirst.clear()
                             way = option
-                            model.setGoal(node.id, goal.switchTo(option, currency, word))
+                            onChange(typed.switchTo(option, currency, word))
                         }
                     },
                     shape = SegmentedButtonDefaults.itemShape(index, GoalWay.entries.size),
@@ -255,6 +274,7 @@ fun GoalSection(model: MapViewModel, node: MapNode, under: Rollup) {
             currency = currency.takeIf { money },
             word = word.takeIf { !money },
             onCommit = { value -> set(goal.firstChanges(way, value)) },
+            drafts = drafts,
         )
         NumberField(
             key = "${node.id} ${way.name} second",
@@ -264,6 +284,7 @@ fun GoalSection(model: MapViewModel, node: MapNode, under: Rollup) {
             currency = currency.takeIf { money },
             word = word.takeIf { !money },
             onCommit = { value -> set(mapOf(GOAL_CURRENT to (value?.let(::number) ?: JsonNull))) },
+            drafts = drafts,
         )
 
         if (money) {
@@ -295,6 +316,7 @@ fun GoalSection(model: MapViewModel, node: MapNode, under: Rollup) {
                     word = text.trim().ifEmpty { null }
                     set(mapOf(GOAL_UNIT to (text.trim().ifEmpty { null }?.let(::JsonPrimitive) ?: JsonNull)))
                 },
+                drafts = drafts,
             )
         }
 
@@ -307,7 +329,7 @@ fun GoalSection(model: MapViewModel, node: MapNode, under: Rollup) {
             onPick = { picked ->
                 choosingCurrency = false
                 currencyCode = picked.currencyCode
-                model.setGoal(node.id, mapOf(GOAL_UNIT to JsonPrimitive(picked.currencyCode)))
+                onChange(mapOf(GOAL_UNIT to JsonPrimitive(picked.currencyCode)))
             },
             onDismiss = { choosingCurrency = false },
         )
@@ -522,10 +544,11 @@ private fun MenuItem(label: String, icon: ImageVector, onClick: () -> Unit) {
 
 /**
  * A goal in its idea's details: how far along it is, its numbers in words,
- * and a way to move it on: −1 and +1 for a count, an amount for money.
+ * and a way to move it on: −1 and +1 for a count, an amount for money; none
+ * on a map that can't be `changeable`.
  */
 @Composable
-fun GoalDetails(model: MapViewModel, node: MapNode, goal: Goal) {
+fun GoalDetails(model: MapViewModel, node: MapNode, goal: Goal, changeable: Boolean = true) {
     val locale = LocalConfiguration.current.locales[0]
     val words = rememberWords()
     var changing by rememberSaveable(node.id) { mutableStateOf<GoalChange?>(null) }
@@ -536,6 +559,8 @@ fun GoalDetails(model: MapViewModel, node: MapNode, goal: Goal) {
         Text(GoalNumbers.summary(goal, words, locale), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
 
         when {
+            // A map that can only be looked at offers no step, as it takes none.
+            !changeable -> Unit
             goal.target == null -> FilledTonalButton(onClick = { model.show(Panel.Editor(node.id)) }) { Text(stringResource(R.string.goal_set_a_target)) }
             goal.way == GoalWay.Counting -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 val takeOneOff = stringResource(R.string.goal_take_one_off)

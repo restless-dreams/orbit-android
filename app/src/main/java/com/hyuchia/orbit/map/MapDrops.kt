@@ -3,6 +3,7 @@ package com.hyuchia.orbit.map
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ContentResolver
+import android.net.Uri
 import android.view.DragEvent
 import android.view.View
 import androidx.annotation.StringRes
@@ -12,6 +13,7 @@ import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.data.AddedMotion
 import com.hyuchia.orbit.data.AddedPicture
+import com.hyuchia.orbit.data.AddedVideo
 import com.hyuchia.orbit.data.DropKind
 import com.hyuchia.orbit.data.DroppedItem
 import com.hyuchia.orbit.data.DroppedText
@@ -27,8 +29,10 @@ import com.hyuchia.orbit.data.droppedText
 import com.hyuchia.orbit.data.fromProvider
 import com.hyuchia.orbit.data.ideaName
 import com.hyuchia.orbit.media.NATIVE_PROVIDER
+import com.hyuchia.orbit.media.VideoMaker
 import com.hyuchia.orbit.page.DropPlace
 import com.hyuchia.orbit.page.MapCommand
+import com.hyuchia.orbit.page.MapFile
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.MapPage
 import com.hyuchia.orbit.page.Media
@@ -36,6 +40,7 @@ import com.hyuchia.orbit.page.PageException
 import com.hyuchia.orbit.page.PastedIdeas
 import com.hyuchia.orbit.page.ViewMode
 import com.hyuchia.orbit.page.findActivity
+import com.hyuchia.orbit.ui.MediaWords
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,7 +64,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
 
 /** What a drag over the map would do there, as the hint over the map says. */
-enum class DropOffer { Ideas, Pictures, Videos, Sounds, Maps, Move }
+enum class DropOffer { Ideas, Pictures, Videos, Sounds, Maps, Files, Move }
 
 /**
  * The hint over the map while something is dragged onto it: what letting go
@@ -68,8 +73,22 @@ enum class DropOffer { Ideas, Pictures, Videos, Sounds, Maps, Move }
  */
 data class DropHint(val offer: DropOffer, val target: String?, val high: Boolean = false)
 
-/** Pictures, videos and sounds let go on the map, while they're copied in: how many of how many, and how far along a video or a sound is. */
-data class DropCopy(val target: String, val done: Int, val total: Int, val video: Boolean, val progress: Float? = null, val sound: Boolean = false)
+/**
+ * Pictures, videos and sounds let go on the map, while they're copied in:
+ * how many of how many, and how far along a video or a sound is. `asking`
+ * says the person is being asked about big videos among them, so nothing is
+ * copied yet.
+ */
+data class DropCopy(
+    val target: String,
+    val done: Int,
+    val total: Int,
+    val video: Boolean,
+    val progress: Float? = null,
+    val sound: Boolean = false,
+    val smaller: Boolean = false,
+    val asking: Boolean = false,
+)
 
 /** An idea dragged out of Orbit, from its map or its outline: a drop back on the same map moves it. */
 data class OutgoingIdea(val mapId: String, val id: String)
@@ -91,14 +110,19 @@ sealed interface DropPlan {
     /** Text, and files of it: ideas under the idea, as pasting makes them. */
     data class Ideas(val items: List<DroppedItem>) : DropPlan
 
+    /** Files of other kinds, PDFs or spreadsheets, and every file let go with them: they join the idea's files. */
+    data class Files(val items: List<DroppedItem>) : DropPlan
+
     data object Nothing : DropPlan
 }
 
 /**
  * What a drop on a map does with what it holds: map files open as maps,
- * whatever else came with them; one picture, video or sound becomes the
- * idea's, several become ideas of their own; text becomes ideas. Text that
- * comes with pictures, such as a picture's address from a browser, stays out.
+ * whatever else came with them; files of other kinds, PDFs or spreadsheets,
+ * join the idea's files, with every other file let go with them; one
+ * picture, video or sound becomes the idea's, several become ideas of their
+ * own; text becomes ideas. Text that comes with files, such as a picture's
+ * address from a browser, stays out.
  */
 fun planDrop(items: List<DroppedItem>): DropPlan {
     val maps = items.filterIsInstance<DroppedItem.MapFile>()
@@ -107,6 +131,7 @@ fun planDrop(items: List<DroppedItem>): DropPlan {
 
     return when {
         maps.isNotEmpty() -> DropPlan.OpenMaps(maps)
+        items.any { it is DroppedItem.File } -> DropPlan.Files(items.filter { it !is DroppedItem.Text })
         media.size == 1 -> DropPlan.Media(media.single())
         media.isNotEmpty() -> DropPlan.NewIdeas(media)
         text.isNotEmpty() -> DropPlan.Ideas(text)
@@ -114,13 +139,18 @@ fun planDrop(items: List<DroppedItem>): DropPlan {
     }
 }
 
-/** What the hint says a drag offering `kinds` would do: map files open as maps, pictures, videos and sounds join ideas, text becomes ideas. */
+/**
+ * What the hint says a drag offering `kinds` would do, as [planDrop] does
+ * it once it's let go: map files open as maps, whatever else comes with
+ * them; pictures, videos and sounds join ideas; text becomes ideas.
+ */
 fun dropOffer(kinds: Set<DropKind>): DropOffer? = when {
+    DropKind.Maps in kinds -> DropOffer.Maps
+    DropKind.Files in kinds -> DropOffer.Files
     DropKind.Pictures in kinds -> DropOffer.Pictures
     DropKind.Videos in kinds -> DropOffer.Videos
     DropKind.Sounds in kinds -> DropOffer.Sounds
     DropKind.Ideas in kinds -> DropOffer.Ideas
-    DropKind.Maps in kinds -> DropOffer.Maps
     else -> null
 }
 
@@ -138,9 +168,9 @@ private const val MOVE_STEP = 1.5f
 private const val HIGH_SHARE = 0.4f
 
 /**
- * Whether a map shown as `state` takes drops: drawn, changeable, not behind
- * its lock (`locked`), and not presented, studied, made into a path or shown
- * at an earlier version.
+ * Whether a map shown as `state` takes drops, and pastes: drawn, changeable,
+ * not behind its lock (`locked`), and not presented, studied, made into a
+ * path or shown at an earlier version.
  */
 fun takesDrops(state: MapUi, locked: Boolean): Boolean =
     state.ready && !locked && state.readOnly == null && state.presentation == null && state.study == null && !state.pathMaking && !state.showingVersion
@@ -161,6 +191,11 @@ class MapDrops(
 
     /** Brings in maps from files let go on the map, when there are some. */
     private val importer: () -> Importer,
+
+    /** Big videos among what's dropped: offered smaller first, and made so by `maker`; a test's are offered nothing. */
+    private val bigVideos: BigVideos = BigVideos({ VideoMaker.NONE }, SmallerOffers()),
+
+    private val maker: () -> VideoMaker = { VideoMaker.NONE },
 
     private val words: Words,
     private val ui: StateFlow<MapUi>,
@@ -329,19 +364,43 @@ class MapDrops(
 
         scope.launch {
             try {
-                val target = place(x, y) ?: return@launch
-
-                if (own != null) {
-                    move(own.id, target)
-                } else {
-                    add(clip, resolver, target)
-                }
+                land(clip, resolver, own, x, y)
             } finally {
                 permissions?.release()
             }
         }
 
         return true
+    }
+
+    /**
+     * What a drop let go at (`x`, `y`) dp brings: `own`, an idea of this
+     * map, moves into the idea there, and anything else is added to it.
+     */
+    internal suspend fun land(clip: ClipData, resolver: ContentResolver, own: OutgoingIdea?, x: Float, y: Float) {
+        val target = place(x, y) ?: return
+
+        if (own != null) {
+            move(own.id, target)
+        } else {
+            add(clip, resolver, target)
+        }
+    }
+
+    /**
+     * Whether the map still takes the drop, right as it's added. A drop takes
+     * a while, as its files are read, its pictures copied and the person
+     * asked about a live photo: meanwhile the map may have begun to be
+     * presented, made into a path or studied, been locked, or shown at an
+     * earlier version, and then nothing is added, and the screen says so.
+     */
+    private fun stillTakes(): Boolean {
+        if (open()) {
+            return true
+        }
+
+        tell(MapEvent.Snackbar(ShownText.Resource(R.string.drop_not_added_now)))
+        return false
     }
 
     /** The idea a drop at (`x`, `y`) goes into: the page's, or the one in focus when the page can't say. */
@@ -362,6 +421,7 @@ class MapDrops(
         val node = nodes[id] ?: return
 
         when {
+            !stillTakes() -> Unit
             isWithin(nodes, target, id) -> tell(MapEvent.Snackbar(ShownText.Resource(R.string.drop_not_into_itself)))
             node.parentId == target -> Unit
             else -> {
@@ -380,6 +440,7 @@ class MapDrops(
             is DropPlan.Media -> addMedia(plan.item, resolver, target)
             is DropPlan.NewIdeas -> addNewIdeas(plan.items, resolver, target)
             is DropPlan.Ideas -> addText(plan.items, resolver, target)
+            is DropPlan.Files -> addFiles(plan.items, resolver, target)
             DropPlan.Nothing -> tell(MapEvent.Snackbar(ShownText.Resource(R.string.drop_nothing_to_add)))
         }
     }
@@ -458,6 +519,10 @@ class MapDrops(
             return
         }
 
+        if (!stillTakes()) {
+            return
+        }
+
         try {
             val pasted = page().request(PastedIdeas.serializer()) { job -> MapCommand.Paste(job, target, text) }
 
@@ -472,36 +537,99 @@ class MapDrops(
         }
     }
 
+    /**
+     * Files let go on an idea, of any kind: each copied into the map as it
+     * is, and all of them added to the idea's files as one change, with Undo.
+     * One that can't join, too big or unreadable, is left out, and the
+     * message says why; the rest still join.
+     */
+    private suspend fun addFiles(items: List<DroppedItem>, resolver: ContentResolver, target: String) {
+        // A live photo's two halves go as the two files they are.
+        val addresses = items.flatMap { item ->
+            when (item) {
+                is DroppedItem.LivePhoto -> listOf(item.still.address, item.movie.address)
+                is DroppedItem.Picture -> listOf(item.address)
+                is DroppedItem.Video -> listOf(item.address)
+                is DroppedItem.Sound -> listOf(item.address)
+                is DroppedItem.TextFile -> listOf(item.address)
+                is DroppedItem.File -> listOf(item.address)
+                is DroppedItem.MapFile, is DroppedItem.Text -> emptyList()
+            }
+        }
+
+        copied(target, total = addresses.size, video = false) {
+            val files = mutableListOf<MapFile>()
+            var problem: ShownText? = null
+
+            addresses.forEachIndexed { index, address ->
+                copyState.update { it?.copy(done = index + 1, progress = null) }
+
+                try {
+                    val copy = maps.addFile(mapId, address.toUri(), resolver) { progress -> copyState.update { it?.copy(progress = progress) } }
+                    files += MapFile(copy.src, copy.name, copy.type, copy.size)
+                } catch (refused: MediaRefusedException) {
+                    problem = ShownText.Plain(refused.message.orEmpty())
+                } catch (stopped: CancellationException) {
+                    throw stopped
+                } catch (unreadable: Exception) {
+                    Logs.warn(TAG, "Couldn't read a file that was dropped", unreadable)
+                    problem = ShownText.Resource(R.string.files_unreadable)
+                }
+            }
+
+            // Copied while the map went on: what it can't take now stays out, its files left for the map's tidying up.
+            if (files.isEmpty() || !stillTakes()) {
+                problem?.let { tell(MapEvent.Snackbar(it)) }
+                return@copied
+            }
+
+            page().send(MapCommand.AddFiles(target, files))
+            tell(MapEvent.Added)
+            val added = ShownText.Plural(R.plurals.files_added, files.size, listOf(label(target), files.size))
+            tell(MapEvent.Snackbar(problem?.let { ShownText.Joined(listOf(added, it), " ") } ?: added, undo = true))
+        }
+    }
+
     /** One picture, video or sound: copied into the map, and made the idea's, with Undo. */
     private suspend fun addMedia(item: DroppedItem, resolver: ContentResolver, target: String) {
         val video = item is DroppedItem.Video
 
         copied(target, total = 1, video = video, sound = item is DroppedItem.Sound) {
+            // A video made smaller, or kept as it is on a phone that can't, says so once it's the idea's.
+            var smaller: Pair<VideoWay, AddedVideo>? = null
+
             try {
-                if (item is DroppedItem.Picture) {
-                    val added = maps.addPicture(mapId, item.address.toUri(), resolver)
-                    update(target, "image", pictureAttribute(added))
-                    tell(MapEvent.Added)
-                    tell(MapEvent.Snackbar(ShownText.Resource(R.string.drop_added_the_picture, listOf(label(target))), undo = true))
-                } else if (item is DroppedItem.LivePhoto) {
-                    val added = maps.addLivePhoto(mapId, item.still.address.toUri(), item.movie.address.toUri(), resolver)
-                    update(target, "image", pictureAttribute(added))
-                    tell(MapEvent.Added)
-                    tell(MapEvent.Snackbar(ShownText.Resource(R.string.drop_added_the_live_photo, listOf(label(target))), undo = true))
-                } else if (item is DroppedItem.Video) {
-                    val added = maps.addVideo(mapId, item.address.toUri(), resolver) { progress -> copyState.update { it?.copy(progress = progress) } }
-                    val caption = ui.value.nodes[target]?.video?.caption
-                    update(target, "video", videoAttribute(added.src, added.thumbnail, caption))
-                    tell(MapEvent.Added)
-                    tell(MapEvent.Snackbar(ShownText.Resource(R.string.drop_added_the_video, listOf(label(target))), undo = true))
-                } else if (item is DroppedItem.Sound) {
-                    // As one added from the phone: the idea's caption stays, else the file's name gives one.
-                    val added = maps.addSound(mapId, item.address.toUri(), resolver) { progress -> copyState.update { it?.copy(progress = progress) } }
-                    val caption = ui.value.nodes[target]?.audio?.caption ?: added.caption
-                    update(target, "audio", soundAttribute(added.src, caption))
-                    tell(MapEvent.Added)
-                    tell(MapEvent.Snackbar(ShownText.Resource(R.string.drop_added_the_sound, listOf(label(target))), undo = true))
+                // The idea's field, its new value, and what's said once it's the idea's.
+                val (field, value, added) = when (item) {
+                    is DroppedItem.Picture -> Triple("image", pictureAttribute(maps.addPicture(mapId, item.address.toUri(), resolver)), R.string.drop_added_the_picture)
+                    is DroppedItem.LivePhoto ->
+                        Triple("image", pictureAttribute(maps.addLivePhoto(mapId, item.still.address.toUri(), item.movie.address.toUri(), resolver)), R.string.drop_added_the_live_photo)
+                    is DroppedItem.Video -> {
+                        val uri = item.address.toUri()
+                        // A big one is offered smaller first: the person may choose neither, and nothing comes in.
+                        val way = bigVideos.way(uri, maps.sizeOf(uri, resolver), maps.mediaSizeNow(mapId), ::asking)
+                        copyState.update { it?.copy(asking = false) }
+                        val copy = addVideo(uri, resolver, way) ?: return@copied
+                        smaller = way to copy
+                        Triple("video", videoAttribute(copy.src, copy.thumbnail, ui.value.nodes[target]?.video?.caption), R.string.drop_added_the_video)
+                    }
+                    is DroppedItem.Sound -> {
+                        // As one added from the phone: the idea's caption stays, else the file's name gives one.
+                        val copy = maps.addSound(mapId, item.address.toUri(), resolver) { progress -> copyState.update { it?.copy(progress = progress) } }
+                        Triple("audio", soundAttribute(copy.src, ui.value.nodes[target]?.audio?.caption ?: copy.caption), R.string.drop_added_the_sound)
+                    }
+                    else -> return@copied
                 }
+
+                // Copied while the map went on: what it can't take now stays out, its file left for the map's tidying up.
+                if (!stillTakes()) {
+                    return@copied
+                }
+
+                update(target, field, value)
+                tell(MapEvent.Added)
+                tell(MapEvent.Snackbar(ShownText.Resource(added, listOf(label(target))), undo = true))
+                smaller?.let { (way, video) -> madeSmaller(way, video) }
             } catch (refused: MediaRefusedException) {
                 tell(MapEvent.Snackbar(ShownText.Plain(refused.message.orEmpty())))
             } catch (stopped: CancellationException) {
@@ -523,6 +651,11 @@ class MapDrops(
         copied(target, total = items.size, video = items.any { it is DroppedItem.Video }, sound = items.any { it is DroppedItem.Sound }) {
             val nodes = mutableListOf<JsonObject>()
             var problem: String? = null
+            // The big videos among them are offered smaller once, all together, before any is copied.
+            val mapMedia = maps.mediaSizeNow(mapId)
+            val big = items.filterIsInstance<DroppedItem.Video>().mapNotNull { bigVideos.big(it.address.toUri(), maps.sizeOf(it.address.toUri(), resolver), mapMedia) }
+            val ways = if (big.isEmpty()) emptyMap() else bigVideos.ways(big, mapMedia, ::asking)
+            copyState.update { it?.copy(asking = false) }
 
             items.forEachIndexed { index, item ->
                 copyState.update { it?.copy(done = index + 1, progress = null) }
@@ -538,7 +671,7 @@ class MapDrops(
                             put("image", pictureAttribute(maps.addLivePhoto(mapId, item.still.address.toUri(), item.movie.address.toUri(), resolver)))
                         }
                         is DroppedItem.Video -> {
-                            val added = maps.addVideo(mapId, item.address.toUri(), resolver) { progress -> copyState.update { it?.copy(progress = progress) } }
+                            val added = addVideo(item.address.toUri(), resolver, ways[item.address.toUri()] ?: VideoWay.AsItIs) ?: return@forEachIndexed
 
                             buildJsonObject {
                                 put("text", ideaName(item.name) ?: words.string(R.string.drop_video))
@@ -571,6 +704,10 @@ class MapDrops(
                 return@copied
             }
 
+            if (!stillTakes()) {
+                return@copied
+            }
+
             val count = try {
                 page().request(PastedIdeas.serializer()) { job -> MapCommand.AddNodes(job, target, nodes) }.count
             } catch (failed: PageException) {
@@ -593,6 +730,37 @@ class MapDrops(
             }
 
             tell(MapEvent.Snackbar(message, undo = true))
+        }
+    }
+
+    /**
+     * Copies a video let go on the map into its folder as `way` says: made
+     * smaller on the phone, the pill saying how far along it is, or as it is.
+     * Null when the person chose neither, and it doesn't come in.
+     */
+    private suspend fun addVideo(uri: Uri, resolver: ContentResolver, way: VideoWay): AddedVideo? = when (way) {
+        VideoWay.Neither -> null
+        is VideoWay.Smaller -> {
+            copyState.update { it?.copy(progress = 0f, smaller = true) }
+
+            maps.addMadeVideo(mapId, way.plan.estimate) { made ->
+                maker().make(uri, way.plan, made) { progress -> copyState.update { it?.copy(progress = progress, smaller = true) } }
+            }.also { copyState.update { it?.copy(smaller = false) } }
+        }
+        else -> maps.addVideo(mapId, uri, resolver) { progress -> copyState.update { it?.copy(progress = progress) } }
+    }
+
+    /** While the person is asked about big videos let go on the map, the pill over it doesn't say they're being copied. */
+    private fun asking() {
+        copyState.update { it?.copy(asking = true) }
+    }
+
+    /** Says a video let go on the map was made smaller, from how big to how big, or that this phone couldn't make it smaller. */
+    private fun madeSmaller(way: VideoWay, added: AddedVideo) {
+        when (way) {
+            is VideoWay.Smaller -> tell(MapEvent.Snackbar(ShownText.Resource(R.string.map_made_the_video_smaller, listOf(MediaWords.size(added.bytes, words), MediaWords.size(way.size, words)))))
+            VideoWay.AsItIsHere -> tell(MapEvent.Snackbar(ShownText.Resource(R.string.map_cannot_make_videos_smaller)))
+            else -> Unit
         }
     }
 

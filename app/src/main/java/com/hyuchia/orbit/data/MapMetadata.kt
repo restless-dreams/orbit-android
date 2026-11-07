@@ -76,6 +76,16 @@ data class MapMetadata(
      */
     val studyElsewhere: Map<String, Map<String, StudyCard>>? = null,
 
+    /**
+     * The ideas the map's cards have answers for, here or on another device,
+     * that weren't cards when this device's page last read the map whole:
+     * gone from it, or with no ideas or note under them anymore. No session
+     * studies them, so Home doesn't count them as due ([studyCounted]), and
+     * their answers stay, for when they're cards again. Null: none, as in
+     * details from before it.
+     */
+    val studyNotCards: List<String>? = null,
+
     /** The map's file in the folder maps are kept in, and how both sides were when they last matched. */
     val sync: SyncRecord? = null,
 
@@ -105,9 +115,32 @@ data class MapMetadata(
     /** How each card is going, from this device's answers and the other devices': each as its latest answer left it. */
     val studyProgress: Map<String, StudyCard> get() = mergedProgress(study, studyElsewhere)
 
+    /** How each of the map's cards is going ([studyProgress]), without the ideas that weren't cards when last read ([studyNotCards]): what Home counts. */
+    val studyCounted: Map<String, StudyCard> get() = studyNotCards?.toSet()?.let { aside -> studyProgress.filterKeys { it !in aside } } ?: studyProgress
+
     /** Whether these details keep something about `idea`, by its id: its place on the path, its rehearsal's time, or how its card is going, here or on another device. */
     fun remembers(idea: String): Boolean =
         idea in path.orEmpty() || rehearsal?.containsKey(idea) == true || study?.containsKey(idea) == true || studyElsewhere.orEmpty().values.any { idea in it }
+
+    /**
+     * These details with the ideas new text gave new ids, `renames` from the
+     * old to the new, keeping what they keep about them: the path, the
+     * rehearsal and the study. A card goes on as its latest answer on any
+     * device left it, kept as this device's own, over what an idea that had
+     * the new id before left: the other devices see only the new text, and
+     * find the card under the new id in this device's record in the folder.
+     * Their own answers stay as their records say.
+     */
+    fun withIdeasRenamed(renames: Map<String, String>): MapMetadata {
+        val progress = studyProgress
+        val cards = renames.mapNotNull { (from, to) -> progress[from]?.let { to to it } }.toMap()
+
+        return copy(
+            path = path?.map { renames[it] ?: it },
+            rehearsal = rehearsal?.mapKeys { (idea, _) -> renames[idea] ?: idea },
+            study = if (cards.isEmpty()) study else study.orEmpty() - renames.keys + cards,
+        )
+    }
 }
 
 /**

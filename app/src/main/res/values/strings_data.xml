@@ -56,6 +56,10 @@
     <string name="data_zip_points_outside">That zip has a file that points outside it.</string>
     <string name="data_zip_file_too_big">A file in that zip is too big to be part of a map.</string>
     <string name="data_no_room_for_zip_maps">There isn\'t room on this device for the maps in that zip.</string>
+    <!-- A zip of one map, opened or let go on the list of maps, before any of it is unpacked: %1$s is about what the map takes, %2$s what's free, sizes as data_megabytes says them. -->
+    <string name="data_no_room_for_zip_map">There isn\'t room on this device for the map in that zip: it takes about %1$s, and %2$s is free.</string>
+    <!-- The same, when the device runs out of room as the map is unpacked. -->
+    <string name="data_no_room_left_for_zip_map">There isn\'t room on this device for the map in that zip.</string>
     <!-- Said after a zip of maps came in, when some of its folders had no map in them: pictures or versions without the map's text. -->
     <!-- Said after a zip of every map came in, when maps already here were missing some of its files: pictures, videos, sounds or versions, as after a cloud backup that left them out. -->
     <plurals name="data_zip_files_filled_in">
@@ -67,7 +71,7 @@
         <item quantity="other">%1$d folders in that zip had no map in them, so they were left out.</item>
     </plurals>
 
-    <!-- Pictures and videos a map can't take. Sizes read as data_megabytes does: 50 MB. -->
+    <!-- Pictures and videos a map can't take. Sizes read as data_megabytes and data_gigabytes do: 250 MB, 1 GB. -->
     <!-- %1$s is the video's size, %2$s the most a video can be. -->
     <string name="data_video_too_big">That video is %1$s, and a map keeps videos of up to %2$s, so it can still go to your other devices. Trim it in your gallery, or add it as a YouTube or Vimeo link.</string>
     <!-- %1$s is the most a video can be. -->
@@ -80,9 +84,13 @@
     <string name="data_video_kind_refused">Orbit keeps videos as MP4, WebM or QuickTime files, and this one is %1$s.</string>
     <string name="data_video_kind_unknown">Orbit keeps videos as MP4, WebM or QuickTime files, and this one is of a kind it doesn\'t know.</string>
     <string name="data_no_room_for_video">There isn\'t room on this device for that video.</string>
+    <!-- Ideas copied in another map, pasted into this one: their pictures, videos and sounds come with them. -->
+    <string name="data_no_room_for_pasted_media">There isn\'t room on this device for the pictures, videos and sounds of those ideas.</string>
     <string name="data_more_than_a_map_keeps">That\'s more than a map keeps.</string>
     <!-- A size: %1$s is a number of megabytes, such as 64.5. -->
     <string name="data_megabytes">%1$s MB</string>
+    <!-- A size from 1,000 MB on: %1$s is a number of gigabytes, such as 1.2. -->
+    <string name="data_gigabytes">%1$s GB</string>
 
     <!-- Keeping the maps in a folder -->
     <!-- The folder's name, when Orbit can't learn it. -->
@@ -97,6 +105,18 @@
         <item quantity="one">One file in the folder couldn\'t be read.</item>
         <item quantity="other">%1$d files in the folder couldn\'t be read.</item>
     </plurals>
+    <!-- Pictures, videos or sounds that have kept failing to come from the folder for a while: %1$d counts the maps missing them. -->
+    <plurals name="data_folder_media_not_arriving">
+        <item quantity="one">One map is still missing pictures, videos or sounds from the folder.</item>
+        <item quantity="other">%1$d maps are still missing pictures, videos or sounds from the folder.</item>
+    </plurals>
+    <!-- Pictures, videos or sounds not copied to or from the folder because this device is short of room: %1$d is how many. data_folder_tries_again follows. -->
+    <plurals name="data_folder_no_room">
+        <item quantity="one">A picture, video or sound needs more room than this device has free.</item>
+        <item quantity="other">%1$d pictures, videos or sounds need more room than this device has free.</item>
+    </plurals>
+    <!-- Orbit's own record of the maps deleted on this device couldn't be read, so it doesn't sync until it can: otherwise a deleted map's file could come back from the folder. -->
+    <string name="data_folder_deletions_unreadable">Orbit couldn\'t read which maps were deleted on this device, so your maps wait to be brought in step with the folder. It tries again in a moment.</string>
     <!-- Follows the sentences above. -->
     <string name="data_folder_tries_again">Orbit tries again in a moment.</string>
     <!-- A picture or video too big to join its map, in the list settings_folder_too_big ends with: %1$s is its file's name, %2$s the map's title. -->

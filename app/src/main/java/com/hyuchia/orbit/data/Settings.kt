@@ -96,6 +96,15 @@ data class AppSettings(
 
     /** How many new cards a map brings into each day's study, after the ones that are due: the learner's choice. */
     val newCardsADay: Int = NEW_CARDS_A_DAY,
+
+    /** Ideas' dates remind on this device when they come (see [com.hyuchia.orbit.reminders.Reminders]). */
+    val reminders: Boolean = true,
+
+    /**
+     * Orbit asked to post notifications, the first time a date was set on
+     * Android 13 or later: it asks once, and Settings offers it again.
+     */
+    val notificationsAsked: Boolean = false,
 )
 
 // A settings file that can't be read starts over instead of stopping the app: settings are quick to choose
@@ -134,6 +143,8 @@ private object Keys {
     val storageNoteDismissed = booleanPreferencesKey("storage_note_dismissed")
     val folderNoticesDismissed = stringSetPreferencesKey("folder_notices_dismissed")
     val newCardsADay = intPreferencesKey("new_cards_a_day")
+    val reminders = booleanPreferencesKey("reminders")
+    val notificationsAsked = booleanPreferencesKey("notifications_asked")
 }
 
 /** The value at `key`; null without one, or with one of another type. */
@@ -195,6 +206,8 @@ class SettingsRepository internal constructor(private val store: DataStore<Prefe
             keep(Keys.storageNoteDismissed) { it.storageNoteDismissed }
             keep(Keys.folderNoticesDismissed) { it.folderNoticesDismissed }
             keep(Keys.newCardsADay) { it.newCardsADay }
+            keep(Keys.reminders) { it.reminders }
+            keep(Keys.notificationsAsked) { it.notificationsAsked }
         }
     }
 
@@ -225,6 +238,8 @@ class SettingsRepository internal constructor(private val store: DataStore<Prefe
             storageNoteDismissed = preferences.valueOf(Keys.storageNoteDismissed) ?: defaults.storageNoteDismissed,
             folderNoticesDismissed = (preferences.asMap()[Keys.folderNoticesDismissed] as? Set<*>)?.filterIsInstance<String>()?.toSet() ?: defaults.folderNoticesDismissed,
             newCardsADay = preferences.valueOf(Keys.newCardsADay)?.takeIf { it > 0 } ?: defaults.newCardsADay,
+            reminders = preferences.valueOf(Keys.reminders) ?: defaults.reminders,
+            notificationsAsked = preferences.valueOf(Keys.notificationsAsked) ?: defaults.notificationsAsked,
         )
     }
 }

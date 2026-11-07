@@ -35,6 +35,7 @@ const STATE: MapState = {
       drawnColor: 'var(--_orbit-color-0)',
       status: null,
       priority: null,
+      due: null,
       tags: [],
       collapsed: false,
       type: null,
@@ -47,6 +48,7 @@ const STATE: MapState = {
       embed: null,
       attrs: null,
       audio: null,
+      files: [],
     },
     {
       id: 'tokyo',
@@ -60,6 +62,7 @@ const STATE: MapState = {
       drawnColor: '#e91e63',
       status: 'todo',
       priority: 2,
+      due: '2027-04-02 09:30',
       tags: ['city'],
       collapsed: true,
       type: 'goal',
@@ -72,6 +75,10 @@ const STATE: MapState = {
       embed: null,
       attrs: { target: 3000, current: 1250, unit: 'USD' },
       audio: { src: 'media/memo-mf2k1x.mp4', alt: null, caption: 'Where to stay', provider: null, thumbnail: null, motion: null },
+      files: [
+        { src: 'media/file-rail-pass.pdf', name: 'Rail pass.pdf', type: 'application/pdf', size: 48213 },
+        { src: 'media/budget.xlsx', name: null, type: null, size: null },
+      ],
     },
     {
       // Numbers past what the app holds, as the page sends them (whole-numbers.ts): `type: goal@99999999999`, `priority: -1e21`.
@@ -86,6 +93,7 @@ const STATE: MapState = {
       drawnColor: 'var(--_orbit-color-1)',
       status: null,
       priority: SMALLEST_WHOLE,
+      due: null,
       tags: [],
       collapsed: false,
       type: 'goal',
@@ -98,6 +106,7 @@ const STATE: MapState = {
       embed: null,
       attrs: null,
       audio: null,
+      files: [],
     },
   ],
   options: { theme: 'night', palette: ['#e91e63', '#3f51b5'], showRings: true, animation: false, speed: 1.5, maxDepth: 3, view: 'focus', progressRings: false, tags: ['travel'] },
@@ -137,6 +146,9 @@ export const MAP_COMMANDS: OneOfEach<Command> = {
   add: { type: 'add', parentId: 'trip-to-japan', node: { text: 'Kyoto', status: 'todo' }, index: null },
   update: { type: 'update', id: 'tokyo', changes: { color: '#3f51b5', note: null, attrs: { current: 1300 } } },
   addToGoal: { type: 'addToGoal', id: 'tokyo', amount: 25.5 },
+  checkNote: { type: 'checkNote', id: 'tokyo', line: 2, checked: true },
+  addFiles: { type: 'addFiles', id: 'tokyo', files: [{ src: 'media/file-hotel.pdf', name: 'Hotel: booking, final.pdf', type: 'application/pdf', size: 1250000 }] },
+  removeFile: { type: 'removeFile', id: 'tokyo', src: 'media/file-rail-pass.pdf' },
   remove: { type: 'remove', id: 'tokyo' },
   move: { type: 'move', id: 'tokyo', parentId: 'trip-to-japan', index: 0 },
   duplicate: { type: 'duplicate', id: 'tokyo' },
@@ -185,8 +197,12 @@ export const MAP_COMMANDS: OneOfEach<Command> = {
   },
   mapFromText: { type: 'mapFromText', job: 12, text: 'Trip to Japan\n\tTokyo\n\t\tShibuya\n\tKyoto', subject: null },
   editMap: { type: 'editMap', job: 13, markdown: '# Trip to Japan\n', title: 'Japan in spring', tags: ['travel', 'Plans'] },
+  cancel: { type: 'cancel', job: 3 },
   hideChildren: { type: 'hideChildren', ids: ['trip-to-japan', 'tokyo'] },
   revealChildren: { type: 'revealChildren', ids: null },
+  spotlight: { type: 'spotlight', id: 'tokyo', insets: { top: 64, right: 0, bottom: 112, left: 0 }, share: null },
+  endSpotlight: { type: 'endSpotlight' },
+  pictureShown: { type: 'pictureShown', job: 14, src: 'media/sketch-m4k2x9.svg' },
 };
 
 /** What the map's page tells the app. */
@@ -211,6 +227,7 @@ export const MAP_MESSAGES: OneOfEach<Message> = {
   declined: { type: 'declined', change: 'update', message: 'A node\'s image is its address, or { src, alt, caption, motion }, like { image: \'summit.jpg\' }, but got 42.' },
   dropTarget: { type: 'dropTarget', id: 'tokyo' },
   dragOut: { type: 'dragOut', id: 'tokyo' },
+  spotlight: { type: 'spotlight', id: 'tokyo', phase: 'rest', x: 180, y: 271.5, radius: 154.8, scrim: 'rgba(15, 23, 42, 0.45)' },
 };
 
 /** What the app tells an audience's page, on a second screen or a TV. */

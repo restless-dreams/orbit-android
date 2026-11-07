@@ -120,24 +120,31 @@ import com.hyuchia.orbit.AppContainer
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
+import com.hyuchia.orbit.data.FolderNotes
 import com.hyuchia.orbit.data.ImportResult
 import com.hyuchia.orbit.data.MapFileTypes
 import com.hyuchia.orbit.data.MapSummary
+import com.hyuchia.orbit.data.MapText
 import com.hyuchia.orbit.data.MediaSummary
 import com.hyuchia.orbit.data.SortOrder
+import com.hyuchia.orbit.data.TrashedMap
 import com.hyuchia.orbit.data.Uncleaned
 import com.hyuchia.orbit.data.forgetPrivateMapsLeftOutOfRestore
 import com.hyuchia.orbit.page.SystemWebView
 import com.hyuchia.orbit.privacy.CoverDialog
+import com.hyuchia.orbit.privacy.KeyboardsDontLearn
+import com.hyuchia.orbit.privacy.MapMessage
 import com.hyuchia.orbit.privacy.PrivateOnScreen
 import com.hyuchia.orbit.privacy.Unlocked
 import com.hyuchia.orbit.privacy.WhenPrivateMapsLock
 import com.hyuchia.orbit.privacy.conceals
 import com.hyuchia.orbit.privacy.coverTitle
+import com.hyuchia.orbit.privacy.dismissAsPrivateMapsLock
 import com.hyuchia.orbit.privacy.lockedLook
 import com.hyuchia.orbit.privacy.rememberMakePrivate
 import com.hyuchia.orbit.privacy.rememberUnlocking
 import com.hyuchia.orbit.settings.noteEntries
+import com.hyuchia.orbit.study.rememberStudyDay
 import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.KeyboardShortcuts
@@ -183,47 +190,53 @@ fun HomeScreen(
     val query by model.query.collectAsStateWithLifecycle()
     val settings = LocalAppSettings.current
     val folder by container.folderSync.state.collectAsStateWithLifecycle()
+    // How many cards each map has due moves on with the day: at midnight, and as the phone's time zone changes.
+    val today = rememberStudyDay()
     val scope = rememberCoroutineScope()
     val snackbars = remember { SnackbarHostState() }
 
-    // A map deleted from its own screen is offered back here, once the list shows: a private one named only while they're
-    // unlocked, and not mentioned while they hide (it waits in the trash).
     val hiding by rememberUpdatedState(settings.hideLockedPrivateMaps)
 
-    LaunchedEffect(container) {
-        for (item in container.deletedMaps) {
-            snackbars.currentSnackbarData?.dismiss()
-            val privacy = container.privateMaps.view.value
-            val hidden = item.isPrivate && privacy.hides(item.id)
+    /**
+     * Offers a deleted map back with Undo, named as private maps are as the message shows, not as they were when it was
+     * deleted, which takes a moment: a private one by its title only while it's unlocked, by its cover, if it has one,
+     * while it's locked, and not at all while they hide (it waits in the trash). Named while they're unlocked, the
+     * message goes as they lock, even while it waits for the one before it to go. Otherwise it names none of them, so it
+     * stays as they lock, with its Undo, even when Home hears they locked only after it showed.
+     */
+    suspend fun offerBack(item: TrashedMap) {
+        snackbars.currentSnackbarData?.dismiss()
+        val privacy = container.privateMaps.view.value
+        val hidden = item.isPrivate && privacy.hides(item.id)
 
-            if (hidden && privacy.conceals(hiding)) {
-                continue
-            }
+        if (hidden && privacy.conceals(hiding)) {
+            return
+        }
 
-            // Hidden, it's named by its cover, if it has one.
-            val named = when {
-                !hidden -> item.title
-                item.cover != null -> resources.coverTitle(item.cover)
-                else -> null
-            }
+        val named = when {
+            !hidden -> item.title
+            item.cover != null -> resources.coverTitle(item.cover)
+            else -> null
+        }
 
-            val result = snackbars.showSnackbar(
-                named?.let { resources.getString(R.string.home_deleted_map, it) } ?: resources.getString(R.string.private_deleted_map),
-                actionLabel = resources.getString(R.string.common_undo),
-                duration = SnackbarDuration.Long,
-            )
+        val message = named?.let { resources.getString(R.string.home_deleted_map, it) } ?: resources.getString(R.string.private_deleted_map)
 
-            if (result == SnackbarResult.ActionPerformed) {
-                model.restore(item)
-            }
+        val namesPrivateMap = item.isPrivate && !hidden
+        val undo = resources.getString(R.string.common_undo)
+
+        suspend fun show(): SnackbarResult = snackbars.showSnackbar(MapMessage(message, namesPrivateMap, actionLabel = undo, duration = SnackbarDuration.Long))
+
+        val result = if (namesPrivateMap) container.privateMaps.lock.unlessLocked(::show) else show()
+
+        if (result == SnackbarResult.ActionPerformed) {
+            model.restore(item)
         }
     }
 
-    // A map that couldn't be made or duplicated says why.
-    LaunchedEffect(model) {
-        model.problems.collect { problem ->
-            snackbars.currentSnackbarData?.dismiss()
-            snackbars.showSnackbar(problem)
+    // A map deleted from its own screen is offered back here, once the list shows.
+    LaunchedEffect(container) {
+        for (item in container.deletedMaps) {
+            offerBack(item)
         }
     }
 
@@ -231,15 +244,27 @@ fun HomeScreen(
     var renaming by remember { mutableStateOf<MapSummary?>(null) }
     var tagging by remember { mutableStateOf<MapSummary?>(null) }
     var managingTags by rememberSaveable { mutableStateOf(false) }
+    // While Edit tags is open over Home, what Home says shows in it: a tag renamed in every map says there which maps kept it.
+    val tagMessages = remember { SnackbarHostState() }
     // A map with pictures, videos or audio, and what goes with it, while its sheet asks how to share it.
     var sharing by remember { mutableStateOf<SharingMap?>(null) }
     // A private map whose cover is being chosen.
     var covering by remember { mutableStateOf<MapSummary?>(null) }
     var fabOpen by rememberSaveable { mutableStateOf(false) }
 
-    // When private maps lock, what named one here goes with them: a message, and the map being renamed or tagged.
+    // A map that couldn't be made or duplicated says why, and a tag that stayed on maps says which.
+    LaunchedEffect(model) {
+        model.problems.collect { problem ->
+            val host = if (managingTags) tagMessages else snackbars
+            host.currentSnackbarData?.dismiss()
+            host.showSnackbar(problem)
+        }
+    }
+
+    // When private maps lock, what named one here goes with them: a message that names one, and the map being renamed or tagged.
     WhenPrivateMapsLock {
-        snackbars.currentSnackbarData?.dismiss()
+        snackbars.dismissAsPrivateMapsLock()
+        tagMessages.currentSnackbarData?.dismiss()
         renaming = renaming?.takeUnless { it.metadata.isPrivate }
         tagging = tagging?.takeUnless { it.metadata.isPrivate }
         sharing = sharing?.takeUnless { it.map.metadata.isPrivate }
@@ -306,6 +331,9 @@ fun HomeScreen(
                 val media = container.maps.mediaSummary(map.id)
                 val uncleaned = container.maps.uncleaned(map.id)
                 val clean = container.maps.mediaSummary(map.id, leavingOut = uncleaned.names)
+                // Its text alone goes as the file its text is, markdown or YAML.
+                val text = container.maps.read(map.id)
+                val yaml = withContext(Dispatchers.Default) { MapText.isYaml(text) }
 
                 // A private map that locked meanwhile isn't named, or counted, after all.
                 if (container.privateMaps.hides(map)) {
@@ -316,7 +344,7 @@ fun HomeScreen(
                 if (media.isEmpty) {
                     share(map, withFiles = false)
                 } else {
-                    sharing = SharingMap(map, media, clean, uncleaned)
+                    sharing = SharingMap(map, media, clean, uncleaned, yaml)
                 }
             }
         },
@@ -325,16 +353,7 @@ fun HomeScreen(
             scope.launch {
                 val deleted = model.delete(map.id) ?: return@launch
                 withdrawShortcut(context, map.id)
-                snackbars.currentSnackbarData?.dismiss()
-                val result = snackbars.showSnackbar(
-                    resources.getString(R.string.home_deleted_map, map.title),
-                    actionLabel = resources.getString(R.string.common_undo),
-                    duration = SnackbarDuration.Long,
-                )
-
-                if (result == SnackbarResult.ActionPerformed) {
-                    model.restore(deleted)
-                }
+                offerBack(deleted)
             }
         },
         onAddToHomeScreen = if (widgetsPinnable) {
@@ -385,7 +404,7 @@ fun HomeScreen(
             locked = locked,
             modifier = modifier,
             lockedCard = { LockedMapCard(map.metadata.pinned, onUnlock = ::unlock, open = !privacy.hides(map), cover = map.metadata.cover, look = lockedLook(map.id)) },
-            card = { MapCard(map, actions(map)) },
+            card = { MapCard(map, actions(map), today) },
         )
     }
 
@@ -632,7 +651,8 @@ fun HomeScreen(
                         removed.size,
                         folder.name ?: stringResource(R.string.settings_your_folder),
                         onOpenTrash = onTrash,
-                        onDismiss = container.folderSync::dismissNotes,
+                        // Only what the card said is read: while private maps hide, theirs stay, and wait in the trash.
+                        onDismiss = { container.folderSync.dismissNotes(FolderNotes(removed = removed), hidden = { concealing && it.isPrivate && privacy.hides(it.id) }) },
                         modifier = Modifier.animateItem(),
                     )
                 }
@@ -686,7 +706,7 @@ fun HomeScreen(
                     item(key = "search-found", span = { GridItemSpan(maxLineSpan) }) { SearchFound(results.size, state.searched) }
 
                     items(results, key = { it.map.id }) { hit ->
-                        MapCard(hit.map, actions(hit.map), snippet = hit.snippet, modifier = Modifier.animateItem())
+                        MapCard(hit.map, actions(hit.map), today, snippet = hit.snippet, modifier = Modifier.animateItem())
                     }
                 }
                 state.isEmpty -> {
@@ -700,7 +720,15 @@ fun HomeScreen(
                 }
                 else -> {
                     if (state.pinned.isNotEmpty()) {
-                        header("pinned-header") { SectionHeader(stringResource(R.string.home_pinned_maps)) }
+                        header("pinned-header") {
+                            // The order sorts the pinned maps too: with no others shown, it's beside them.
+                            SectionHeader(stringResource(R.string.home_pinned_maps)) {
+                                if (state.others.isEmpty()) {
+                                    SortMenu(state.sortOrder, model::sort)
+                                }
+                            }
+                        }
+
                         items(state.pinned, key = { it.id }) { map -> HomeCard(map, moving(map)) }
                     }
 
@@ -744,6 +772,7 @@ fun HomeScreen(
             shared.media,
             shared.clean,
             shared.uncleaned,
+            yaml = shared.yaml,
             onShare = { withFiles, asTheyAre ->
                 sharing = null
                 scope.launch { share(shared.map, withFiles, asTheyAre) }
@@ -753,13 +782,7 @@ fun HomeScreen(
     }
 
     tagging?.let { map ->
-        TagsSheet(
-            title = map.title,
-            tags = map.outline.tags,
-            known = state.tags.map { it.name },
-            onChange = { tags -> model.setTags(map.id, tags) },
-            onDismiss = { tagging = null },
-        )
+        MapTagsSheet(map, known = state.tags.map { it.name }, onChange = { tags -> model.setTags(map.id, tags) }, onDismiss = { tagging = null })
     }
 
     // Removing the last tag leaves nothing to edit.
@@ -770,15 +793,13 @@ fun HomeScreen(
     }
 
     if (managingTags) {
-        ManageTagsSheet(state.tags, onRename = model::renameTag, onRemove = model::removeTag, onDismiss = { managingTags = false })
+        ManageTagsSheet(state.tags, tagMessages, onRename = model::renameTag, onRemove = model::removeTag, onDismiss = { managingTags = false })
     }
 
     renaming?.let { map ->
-        TitleDialog(
-            heading = stringResource(R.string.home_rename_map),
-            confirm = stringResource(R.string.common_rename),
-            initial = map.title,
-            onConfirm = { title ->
+        RenameMapDialog(
+            map,
+            onRename = { title ->
                 renaming = null
                 model.rename(map.id, title)
             },
@@ -788,6 +809,28 @@ fun HomeScreen(
 
     covering?.let { map ->
         CoverDialog(map, onDismiss = { covering = null })
+    }
+}
+
+/** Renames `map` from its card: a private map's title asks keyboards not to learn from it, as what's typed into the map does. */
+@Composable
+internal fun RenameMapDialog(map: MapSummary, onRename: (String) -> Unit, onDismiss: () -> Unit) {
+    KeyboardsDontLearn(enabled = map.metadata.isPrivate) {
+        TitleDialog(
+            heading = stringResource(R.string.home_rename_map),
+            confirm = stringResource(R.string.common_rename),
+            initial = map.title,
+            onConfirm = onRename,
+            onDismiss = onDismiss,
+        )
+    }
+}
+
+/** Tags `map` from its card, with the tags of the maps shown (`known`): a private map's ask keyboards not to learn from them. */
+@Composable
+internal fun MapTagsSheet(map: MapSummary, known: List<String>, onChange: (List<String>) -> Unit, onDismiss: () -> Unit) {
+    KeyboardsDontLearn(enabled = map.metadata.isPrivate) {
+        TagsSheet(title = map.title, tags = map.outline.tags, known = known, onChange = onChange, onDismiss = onDismiss)
     }
 }
 
@@ -1041,22 +1084,34 @@ private fun SearchFound(count: Int, searched: String) {
 /** Ctrl+, opens the settings, as in most apps. */
 private val SettingsKeys = Keys(KeyEvent.KEYCODE_COMMA, ctrl = true, character = ',')
 
-/** A map whose sheet asks how to share it: all its own files (`media`), those that go clean, and those that can't. */
-private class SharingMap(val map: MapSummary, val media: MediaSummary, val clean: MediaSummary, val uncleaned: Uncleaned)
+/** A map whose sheet asks how to share it: all its own files (`media`), those that go clean, and those that can't, and whether its text is YAML. */
+private class SharingMap(val map: MapSummary, val media: MediaSummary, val clean: MediaSummary, val uncleaned: Uncleaned, val yaml: Boolean)
 
 /**
  * Shares a map as a zip with its own pictures, videos and audio (see
  * [MapRepository.writeZip]), with those that can't go clean in `asTheyAre`
- * as they are, or as its markdown file alone. A private map that locked
+ * as they are, or as its text alone ([TextFile]). A private map that locked
  * while its zip was written, which takes seconds with its videos, opens
  * nothing ([shareMapExport]).
  */
 suspend fun shareMap(context: Context, container: AppContainer, map: MapSummary, withFiles: Boolean, asTheyAre: Set<String> = emptySet()) {
     if (withFiles) {
-        shareMapExport(context, map.id, exportName(context, map.title, "zip"), "application/zip", map.title) { container.maps.writeZip(map.id, it, asTheyAre) }
+        shareMapExport(context, map.id, exportName(context, map.title, "zip"), "application/zip", map.title) { output -> container.maps.writeZip(map.id, output, asTheyAre, room = this) }
     } else {
-        val markdown = container.maps.read(map.id)
-        shareMapExport(context, map.id, exportName(context, map.title, "md"), "text/markdown", map.title) { it.write(markdown.toByteArray()) }
+        val text = container.maps.read(map.id)
+        val file = TextFile.of(text)
+        shareMapExport(context, map.id, exportName(context, map.title, file.extension), file.type, map.title) { it.write(text.toByteArray()) }
+    }
+}
+
+/** How a map's text goes as a file of its own: as markdown, or a YAML map as the YAML it is, named and typed so. */
+internal enum class TextFile(val extension: String, val type: String) {
+    Markdown("md", "text/markdown"),
+    Yaml("yaml", "application/yaml"),
+    ;
+
+    companion object {
+        fun of(text: String): TextFile = if (MapText.isYaml(text)) Yaml else Markdown
     }
 }
 

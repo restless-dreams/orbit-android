@@ -53,53 +53,110 @@ fun isSoundFile(name: String): Boolean = isSoundName(name) || (name.endsWith(".m
 /**
  * The files in a map's `media/` its text plays as sounds, in the order the
  * map gives them: its ideas' `audio` (`sound`, `voice` and `recording` say
- * the same) in their `<!-- orbit … -->` attributes, on its line
- * (`audio: media/…`, or `audio: { src: media/… }`) or with its `src` on
- * the lines under it. That's what makes a file a sound, whatever its name:
- * a voice memo is an `.mp4`. A sound on the web is no file of the map's,
- * and words in a note are only words.
+ * the same), on its line (`audio: media/…`, or `audio: { src: media/… }`)
+ * or with its `src` on the lines under it, in their `<!-- orbit … -->`
+ * attributes, or among a YAML map's keys. That's what makes a file a sound,
+ * whatever its name: a voice memo is an `.mp4`. A sound on the web is no
+ * file of the map's, and words are only words: a markdown map's notes, and
+ * a YAML map's comments and the values written on the lines under their
+ * keys (`note: |`).
  */
 fun soundNamesIn(markdown: String): List<String> {
     val names = LinkedHashSet<String>()
 
-    for (attributes in OrbitAttributes.findAll(markdown)) {
-        val lines = attributes.groupValues[1].lines()
-
-        lines.forEachIndexed { index, line ->
-            for (key in SoundKey.findAll(line)) {
-                val value = key.groupValues[1]
-                val inline = SoundFile.find(value)
-
-                if (inline != null) {
-                    names += inline.groupValues[1]
-                    continue
-                }
-
-                if (value.isNotBlank()) {
-                    continue
-                }
-
-                // Its fields on the lines under it, further in: its `src` among them.
-                val indent = line.indexOfFirst { !it.isWhitespace() }
-
-                for (next in lines.drop(index + 1)) {
-                    if (next.isBlank() || next.indexOfFirst { !it.isWhitespace() } <= indent) {
-                        break
-                    }
-
-                    val source = SoundSource.find(next) ?: continue
-                    names += source.groupValues[1]
-                    break
-                }
-            }
+    if (MapText.isYaml(markdown)) {
+        soundsIn(yamlKeys(markdown.lines()), names)
+    } else {
+        for (attributes in OrbitAttributes.findAll(markdown)) {
+            soundsIn(attributes.groupValues[1].lines(), names)
         }
     }
 
     return names.toList()
 }
 
+/** Adds the sounds `lines` give their ideas to `names`: an idea's attributes, or a YAML map's keys, written as YAML. */
+private fun soundsIn(lines: List<String>, names: MutableSet<String>) {
+    lines.forEachIndexed { index, line ->
+        for (key in SoundKey.findAll(line)) {
+            val value = key.groupValues[1]
+            val inline = SoundFile.find(value)
+
+            if (inline != null) {
+                names += inline.groupValues[1]
+                continue
+            }
+
+            if (value.isNotBlank()) {
+                continue
+            }
+
+            // Its fields on the lines under it, further in: its `src` among them.
+            val indent = line.indexOfFirst { !it.isWhitespace() }
+
+            for (next in lines.drop(index + 1)) {
+                if (next.isBlank() || next.indexOfFirst { !it.isWhitespace() } <= indent) {
+                    break
+                }
+
+                val source = SoundSource.find(next) ?: continue
+                names += source.groupValues[1]
+                break
+            }
+        }
+    }
+}
+
+/**
+ * A YAML map's lines as its keys read: a comment, and each line of a value
+ * written on the lines under its key (`note: |` or `text: >`, a note or a
+ * name of several lines) or its list item's dash (`- |`), are blank, since
+ * only words are there.
+ */
+internal fun yamlKeys(lines: List<String>): List<String> {
+    val keys = ArrayList<String>(lines.size)
+    // The column a value written on the lines under its key (or its dash) is further in than, while its lines go on.
+    var valueColumn: Int? = null
+
+    for (line in lines) {
+        val indent = line.indexOfFirst { !it.isWhitespace() }
+
+        if (valueColumn != null && (indent < 0 || indent > valueColumn)) {
+            keys += ""
+            continue
+        }
+
+        valueColumn = null
+
+        if (indent >= 0 && line[indent] == '#') {
+            keys += ""
+            continue
+        }
+
+        val block = BlockValue.find(line)
+        val lead = block?.groupValues?.get(1).orEmpty()
+        val keyed = block?.groups?.get(2) != null
+
+        // A key's value is further in than the key; a list item's, than its dash. A line with neither says nothing of one.
+        if (block != null && (keyed || lead.isNotBlank())) {
+            valueColumn = if (keyed) lead.length else lead.trimEnd().length - 1
+        }
+
+        keys += line
+    }
+
+    return keys
+}
+
+/**
+ * A line whose value is written on the lines under it (`note: |`,
+ * `text: >-`), or a list item that is one (`- |`): its first group runs to
+ * where its key starts, after any dashes, and its second is the key.
+ */
+private val BlockValue = Regex("""^(\s*(?:-\s+)*)([^\s#][^#]*?:\s+)?[|>][1-9+-]*\s*(?:#.*)?$""")
+
 /** An idea's attributes in orbit-md: `<!-- orbit key: value -->`, or a block of them. */
-private val OrbitAttributes = Regex("""<!--\s*orbit\b(.*?)-->""", RegexOption.DOT_MATCHES_ALL)
+internal val OrbitAttributes = Regex("""<!--\s*orbit\b(.*?)-->""", RegexOption.DOT_MATCHES_ALL)
 
 /** An idea's sound, and what follows it on its line. The spaces after its colon are read once: a long run of them costs one pass, even on a line that turns out not to say one. */
 private val SoundKey = Regex("""(?:^|[\s,{])(?:audio|sound|voice|recording)\s*:\s*+(.*)$""")
@@ -248,18 +305,20 @@ fun soundCaption(displayName: String?): String? {
 
 /** Why a sound of `size` bytes can't join a map whose pictures, videos and sounds come to `mapMedia`, in `words`, or null when it can. */
 fun soundRefusal(size: Long, mapMedia: Long, words: Words): String? = when {
-    size > VIDEO_SIZE_LIMIT -> words.string(R.string.data_sound_too_big, megabytes(size, words), megabytes(VIDEO_SIZE_LIMIT, words))
-    mapMedia + size > MAP_MEDIA_LIMIT -> words.string(R.string.data_sound_past_map_room, megabytes(mapMedia, words), megabytes(MAP_MEDIA_LIMIT, words))
+    size > MEDIA_FILE_LIMIT -> words.string(R.string.data_sound_too_big, readableSize(size, words), readableSize(MEDIA_FILE_LIMIT, words))
+    mapMedia + size > MAP_MEDIA_LIMIT -> words.string(R.string.data_sound_past_map_room, readableSize(mapMedia, words), readableSize(MAP_MEDIA_LIMIT, words))
     else -> null
 }
 
 /**
  * Copies a sound into `output`, telling `onProgress` how far along it is,
  * from 0 to 1, when its `size` is known (0 or less when it isn't). A sound
- * that turns out bigger than a video may be, whatever size it said it was, is
- * refused, saying why in `words`. `keepGoing` throws to stop the copy.
+ * that turns out bigger than a video may be, or than what's left of the
+ * room of a map whose pictures, videos and sounds come to `mapMedia`,
+ * whatever size it said it was, is refused as soon as it does, saying why
+ * in `words`. `keepGoing` throws to stop the copy.
  */
-internal fun copySound(input: InputStream, output: OutputStream, size: Long, words: Words, onProgress: (Float) -> Unit, keepGoing: () -> Unit = {}) {
+internal fun copySound(input: InputStream, output: OutputStream, size: Long, mapMedia: Long, words: Words, onProgress: (Float) -> Unit, keepGoing: () -> Unit = {}) {
     val buffer = ByteArray(SOUND_COPY_BUFFER)
     var copied = 0L
     var reported = -1
@@ -274,8 +333,12 @@ internal fun copySound(input: InputStream, output: OutputStream, size: Long, wor
 
         copied += read
 
-        if (copied > VIDEO_SIZE_LIMIT) {
-            throw MediaRefusedException(words.string(R.string.data_sound_past_limit, megabytes(VIDEO_SIZE_LIMIT, words)))
+        if (copied > MEDIA_FILE_LIMIT) {
+            throw MediaRefusedException(words.string(R.string.data_sound_past_limit, readableSize(MEDIA_FILE_LIMIT, words)))
+        }
+
+        if (mapMedia + copied > MAP_MEDIA_LIMIT) {
+            throw MediaRefusedException(words.string(R.string.data_sound_past_map_room, readableSize(mapMedia, words), readableSize(MAP_MEDIA_LIMIT, words)))
         }
 
         output.write(buffer, 0, read)

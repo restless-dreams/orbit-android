@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ouvir ideias: o que pede e por que parou de ouvir. Veja TRANSLATING.md. -->
+<resources>
+    <string name="voice_say_your_ideas">Diga suas ideias</string>
+    <string name="voice_needs_microphone">O Orbit precisa do microfone para ouvir suas ideias.</string>
+    <string name="voice_microphone_busy">O microfone está ocupado agora.</string>
+    <string name="voice_needs_connection">O serviço de voz deste dispositivo precisa de conexão.</string>
+    <string name="voice_language_missing">O serviço de voz deste dispositivo ainda não tem o seu idioma.</string>
+    <string name="voice_service_busy">O serviço de voz está ocupado. Tente de novo em um instante.</string>
+    <string name="voice_service_stopped">O serviço de voz parou de ouvir.</string>
+</resources>

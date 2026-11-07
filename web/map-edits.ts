@@ -4,12 +4,15 @@
 // written back as orbit-md, as its screen writes it: only what changed is
 // written again in markdown. A map Orbit can only show (a newer Orbit wrote
 // it, or it can't read all of it) is never changed, and the app hears why.
+// A new name gives the center a new id, as typing one on the map does, and
+// the app hears that too, to keep what it keeps about the center by its id.
 
 import { createMapTools, parseOrbit, serializeOrbitMarkdown } from '@restless-dreams/orbit';
-import type { OrbitDocument } from '@restless-dreams/orbit';
+import type { OrbitDocument, OrbitNode } from '@restless-dreams/orbit';
 import { withTags } from './look';
 import { readingOf } from './reading';
 import type { Reading } from './reading';
+import type { Renamed } from './renaming';
 
 /** What the app asks to change; null leaves it as it is. */
 export interface MapEdit {
@@ -17,11 +20,40 @@ export interface MapEdit {
   tags: string[] | null;
 }
 
-/** The map with the change made, or why it wasn't: Orbit can only show it. */
+/** The map with the change made, or why it wasn't: Orbit can only show it. And the ideas the change gave new ids. */
 export interface EditedMap {
   markdown: string | null;
   refused: Reading['lock'];
+  renamed: Renamed[];
 }
+
+/** Every node's id, the center first, each before the ones under it. */
+const idsOf = (root: OrbitNode): string[] => {
+  const ids: string[] = [];
+
+  const visit = (node: OrbitNode): void => {
+    ids.push(node.id);
+    node.children.forEach(visit);
+  };
+
+  visit(root);
+  return ids;
+};
+
+/**
+ * The ideas a change gave new ids, from their ids `before` it to those
+ * `after` it, place by place: a change from Home keeps every idea where it
+ * is, and a new name gives the center a new id from it. The app keeps things
+ * about an idea by its id (its place on the path, its rehearsal's time, its
+ * card in study mode), and follows the new one.
+ */
+const renamedIds = (before: string[], after: string[]): Renamed[] => {
+  if (before.length !== after.length) {
+    return [];
+  }
+
+  return before.flatMap((from, place) => (from === after[place] ? [] : [{ from, to: after[place] }]));
+};
 
 /**
  * The map with `title` as its name. A map's name is its own title, when it
@@ -50,9 +82,10 @@ export const editedMap = (text: string, edit: MapEdit, untitled: string): Edited
   const { lock } = readingOf(parsed, text);
 
   if (lock !== null) {
-    return { markdown: null, refused: lock };
+    return { markdown: null, refused: lock, renamed: [] };
   }
 
+  const ids = idsOf(parsed.root);
   let document: OrbitDocument = parsed;
 
   if (edit.title !== null) {
@@ -63,5 +96,7 @@ export const editedMap = (text: string, edit: MapEdit, untitled: string): Edited
     document = withTags(document, edit.tags);
   }
 
-  return { markdown: serializeOrbitMarkdown(document), refused: null };
+  const markdown = serializeOrbitMarkdown(document);
+  // The ids the map has as it's read again, as its screen will read it.
+  return { markdown, refused: null, renamed: renamedIds(ids, idsOf(parseOrbit(markdown, { untitled }).root)) };
 };

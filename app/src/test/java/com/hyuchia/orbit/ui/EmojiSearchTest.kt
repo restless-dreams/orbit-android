@@ -11,6 +11,7 @@ class EmojiSearchTest {
 
     private val english = EmojiIndex.read(asset("emoji"), asset("en"), english = null, drawable = { true })
     private val spanish = EmojiIndex.read(asset("emoji"), asset("es"), english = asset("en"), drawable = { true })
+    private val portuguese = EmojiIndex.read(asset("emoji"), asset("pt"), english = asset("en"), drawable = { true })
 
     private fun EmojiIndex.first(query: String): String? = search(query).firstOrNull()?.emoji
 
@@ -62,6 +63,17 @@ class EmojiSearchTest {
         assertEquals("❤️", spanish.first("Corazón rojo"))
         assertEquals("🇲🇽", spanish.first("mexico"))
         assertTrue("💡" in spanish.found("foco"))
+    }
+
+    @Test
+    fun portugueseIgnoresAccentsAndCase() {
+        assertEquals("🚀", portuguese.first("foguete"))
+        assertEquals("❤️", portuguese.first("coracao vermelho"))
+        assertEquals("❤️", portuguese.first("Coração vermelho"))
+        assertEquals("🇧🇷", portuguese.first("brasil"))
+        assertTrue("💡" in portuguese.found("ideia"))
+        // English after it, as for Spanish.
+        assertEquals("🚀", portuguese.first("rocket"))
     }
 
     @Test

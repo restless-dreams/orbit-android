@@ -133,6 +133,7 @@ export interface TvWords {
 const TV_WORDS: Record<string, TvWords> = {
   en: { language: 'en', status: 'Presenting a map', waiting: 'Waiting for the presenter' },
   es: { language: 'es', status: 'Presentando un mapa', waiting: 'Esperando a quien presenta' },
+  pt: { language: 'pt', status: 'Apresentando um mapa', waiting: 'Aguardando quem apresenta' },
 };
 
 /** The TV's words in its own language, `navigator.language`, when the app speaks it, and in English otherwise. */

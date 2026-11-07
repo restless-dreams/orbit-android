@@ -6,35 +6,49 @@
 #   - a cold start to Home;
 #   - the welcome map opened, until its page has drawn its planets, and closed again with Back, Orbit still in front;
 #   - a second cold start;
+#   - with the journeys' APK, the journeys in journeys/: an idea added on a map, edited, found with its search and
+#     there again after a restart; a panel open as the phone turns; a file opened with Orbit and text and a file
+#     shared to it; an idea caught from Quick Settings; and a map's screen, and a private map's, as Android brings
+#     them back after stopping Orbit's process;
 #   - the crash log, which has to stay empty, and no "Orbit isn't responding".
+#
+# On a WebView too old to draw maps (older than Chromium 99), it checks Orbit says so instead: on Home, and in the
+# welcome map's place, which it still opens and closes. The journeys need maps drawn, and are left out there.
 #
 # Under load, the emulator's own apps (its launcher, System UI) can stop responding as it starts: their dialog is
 # closed, and the log says which app it was.
 #
-#   scripts/smoke-test.sh <apk> <folder for the screenshots and logs>
+#   scripts/smoke-test.sh <apk> <folder for the screenshots and logs> [journeys apk]
 #
 # It runs on the device adb has (ANDROID_SERIAL picks one of several), or, with SMOKE_AVD set, on an emulator of
-# its own that it starts and stops, whatever else adb has:
-#   - SMOKE_AVD is the virtual device, made from SMOKE_IMAGE when it doesn't exist
-#     (system-images;android-35;google_apis;x86_64), and wiped as it starts;
-#   - SMOKE_PORT is its port (5640).
-# An APK without a signature, as release builds are without the upload key, is installed signed with a
-# throwaway key.
+# its own that it starts and stops, whatever else adb has (scripts/with-emulator.sh). With SMOKE_WEBVIEW set to a
+# WebView's APK, it installs that first as an update of the device's own WebView, as on Android 10 with a newer one
+# than it came with (CONTRIBUTING.md, "Device tests"). An APK without a signature, as release builds are without the
+# upload key, is installed signed with a throwaway key. Build the journeys with ./gradlew :journeys:assembleDebug.
 set -euo pipefail
 
-if [ $# -ne 2 ]; then
-    echo "Usage: $0 <apk> <output folder>" >&2
+if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+    echo "Usage: $0 <apk> <output folder> [journeys apk]" >&2
     exit 2
+fi
+
+# An emulator of its own, which other emulators on the same machine never stand in for.
+if [ -n "${SMOKE_AVD:-}" ]; then
+    mkdir -p "$2"
+    SMOKE_LOG=${SMOKE_LOG:-$2/emulator.log} exec "$(dirname "$0")/with-emulator.sh" "$0" "$@"
 fi
 
 apk=$(realpath "$1")
 out=$2
 mkdir -p "$out"
 out=$(realpath "$out")
+journeys=${3:+$(realpath "$3")}
 package=com.hyuchia.orbit
 sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}
 adb=$sdk/platform-tools/adb
 build_tools=$(ls -d "$sdk"/build-tools/* | sort -V | tail -1)
+# The oldest Chromium Orbit's pages draw maps in (SystemWebView.MINIMUM_CHROMIUM).
+minimum_chromium=99
 
 # Says what went wrong, with the crash log when Orbit crashed, and keeps the screen and the log.
 fail() {
@@ -49,26 +63,6 @@ fail() {
     exit 1
 }
 
-# An emulator of its own, which other emulators on the same machine never stand in for.
-if [ -n "${SMOKE_AVD:-}" ]; then
-    avd=$SMOKE_AVD
-    port=${SMOKE_PORT:-5640}
-    if "$adb" devices | grep -q "^emulator-$port"; then
-        echo "Another emulator already uses port $port: give SMOKE_PORT another even port." >&2
-        exit 1
-    fi
-    if ! "$sdk/emulator/emulator" -list-avds | grep -qx "$avd"; then
-        image=${SMOKE_IMAGE:-system-images;android-35;google_apis;x86_64}
-        echo no | "$sdk/cmdline-tools/latest/bin/avdmanager" --silent create avd --name "$avd" --package "$image" --device pixel_7 > /dev/null
-    fi
-    # A clean phone every time: its data is wiped as it starts, and nothing is saved when it stops.
-    "$sdk/emulator/emulator" -avd "$avd" -port "$port" -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data \
-        -gpu swiftshader_indirect > "$out/emulator.log" 2>&1 &
-    emulator=$!
-    export ANDROID_SERIAL=emulator-$port
-    trap '"$adb" emu kill > /dev/null 2>&1 || true; wait "$emulator" 2> /dev/null || true' EXIT
-fi
-
 echo "Waiting for the device to start"
 timeout 300 "$adb" wait-for-device
 for _ in $(seq 1 150); do
@@ -78,7 +72,29 @@ for _ in $(seq 1 150); do
     sleep 2
 done
 [ "$("$adb" shell getprop sys.boot_completed | tr -d '\r')" = 1 ] || fail "the device didn't finish starting"
-echo "Android $("$adb" shell getprop ro.build.version.release | tr -d '\r'), $("$adb" shell dumpsys webviewupdate | grep -m1 -oE 'Current WebView package.*' | tr -d '\r')"
+
+# A newer WebView than the device came with, installed as an update of its own: Android 10 with Chromium 101, say.
+# Android takes it up once it has prepared it.
+if [ -n "${SMOKE_WEBVIEW:-}" ]; then
+    "$adb" install -r -d "$SMOKE_WEBVIEW" > /dev/null || fail "the WebView in $SMOKE_WEBVIEW didn't install as an update of the device's own"
+    version=$("$build_tools/aapt2" dump badging "$SMOKE_WEBVIEW" 2> /dev/null | grep -oE "versionName='[^']*'" | head -1 | cut -d"'" -f2)
+    for _ in $(seq 1 60); do
+        if "$adb" shell dumpsys webviewupdate | grep -q "Current WebView package.*, $version)"; then
+            break
+        fi
+        sleep 1
+    done
+fi
+
+webview=$("$adb" shell dumpsys webviewupdate | grep -m1 -oE 'Current WebView package.*' | tr -d '\r')
+echo "Android $("$adb" shell getprop ro.build.version.release | tr -d '\r'), $webview"
+chromium=$(echo "$webview" | grep -oE ', [0-9]+\.' | tr -dc '0-9')
+if [ -n "$chromium" ] && [ "$chromium" -lt "$minimum_chromium" ]; then
+    old_webview=1
+    echo "Chromium $chromium can't draw maps: Orbit has to say so instead"
+else
+    old_webview=
+fi
 "$adb" shell input keyevent KEYCODE_WAKEUP
 "$adb" shell wm dismiss-keyguard > /dev/null 2>&1 || true
 # Animations only slow the steps down.
@@ -205,19 +221,34 @@ screen "$home" 90 > /dev/null || fail "Home didn't show"
 screen '^👋 Welcome to Orbit$' 30 text > "$out/welcome.txt" || fail "Home didn't show the welcome map"
 "$adb" exec-out screencap -p > "$out/1-home.png"
 
+if [ -n "$old_webview" ]; then
+    # Home says what to update, and that the maps are all still there.
+    screen '^Update .* to see your maps$' 30 text > /dev/null || fail "Home didn't say the WebView is too old to draw maps"
+    "$adb" exec-out screencap -p > "$out/1-old-webview-on-home.png"
+fi
+
 echo "Opening the welcome map"
 read -r x y < "$out/welcome.txt"
 "$adb" shell input tap "$x" "$y"
-# The map's page draws its planets for TalkBack too, so once it has loaded, its + reads "Add an idea to …" as text
-# (the toolbar's button says it in its description).
-screen '^Add an idea to ' 90 text > /dev/null || fail "the welcome map's page didn't draw"
-sleep 2
-"$adb" exec-out screencap -p > "$out/2-welcome-map.png"
+
+if [ -n "$old_webview" ]; then
+    # In the map's place, once its screen is open, the same notice, and no page.
+    screen 'Back to your maps' 30 > /dev/null || fail "the welcome map's screen didn't open"
+    screen '^Update .* to see your maps$' 30 text > /dev/null || fail "the welcome map didn't say the WebView is too old to draw maps"
+    gone '^Add an idea to ' 5 text || fail "a page drew the welcome map on a WebView too old for it"
+    "$adb" exec-out screencap -p > "$out/2-old-webview-in-the-map.png"
+else
+    # The map's page draws its planets for TalkBack too, so once it has loaded, its + reads "Add an idea to …" as
+    # text (the toolbar's button says it in its description).
+    screen '^Add an idea to ' 90 text > /dev/null || fail "the welcome map's page didn't draw"
+    sleep 2
+    "$adb" exec-out screencap -p > "$out/2-welcome-map.png"
+fi
 
 echo "Closing it with Back"
 "$adb" shell input keyevent KEYCODE_BACK
 # Home showing isn't enough: on a tablet, its list is beside the map all along. The map's page goes, and Orbit stays.
-gone '^Add an idea to ' 30 text || fail "Back didn't close the welcome map"
+gone '^Add an idea to |Back to your maps' 30 || fail "Back didn't close the welcome map"
 in_front || fail "Back left Orbit instead of closing the welcome map"
 screen "$home" 30 > /dev/null || fail "Back didn't return to Home"
 "$adb" exec-out screencap -p > "$out/3-map-closed.png"
@@ -229,6 +260,23 @@ screen "$home" 60 > /dev/null || fail "Home didn't show after the second start"
 screen '^👋 Welcome to Orbit$' 30 text > /dev/null || fail "Home didn't list the welcome map after the second start"
 "$adb" exec-out screencap -p > "$out/4-second-start.png"
 sleep 3
+
+# The journeys, in a process of their own (journeys/), each from a fresh install of this build.
+if [ -n "$journeys" ] && [ -z "$old_webview" ]; then
+    echo "The journeys"
+    "$adb" uninstall "$package.journeys" > /dev/null 2>&1 || true
+    "$adb" install -t "$journeys" > /dev/null || fail "the journeys didn't install"
+    captures=/sdcard/Android/media/$package.journeys/failures
+    "$adb" shell rm -rf "$captures"
+    "$adb" shell am instrument -w "$package.journeys/androidx.test.runner.AndroidJUnitRunner" | tr -d '\r' | tee "$out/journeys.txt"
+    if ! grep -q '^OK (' "$out/journeys.txt"; then
+        "$adb" pull "$captures" "$out/journeys-failures" > /dev/null 2>&1 || true
+        fail "a journey failed: the screen and its layout as it failed are in $out/journeys-failures"
+    fi
+    "$adb" uninstall "$package.journeys" > /dev/null 2>&1 || true
+elif [ -n "$journeys" ]; then
+    echo "The journeys need maps drawn, which this WebView can't: they're left out"
+fi
 
 "$adb" logcat -d > "$out/logcat.txt"
 "$adb" logcat -b crash -d > "$out/crash.txt"

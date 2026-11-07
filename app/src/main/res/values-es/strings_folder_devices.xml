@@ -12,6 +12,11 @@
     <string name="folder_devices_this_cannot_open">Este dispositivo no puede abrir los archivos %1$s que agrega</string>
     <string name="folder_devices_shows_only">Abre en solo lectura los mapas guardados por un Orbit más nuevo</string>
     <string name="folder_devices_saves_newer">Guarda mapas que este dispositivo solo puede mostrar</string>
+    <plurals name="folder_devices_keeps_part">
+        <item quantity="one">Guarda solo una parte de %1$s: los archivos de más de %2$s, y lo que pase de %3$s por mapa, se quedan en la carpeta. Actualiza Orbit allí para guardarlo todo</item>
+        <item quantity="many">Guarda solo una parte de %1$s: los archivos de más de %2$s, y lo que pase de %3$s por mapa, se quedan en la carpeta. Actualiza Orbit allí para guardarlos completos</item>
+        <item quantity="other">Guarda solo una parte de %1$s: los archivos de más de %2$s, y lo que pase de %3$s por mapa, se quedan en la carpeta. Actualiza Orbit allí para guardarlos completos</item>
+    </plurals>
     <string name="folder_devices_note">Los dispositivos aparecen aquí cuando se sincronizan con esta versión de Orbit o una posterior.</string>
     <string name="folder_devices_only_this_one">Los otros dispositivos que guarden sus mapas en esta carpeta aparecerán aquí cuando se sincronicen con esta versión de Orbit o una posterior.</string>
 

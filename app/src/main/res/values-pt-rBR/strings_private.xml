@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mapas privados: bloqueados com o próprio bloqueio de tela do celular, e fora dos widgets, dos atalhos e dos Recentes. Veja TRANSLATING.md. -->
+<resources>
+    <string name="private_map">Mapa privado</string>
+    <string name="private_badge">Privado</string>
+    <string name="private_make_private">Tornar privado</string>
+    <string name="private_make_not_private">Desativar Privado</string>
+    <string name="private_made_private">“%1$s” agora é privado: ele abre com o seu bloqueio de tela</string>
+    <string name="private_made_not_private">“%1$s” não é mais privado</string>
+    <string name="private_unlock">Desbloquear</string>
+    <string name="private_unlock_private_maps">Desbloquear mapas privados</string>
+    <string name="private_lock_private_maps">Bloquear mapas privados</string>
+    <string name="private_lock_now">Bloqueá-los agora</string>
+    <string name="private_menu_lock_now">Bloquear agora</string>
+    <string name="private_lock_private_maps_now">Bloquear mapas privados agora</string>
+    <string name="private_locked_card_hint">Bloqueado · Toque para desbloquear</string>
+    <string name="private_locked_card_description">Mapa privado, bloqueado</string>
+    <string name="private_more_options">Mais opções deste mapa privado</string>
+
+    <!-- A tela de um mapa privado enquanto os mapas privados estão bloqueados -->
+    <string name="private_cover_title">Este mapa é privado</string>
+    <string name="private_cover_body">Desbloqueie com sua impressão digital, seu rosto ou o bloqueio de tela para vê-lo.</string>
+    <string name="private_back_to_your_maps">Voltar para seus mapas</string>
+
+    <!-- Tornar um mapa privado em um dispositivo sem bloqueio de tela -->
+    <string name="private_needs_screen_lock_title">Primeiro, defina um bloqueio de tela</string>
+    <string name="private_needs_screen_lock_body">Os mapas privados abrem com sua impressão digital, seu rosto ou o bloqueio de tela, e este dispositivo ainda não tem bloqueio de tela. Quando você definir um, este mapa vai se tornar privado.</string>
+    <string name="private_set_screen_lock">Definir bloqueio de tela</string>
+    <string name="private_not_now">Agora não</string>
+
+    <!-- Configurações -->
+    <string name="private_settings_heading">Mapas privados</string>
+    <string name="private_settings_description">Torne um mapa privado pelo menu dele: ele aparece bloqueado entre seus mapas, fica fora dos widgets, dos atalhos e dos Recentes, e abre com sua impressão digital, seu rosto ou o bloqueio de tela.</string>
+    <plurals name="private_settings_count">
+        <item quantity="one">%1$d mapa privado: ele aparece bloqueado entre seus mapas, fica fora dos widgets, dos atalhos e dos Recentes, e abre com sua impressão digital, seu rosto ou o bloqueio de tela.</item>
+        <item quantity="many">%1$d mapas privados: eles aparecem bloqueados entre seus mapas, ficam fora dos widgets, dos atalhos e dos Recentes, e abrem com sua impressão digital, seu rosto ou o bloqueio de tela.</item>
+        <item quantity="other">%1$d mapas privados: eles aparecem bloqueados entre seus mapas, ficam fora dos widgets, dos atalhos e dos Recentes, e abrem com sua impressão digital, seu rosto ou o bloqueio de tela.</item>
+    </plurals>
+    <string name="private_settings_lock_again">Bloquear de novo depois de sair do Orbit</string>
+    <string name="private_lock_right_away">Na hora</string>
+    <plurals name="private_lock_minutes">
+        <item quantity="one">%1$d minuto</item>
+        <item quantity="many">%1$d minutos</item>
+        <item quantity="other">%1$d minutos</item>
+    </plurals>
+    <string name="private_settings_screen_off">Ao desligar a tela, eles são bloqueados na hora.</string>
+    <string name="private_settings_not_encrypted">Os mapas privados são bloqueados no Orbit, não criptografados: os arquivos deles continuam em markdown simples, então um app de sincronização, a pasta onde você guarda os mapas ou um backup podem lê-los como qualquer outro mapa.</string>
+    <string name="private_settings_no_screen_lock">Este dispositivo não tem bloqueio de tela, então ainda não é possível tornar mapas privados. Defina um PIN, um padrão ou uma senha para bloqueá-los.</string>
+    <string name="private_settings_no_screen_lock_with_maps">Este dispositivo não tem mais bloqueio de tela, então seus mapas privados não estão bloqueados. Defina um PIN, um padrão ou uma senha para bloqueá-los de novo. Até lá, o backup do Android os deixa de fora.</string>
+
+    <string name="private_widget_hint">Toque para abrir</string>
+
+    <!-- Onde o Orbit nomearia mapas fora deles, enquanto os mapas privados estão bloqueados -->
+    <string name="private_deleted_map">Mapa privado excluído</string>
+    <string name="private_arrival_newer_version_from">%1$s enviou uma versão mais nova de um mapa privado</string>
+    <string name="private_arrival_another_version">Outra versão de um mapa privado</string>
+    <plurals name="private_maps_in_a_note">
+        <item quantity="one">%1$d mapa privado</item>
+        <item quantity="many">%1$d mapas privados</item>
+        <item quantity="other">%1$d mapas privados</item>
+    </plurals>
+    <plurals name="private_files_in_a_note">
+        <item quantity="one">%1$d imagem ou vídeo de um mapa privado</item>
+        <item quantity="many">%1$d imagens e vídeos de mapas privados</item>
+        <item quantity="other">%1$d imagens e vídeos de mapas privados</item>
+    </plurals>
+
+    <string name="private_switch">Privado</string>
+    <string name="private_show_private_maps">Mostrar mapas privados</string>
+    <string name="private_settings_hide">Ocultar enquanto estiverem bloqueados</string>
+    <string name="private_settings_hide_description">Bloqueados, eles ficam fora dos seus mapas, das pesquisas e das etiquetas, em vez de manter o lugar deles. O cadeado no topo os mostra.</string>
+    <string name="private_settings_description_hidden">Torne um mapa privado pelo menu dele: enquanto está bloqueado, ele não aparece entre seus mapas, fica fora dos widgets, dos atalhos e dos Recentes, e abre com sua impressão digital, seu rosto ou o bloqueio de tela.</string>
+    <plurals name="private_settings_count_hidden">
+        <item quantity="one">%1$d mapa privado: enquanto está bloqueado, ele não aparece entre seus mapas, fica fora dos widgets, dos atalhos e dos Recentes, e abre com sua impressão digital, seu rosto ou o bloqueio de tela.</item>
+        <item quantity="many">%1$d mapas privados: enquanto estão bloqueados, eles não aparecem entre seus mapas, ficam fora dos widgets, dos atalhos e dos Recentes, e abrem com sua impressão digital, seu rosto ou o bloqueio de tela.</item>
+        <item quantity="other">%1$d mapas privados: enquanto estão bloqueados, eles não aparecem entre seus mapas, ficam fora dos widgets, dos atalhos e dos Recentes, e abrem com sua impressão digital, seu rosto ou o bloqueio de tela.</item>
+    </plurals>
+    <string name="private_exported_every_map">Todos os mapas foram exportados.</string>
+    <string name="private_presentation_stopped">A apresentação parou quando os mapas privados foram bloqueados</string>
+    <string name="private_present_again">Apresentar de novo</string>
+
+    <!-- A capa de um mapa privado: um emoji e um nome curto, mostrados no lugar do nome do mapa enquanto ele está bloqueado -->
+    <string name="private_cover_while_locked">Capa enquanto bloqueado</string>
+    <string name="private_cover_explanation">Aparece no lugar do nome dele enquanto está bloqueado.</string>
+    <string name="private_cover_name">Nome</string>
+    <string name="private_cover_name_example">Diário</string>
+    <string name="private_cover_emoji">Emoji</string>
+    <string name="private_cover_choose_emoji">Escolher um emoji</string>
+    <string name="private_cover_change_emoji">Emoji %1$s. Alterar</string>
+    <string name="private_cover_emoji_title">Um emoji para a capa</string>
+    <string name="private_cover_save">Salvar</string>
+    <string name="private_cover_remove">Remover capa</string>
+    <string name="private_locked_card_description_named">Mapa privado, %1$s, bloqueado</string>
+    <string name="private_cover_named_body">Um mapa privado. Desbloqueie com sua impressão digital, seu rosto ou o bloqueio de tela para vê-lo.</string>
+    <string name="private_arrival_newer_version_of_from">%2$s enviou uma versão mais nova do seu mapa privado “%1$s”</string>
+    <string name="private_arrival_another_version_of">Outra versão do seu mapa privado “%1$s”</string>
+</resources>
