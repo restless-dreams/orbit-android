@@ -5,10 +5,10 @@
 **Your universe of ideas, in orbit.** Mind maps you fly through, on phones, tablets and Chromebooks: build a map right on the map, give each idea a color, a status, a note, a picture or a link, then present it on any screen.
 
 <p>
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1.jpg" width="24%" alt="A map of a weekend in Lisbon: the sun in the middle, with food, places, evenings and packing on its orbit">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/2.jpg" width="24%" alt="A new idea typed right inside its planet, with the keyboard up">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/3.jpg" width="24%" alt="The whole map of photosynthesis at once">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/5.jpg" width="24%" alt="A map presented full screen, with the idea's note as its caption">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1.jpg" width="24%" alt="A map of a weekend in Mexico City: the sun in the middle, with places, Teotihuacan, food, the flight, where to stay, packing and the budget on its orbit, several with photos">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/2.jpg" width="24%" alt="A new idea, Pozole, typed right inside its planet in the food orbit, with the keyboard up">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/4.jpg" width="24%" alt="The day at Teotihuacan in its details under the map: its date, a photo of the Pyramid of the Sun and a short note">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/5.jpg" width="24%" alt="A Día de Muertos ofrenda presented full screen: marigolds, pan de muerto, papel picado, candles and copal around the altar, with its note as the caption">
 </p>
 
 **[orbit.hyuchia.com/android](https://orbit.hyuchia.com/android)** · [Every feature](docs/features.md) · [How it's built](docs/architecture.md) · [Privacy policy](app/src/main/assets/privacy.md) · [Contributing](CONTRIBUTING.md) · [Translating](TRANSLATING.md)

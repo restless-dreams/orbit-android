@@ -1,6 +1,6 @@
 Orbit turns your ideas into a map you fly through. Tap an idea and the map zooms in to show what's around it, flick an orbit to spin it, and zoom out to see everything at once.
 
-Build a map right on the map. Add ideas around the one in the middle, type their names where they are, drag them where they belong, and give each one a color, a status, a note, a picture, a sound or a link. Or hold the + button and say your ideas instead of typing them.
+Build a map right on the map. Add ideas around the one in the middle, type their names where they are, drag them where they belong, and give each one a color, a status, a note, a picture, a sound, a link, a file or a date, or sketch right on it. Or hold the + button and say your ideas instead of typing them.
 
 Present it. Orbit plays your map full screen, step by step along a path you pick, with a presenter view on your phone while everyone else sees the map on a second screen, a TV or any browser in the room. Rehearse with a timer that tells you when you're running behind.
 

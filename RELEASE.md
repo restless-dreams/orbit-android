@@ -85,7 +85,7 @@ Releasing for the first time on a store takes longer than the release itself: F-
    - Keep the earlier release's page and script where they are: its page back at /cast is the way back.
    - Keep the receiver published in the Google Cast SDK Developer Console: an unpublished receiver only starts on test devices.
    - Every version of the app casts to it, so it keeps working with all of them. When the release raises `AUDIENCE_PROTOCOL`, the new receiver has to be up before the app ships.
-9. **The store pages:** their texts and pictures are in `fastlane/metadata/android/`: `en-US`, `es-419`, `es-ES` and `pt-BR`. Brazilian Portuguese has its own feature graphic but no screenshots of its own yet, so the stores show the English ones for it.
+9. **The store pages:** their texts and pictures are in `fastlane/metadata/android/`: `en-US`, `es-419`, `es-ES` and `pt-BR`. Each language has its own feature graphic and its own phone and tablet screenshots, taken in it; the two Spanishes share theirs.
    - F-Droid reads them from the tagged commit.
    - Google Play and AppGallery take them by hand, from the same files. For Google Play, `fastlane supply` can upload them instead, with a service account of the Play Console.
 10. **F-Droid:**

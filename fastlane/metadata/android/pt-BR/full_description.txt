@@ -1,6 +1,6 @@
 O Orbit transforma suas ideias em um mapa que você percorre voando. Toque em uma ideia e o mapa se aproxima para mostrar o que há ao redor dela, dê um impulso em uma órbita para fazê-la girar e se afaste para ver tudo de uma vez.
 
-Monte seu mapa no próprio mapa. Adicione ideias em volta da que está no centro, digite os nomes delas ali mesmo, arraste cada uma para onde ela pertence e dê a cada uma uma cor, um status, uma nota, uma imagem, um áudio ou um link. Ou mantenha o botão + pressionado e fale suas ideias em vez de digitar.
+Monte seu mapa no próprio mapa. Adicione ideias em volta da que está no centro, digite os nomes delas ali mesmo, arraste cada uma para onde ela pertence e dê a cada uma uma cor, um status, uma nota, uma imagem, um áudio, um link, um arquivo ou uma data, ou desenhe nela. Ou mantenha o botão + pressionado e fale suas ideias em vez de digitar.
 
 Apresente. O Orbit mostra seu mapa em tela cheia, passo a passo, pelo roteiro que você escolher, com a visão de quem apresenta no seu celular enquanto todo mundo vê o mapa em uma segunda tela, em uma TV ou em qualquer navegador da sala. Ensaie com um cronômetro que avisa quando você está atrasado.
 
