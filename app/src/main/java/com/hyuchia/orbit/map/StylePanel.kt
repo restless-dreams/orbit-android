@@ -25,7 +25,6 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -61,6 +60,7 @@ import com.hyuchia.orbit.theme.MapPalettes
 import com.hyuchia.orbit.theme.MapStyle
 import com.hyuchia.orbit.theme.MapStyles
 import com.hyuchia.orbit.theme.hex
+import com.hyuchia.orbit.ui.ChoiceChips
 import com.hyuchia.orbit.ui.OrbitSlider
 import com.hyuchia.orbit.ui.ToggleRow
 import kotlinx.coroutines.Dispatchers
@@ -164,16 +164,16 @@ fun StylePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
 
                 Text(stringResource(R.string.map_levels_to_show), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
 
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = options?.maxDepth == null, onClick = { set("maxDepth", null) }, label = { Text(stringResource(R.string.map_all_levels)) })
-
-                    (1..4).forEach { depth ->
-                        FilterChip(selected = options?.maxDepth == depth, onClick = { set("maxDepth", JsonPrimitive(depth)) }, label = { Text("$depth") })
-                    }
-                }
+                LevelChoices(options?.maxDepth) { depth -> set("maxDepth", depth?.let(::JsonPrimitive)) }
             }
         }
     }
+}
+
+/** How many levels of ideas the map shows: all of them, or 1 to 4, as chips that read as radio buttons. */
+@Composable
+internal fun LevelChoices(maxDepth: Int?, onPick: (Int?) -> Unit) {
+    ChoiceChips(listOf(null, 1, 2, 3, 4), maxDepth, onPick, label = { depth -> depth?.toString() ?: stringResource(R.string.map_all_levels) })
 }
 
 /** A swatch of a color set at its full size, and the room between two. */

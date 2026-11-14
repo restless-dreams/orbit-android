@@ -15,6 +15,7 @@
 import {
   createOrbitMap,
   exportOPML,
+  getNodePath,
   parseOrbit,
   renderToSVGString,
   serializeOrbitMarkdown,
@@ -41,10 +42,10 @@ import { mergeAttributes, readGoal, stepGoal } from './goal';
 import { aboutAppSettings, automaticRings, knownStyle, nodeTypeFor, nodeTypes, refreshRings, tagsOf, themeOption, withAutomaticRings, withTags } from './look';
 import type { AppTheme } from './look';
 import { editedMap } from './map-edits';
-import { MEDIA_KEYS, mergedMedia } from './media';
+import { MEDIA_KEYS, mergedMedia, stillOnto } from './media';
 import { importFile } from './other-apps';
 import { reportErrors } from './page-errors';
-import { caughtIdea, mapFromText, pastedText } from './paste';
+import { caughtIdea, mapFromText, pastedIdeas, pastedText } from './paste';
 import { readingOf } from './reading';
 import type { Reading } from './reading';
 import { renamings } from './renaming';
@@ -214,10 +215,10 @@ export type Command =
   | { type: 'editNew'; parentId: string; index?: number | null }
   | { type: 'stopEditing'; save: boolean }
   | { type: 'add'; parentId: string; node: Record<string, unknown>; index?: number | null }
-  | { type: 'update'; id: string; changes: Record<string, unknown> }
+  | { type: 'update'; id: string; changes: Record<string, unknown>; onto?: Record<string, string | null> | null; job?: number | null }
   | { type: 'addToGoal'; id: string; amount: number }
   | { type: 'checkNote'; id: string; line: number; checked: boolean }
-  | { type: 'addFiles'; id: string; files: FileInfo[] }
+  | { type: 'addFiles'; id: string; files: FileInfo[]; job?: number | null }
   | { type: 'removeFile'; id: string; src: string }
   | { type: 'remove'; id: string }
   | { type: 'move'; id: string; parentId: string; index?: number | null }
@@ -236,7 +237,7 @@ export type Command =
   | { type: 'convert'; job: number; text: string; to: 'markdown' | 'yaml' | 'opml' }
   | { type: 'check'; job: number; text: string }
   | { type: 'importFile'; job: number; data: string; name: string | null }
-  | { type: 'addIdeas'; job: number; markdown: string; text: string; parentId: string | null }
+  | { type: 'addIdeas'; job: number; markdown: string; text: string; parentId: string | null; baseUrl?: string | null }
   | { type: 'editMap'; job: number; markdown: string; title: string | null; tags: string[] | null }
   | { type: 'copy'; job: number; id: string }
   | { type: 'paste'; job: number; parentId: string; text: string }
@@ -349,6 +350,12 @@ let dropTarget: string | null = null;
 /** The idea being dragged on the map, while one is, and whether it went out of the window to another app. */
 let draggedIdea: string | null = null;
 let draggedOut = false;
+/**
+ * While a field for typing is open on the map, the idea typed into: the one
+ * being renamed, or the one a new idea is typed under (Orbit's own editing
+ * keeps it by that id).
+ */
+let typingInto: string | null = null;
 
 const post = (message: Message): void => {
   window.orbitNative?.postMessage(JSON.stringify(currentMap === null ? message : { ...message, map: currentMap }));
@@ -381,6 +388,29 @@ const canChange = (): boolean => {
 /** Whether ideas can be added, typed, moved and removed on the map now. */
 const editable = (): boolean => {
   return !presenting && canChange();
+};
+
+/**
+ * Whether what's being typed on the map goes on into `parsed`, new text for
+ * the map that reading found `read`: the map as it reads it can be changed,
+ * and the idea typed into, or under, is where it was, under the same ideas,
+ * as Orbit keeps the field open on new text. With no field open, nothing is
+ * being typed, and nothing needs keeping.
+ */
+const takesTyping = (renderer: OrbitSVGRenderer, parsed: OrbitDocument, read: Reading): boolean => {
+  const before = renderer.getDocument()?.root;
+
+  if (typingInto === null || !before) {
+    return true;
+  }
+
+  if (!changeable(appLock ?? read.lock, false)) {
+    return false;
+  }
+
+  const was = getNodePath(before, typingInto);
+  const is = getNodePath(parsed.root, typingInto);
+  return was.length > 0 && was.length === is.length && was.every((node, index) => node.id === is[index]?.id);
 };
 
 // The map as the app sees it
@@ -536,7 +566,11 @@ const postState = (): void => {
   }
 };
 
-/** Runs several edits as one change: one save, and one step to undo. */
+/**
+ * Runs several edits as one change: one save, and one step to undo. `change` returns the first
+ * idea it added, or null when it added none, as when everything pasted was declined: then nothing
+ * changed, and nothing is saved.
+ */
 const batch = (kind: string, change: () => OrbitNode | null): void => {
   batching = true;
   let result: OrbitNode | null = null;
@@ -547,7 +581,9 @@ const batch = (kind: string, change: () => OrbitNode | null): void => {
     batching = false;
   }
 
-  postSaved(kind, result);
+  if (result) {
+    postSaved(kind, result);
+  }
 };
 
 /** Orbit's spin haptics call navigator.vibrate(); the app plays a native tick instead. */
@@ -636,8 +672,12 @@ const load = (command: Extract<Command, { type: 'load' }>): void => {
         post({ type: 'spotlight', id: node.id, phase, x, y, radius, scrim: scrimColor() });
       }
     },
-    onEditorOpen: ({ node, parent }) => post({ type: 'editorOpen', id: node?.id ?? null, parentId: parent?.id ?? null }),
+    onEditorOpen: ({ node, parent }) => {
+      typingInto = node?.id ?? parent?.id ?? null;
+      post({ type: 'editorOpen', id: node?.id ?? null, parentId: parent?.id ?? null });
+    },
     onEditorClose: ({ node }) => {
+      typingInto = null;
       // The idea as it was: what was typed is saved next, and may give it a new id.
       renames.closed(node);
       post({ type: 'editorClose' });
@@ -675,6 +715,7 @@ const unload = (): void => {
   showingVersion = false;
   dropTarget = null;
   draggedIdea = null;
+  typingInto = null;
   document.getElementById('map')?.replaceChildren();
 };
 
@@ -806,14 +847,21 @@ const newNode = (node: OrbitNode): OrbitNewNode => ({ ...nodeInput(node), childr
 
 const countIdeas = (node: OrbitNewNode): number => 1 + (node.children ?? []).reduce((total, child) => total + countIdeas(child), 0);
 
-/** An idea and the ideas under it as plain text, for other apps: its name, then a list. */
+/**
+ * How deep an outline nests: an idea deeper than this is listed at this depth, under the last idea there, so a very deep
+ * branch is an outline about the size of its ideas' names, not of its depth squared. The same as `OUTLINE_DEEPEST` in the
+ * app's IdeaDrag.kt, whose outline of an idea dragged out is this one.
+ */
+const OUTLINE_DEEPEST = 32;
+
+/** An idea and the ideas under it as plain text, for other apps: its name, then a list, nested up to `OUTLINE_DEEPEST`. */
 const outline = (node: OrbitNode): string => {
   const name = (idea: OrbitNode): string => [idea.icon, idea.text].filter(Boolean).join(' ');
   const lines = [name(node)];
 
   const list = (parent: OrbitNode, depth: number): void => {
     for (const child of parent.children) {
-      lines.push(`${'  '.repeat(depth)}- ${name(child)}`);
+      lines.push(`${'  '.repeat(Math.min(depth, OUTLINE_DEEPEST))}- ${name(child)}`);
       list(child, depth + 1);
     }
   };
@@ -842,9 +890,8 @@ const paste = (renderer: OrbitSVGRenderer, parentId: string, text: string): { co
     throw new Error(`No idea ${parentId} to paste under`);
   }
 
-  const { markdown, whole } = pastedText(text);
-  const parsed = parse(markdown);
-  const ideas = (whole ? [parsed.root] : parsed.root.children).map(newNode);
+  const pasted = pastedText(text);
+  const ideas = pastedIdeas(pasted, parse(pasted.markdown)).map(newNode);
 
   batch('add', () => {
     let first: OrbitNode | null = null;
@@ -937,6 +984,30 @@ const answer = (job: number, work: () => unknown): void => {
   }
 };
 
+/**
+ * Makes a change to an idea the app asked for, as `changing` does. With a
+ * `job`, the app waits to hear what came of it before it says anything, so
+ * the page answers instead: true once the idea took it (its save is posted
+ * first), false when the map has no such idea now, and Orbit's reason when
+ * it declined.
+ */
+const changingIdea = (job: number | null | undefined, work: () => OrbitNode | null): void => {
+  if (typeof job !== 'number') {
+    changing('update', work);
+    return;
+  }
+
+  const tried = attempt(work);
+  post(tried.made ? { type: 'result', job, value: tried.value !== null } : { type: 'result', job, error: tried.reason });
+};
+
+/** Answers a change the app waits to hear about (one with a `job`) that the map didn't take, so the app never waits for it. */
+const notTaken = (command: Command): void => {
+  if ((command.type === 'update' || command.type === 'addFiles') && typeof command.job === 'number') {
+    post({ type: 'result', job: command.job, value: false });
+  }
+};
+
 /** What Orbit says about a map's text, but for the keys the app keeps in its frontmatter itself. */
 const diagnosticsOf = (parsed: OrbitDocument): Diagnostic[] => {
   if (parsed.diagnostics) {
@@ -948,7 +1019,11 @@ const diagnosticsOf = (parsed: OrbitDocument): Diagnostic[] => {
   return parsed.warnings.filter((message) => !aboutAppSettings({ message })).map((message) => ({ message, line: null, severity: 'warning' }));
 };
 
-/** Draws text from the app's source editor as it is typed, and says what Orbit made of it. */
+/**
+ * Draws text from the app's source editor as it is typed, and says what
+ * Orbit made of it. It's the map as it is now, typed: a version on show goes,
+ * and the map takes changes again as its text allows.
+ */
 const showSource = (text: string): void => {
   let parsed: OrbitDocument;
 
@@ -959,6 +1034,7 @@ const showSource = (text: string): void => {
     return;
   }
 
+  showingVersion = false;
   reading = readingOf(parsed, text);
 
   if (map) {
@@ -1070,49 +1146,92 @@ const pictureShown = async (src: string, signal?: AbortSignal): Promise<boolean>
   return true;
 };
 
-/** Pictures in an SVG drawn as an image can't load files: put them in the SVG itself. `signal` stops their loading. */
-const inlinePictures = async (svg: string, signal?: AbortSignal): Promise<string> => {
+/** Whether a picture at `href` goes into a picture of the map whose folder is `own`: from the web, or from that folder. */
+const picturesOwn = (href: string, own: string | undefined): boolean => {
+  let address: URL;
+
+  try {
+    address = new URL(href, location.href);
+  } catch {
+    return false;
+  }
+
+  if (address.origin !== location.origin) {
+    return true;
+  }
+
+  return own !== undefined && address.href.startsWith(new URL(own, location.href).href);
+};
+
+/** A picture at `href`, as a data address to put in an SVG: only a picture, whatever else an address answers with. */
+const pictureData = async (href: string, signal?: AbortSignal): Promise<string> => {
+  const response = await fetch(href, { signal });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const blob = await response.blob();
+
+  if (!blob.type.startsWith('image/')) {
+    throw new Error(`Not a picture: ${blob.type}`);
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+};
+
+/**
+ * Pictures in an SVG drawn as an image can't load files: put them in the SVG itself. Of the app's own files, only
+ * those in `own`, the folder of the map the picture is of, go in: one another map's text points at stays out, as it
+ * would whatever the page shows meanwhile. One at a time, each picture read once however many planets show it, so
+ * only one picture's file is ever on its way in, rather than every picture of a big map at once beside the SVG they
+ * go into. `signal` stops their loading.
+ */
+const inlinePictures = async (svg: string, own: string | undefined, signal?: AbortSignal): Promise<string> => {
   if (!svg.includes('<image')) {
     return svg;
   }
 
   const parsed = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  const read = new Map<string, string | null>();
 
-  await Promise.all(Array.from(parsed.querySelectorAll('image')).map(async (image) => {
+  for (const image of Array.from(parsed.querySelectorAll('image'))) {
     const href = image.getAttribute('href') ?? image.getAttribute('xlink:href');
 
     if (!href || href.startsWith('data:')) {
-      return;
+      continue;
     }
 
-    try {
-      const response = await fetch(href, { signal });
+    if (!picturesOwn(href, own)) {
+      image.remove();
+      continue;
+    }
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+    if (!read.has(href)) {
+      try {
+        read.set(href, await pictureData(href, signal));
+      } catch {
+        // A picture from a site that doesn't allow it: the export goes without it.
+        read.set(href, null);
       }
 
-      const blob = await response.blob();
+      goOn(signal);
+    }
 
-      // Only a picture goes into the picture: whatever else an address answers with stays out of the export.
-      if (!blob.type.startsWith('image/')) {
-        throw new Error(`Not a picture: ${blob.type}`);
-      }
+    const data = read.get(href);
 
-      const data = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(blob);
-      });
-
+    if (data) {
       image.setAttribute('href', data);
       image.removeAttribute('xlink:href');
-    } catch {
-      // A picture from a site that doesn't allow it: the export goes without it.
+    } else {
       image.remove();
     }
-  }));
+  }
 
   return new XMLSerializer().serializeToString(parsed);
 };
@@ -1133,8 +1252,8 @@ const withoutBackground = (svg: string): string => {
   return new XMLSerializer().serializeToString(parsed);
 };
 
-const rasterize = async (svg: string, width: number, height: number, scale: number, type: string, signal?: AbortSignal): Promise<string> => {
-  const inlined = await inlinePictures(svg, signal);
+const rasterize = async (svg: string, own: string | undefined, width: number, height: number, scale: number, type: string, signal?: AbortSignal): Promise<string> => {
+  const inlined = await inlinePictures(svg, own, signal);
   goOn(signal);
   const url = URL.createObjectURL(new Blob([inlined], { type: 'image/svg+xml' }));
 
@@ -1214,11 +1333,14 @@ const snapshot = async (job: SnapshotJob, signal?: AbortSignal): Promise<string>
     }
   }
 
+  // The map's own pictures: of the text the job gives, from where the job says its map is; of the map on screen, from where it is.
+  const own = (job.markdown != null ? job.baseUrl : baseUrl) ?? undefined;
+
   if (job.format === 'svg') {
-    return inlinePictures(svg, signal);
+    return inlinePictures(svg, own, signal);
   }
 
-  return rasterize(svg, width, height, job.scale ?? 2, job.format === 'png' ? 'image/png' : 'image/webp', signal);
+  return rasterize(svg, own, width, height, job.scale ?? 2, job.format === 'png' ? 'image/png' : 'image/webp', signal);
 };
 
 /**
@@ -1245,9 +1367,10 @@ const convert = (text: string, to: 'markdown' | 'yaml' | 'opml'): string => {
  * A map's text with the ideas in `text` added under `parentId` (default:
  * its top), for ideas caught without the map open: a line each, nested as
  * pasting nests them (see paste.ts). Orbit adds them on a map no one sees,
- * so the text comes back the way Orbit writes it, ids and all.
+ * so the text comes back the way Orbit writes it, ids and all. That map
+ * asks for its pictures where the map keeps them, `baseUrl`.
  */
-const addIdeas = (markdown: string, text: string, parentId: string | null): string => {
+const addIdeas = (markdown: string, text: string, parentId: string | null, baseUrl: string | null): string => {
   const parsed = parse(markdown);
   // A map Orbit can't read all of, or one a newer Orbit wrote, isn't written over: it would lose what wasn't read.
   const { lock: unread } = readingOf(parsed, markdown);
@@ -1263,7 +1386,7 @@ const addIdeas = (markdown: string, text: string, parentId: string | null): stri
   const host = document.createElement('div');
   host.style.cssText = 'position:fixed;left:-10000px;top:0;width:1px;height:1px;overflow:hidden;visibility:hidden';
   document.body.appendChild(host);
-  const capture = createOrbitMap(host, parsed, { interactive: false, nodeTypes: nodeTypes() });
+  const capture = createOrbitMap(host, parsed, { interactive: false, nodeTypes: nodeTypes(), baseUrl: baseUrl ?? undefined });
 
   try {
     const parent = parentId ?? capture.getDocument()?.root.id;
@@ -1272,10 +1395,16 @@ const addIdeas = (markdown: string, text: string, parentId: string | null): stri
       throw new Error('No map to add to');
     }
 
-    const { markdown: caught, whole } = pastedText(text);
-    const read = parse(caught);
+    const caught = pastedText(text);
+    const ideas = pastedIdeas(caught, parse(caught.markdown));
 
-    for (const idea of (whole ? [read.root] : read.root.children).map(newNode).map(caughtIdea)) {
+    // Text in which Orbit reads no idea, as frontmatter alone, adds none: the map's text comes back as it was, which
+    // the app takes for that (QuickCapture.kt), and says so in its own language, keeping the text.
+    if (ideas.length === 0) {
+      return markdown;
+    }
+
+    for (const idea of ideas.map(newNode).map(caughtIdea)) {
       if (!capture.addNode(parent, idea)) {
         throw new Error(`No idea ${parent} to add to`);
       }
@@ -1328,7 +1457,7 @@ const runJob = async (command: Job): Promise<void> => {
         value = importFile(command.data, command.name, pageWords().untitledMap);
         break;
       case 'addIdeas':
-        value = addIdeas(command.markdown, command.text, command.parentId);
+        value = addIdeas(command.markdown, command.text, command.parentId, command.baseUrl ?? null);
         break;
       case 'editMap':
         value = editedMap(command.markdown, { title: command.title, tags: command.tags }, pageWords().untitledMap);
@@ -1453,11 +1582,13 @@ const handle = (command: Command): void => {
   const renderer = map;
 
   if (!renderer) {
+    notTaken(command);
     return;
   }
 
   if (refused(command.type, lock(), showingVersion)) {
     // Nothing changes a map that can't be saved, nor an earlier version on show: the map's file stays as it is.
+    notTaken(command);
     return;
   }
 
@@ -1479,11 +1610,19 @@ const handle = (command: Command): void => {
     case 'update': {
       const tree = renderer.getDocument()?.root;
       const node = tree ? findNode(tree, command.id) : null;
+
+      // A change for an idea the map doesn't have now (removed, or renamed, meanwhile) is left, and so is one made for a
+      // file the node no longer has, as a live photo's motion for a picture replaced since.
+      if (!node || (command.onto && !stillOnto(node, command.onto))) {
+        notTaken(command);
+        break;
+      }
+
       updating = command.id;
 
       try {
         const changes = nodeChanges(command.changes, node);
-        changing('update', () => renderer.updateNode(command.id, changes));
+        changingIdea(command.job, () => renderer.updateNode(command.id, changes));
       } finally {
         updating = null;
       }
@@ -1509,7 +1648,9 @@ const handle = (command: Command): void => {
       const tree = renderer.getDocument()?.root;
       const node = tree ? findNode(tree, command.id) : null;
 
+      // Files for an idea the map doesn't have now (removed, or renamed, meanwhile) are left.
       if (!node) {
+        notTaken(command);
         break;
       }
 
@@ -1517,7 +1658,10 @@ const handle = (command: Command): void => {
       const added = command.files.filter((file) => !files.some((there) => there.src === file.src)).map(orbitFile);
 
       if (added.length > 0) {
-        changing('update', () => renderer.updateNode(command.id, { files: [...files, ...added] }));
+        changingIdea(command.job, () => renderer.updateNode(command.id, { files: [...files, ...added] }));
+      } else if (typeof command.job === 'number') {
+        // The idea has them all already.
+        post({ type: 'result', job: command.job, value: true });
       }
 
       break;
@@ -1582,10 +1726,20 @@ const handle = (command: Command): void => {
       // The map's text as the app has it now (an undo, a version brought back, a change from elsewhere): drawn, never
       // saved, since the app saves that very text itself, and Orbit writing it its own way could change it. A version
       // on show goes: what's drawn is the map as it is now, which takes changes again.
+      const parsed = parse(command.markdown);
+      const read = readingOf(parsed, command.markdown);
+
+      // What's being typed on the map as a change from elsewhere arrives (a new revision) goes on into the change
+      // where Orbit keeps the field open on it. Where the field would close, as the change can only be shown or no
+      // longer has the idea where it was, what was typed is saved first, on the map as it was and at its revision,
+      // which the app keeps in the map's history: never lost, and never over the change.
+      if ((command.revision ?? revision) !== revision && !takesTyping(renderer, parsed, read)) {
+        renderer.stopEditing(true);
+      }
+
       showingVersion = false;
       revision = command.revision ?? revision;
-      const parsed = parse(command.markdown);
-      reading = readingOf(parsed, command.markdown);
+      reading = read;
       ringsOn = automaticRings(parsed);
       renderer.setOptions({ theme: themeOption(appTheme, knownStyle(parsed.options.theme)), editable: editable() });
       renderer.render(parsed);
@@ -1617,8 +1771,11 @@ const handle = (command: Command): void => {
       break;
     }
     case 'lock':
+      // What's being typed on the map is saved first, while the map still takes it: the map deleted, or its storage a
+      // newer Orbit's, the app keeps that save where it can (in the history the map took to the trash, or on the
+      // screen until it's written), rather than lose it as the field closes.
+      renderer.stopEditing(true);
       appLock = command.reason;
-      renderer.stopEditing(appLock === null);
       renderer.setOptions({ editable: editable() });
       postState();
       break;

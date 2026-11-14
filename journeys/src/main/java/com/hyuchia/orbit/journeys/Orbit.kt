@@ -1,18 +1,25 @@
 package com.hyuchia.orbit.journeys
 
 import android.graphics.Rect
+import android.os.SystemClock
+import android.view.KeyCharacterMap
 import android.view.KeyEvent
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
+import androidx.test.uiautomator.Configurator
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import com.hyuchia.orbit.journeys.Phone.device
 import com.hyuchia.orbit.journeys.Phone.eventually
 import com.hyuchia.orbit.journeys.Phone.gone
+import com.hyuchia.orbit.journeys.Phone.keyboardShows
 import com.hyuchia.orbit.journeys.Phone.orbitProcess
 import com.hyuchia.orbit.journeys.Phone.shell
 import com.hyuchia.orbit.journeys.Phone.shows
 import com.hyuchia.orbit.journeys.Phone.showsOnThePage
+import com.hyuchia.orbit.journeys.Phone.still
+import com.hyuchia.orbit.journeys.Phone.tap
 import com.hyuchia.orbit.journeys.Phone.tapWhenStill
 
 /**
@@ -40,13 +47,14 @@ object Orbit {
     fun home(): UiObject2 = shows(By.text("Search your maps").pkg(ORBIT), "Home")
 
     /**
-     * Finds the map with this card with Home's search, wherever its card is in the list, and waits for its card:
-     * Enter searches, and the keyboard goes, which on a small screen covers the card's name.
+     * Finds the map with this card with Home's search for `words` (the card's own, unless they're words a keyboard
+     * can't type, such as an emoji), wherever its card is in the list, and waits for its card: Enter searches, and
+     * the keyboard goes, which on a small screen covers the card's name.
      */
-    fun findOnHome(card: String): UiObject2 {
+    fun findOnHome(card: String, words: String = card): UiObject2 {
         home().click()
         focusedField()
-        type(card)
+        type(words)
         device.pressEnter()
         return shows(By.clazz("android.widget.TextView").text(card).pkg(ORBIT), "the card of $card")
     }
@@ -62,20 +70,28 @@ object Orbit {
      * planet to TalkBack, and the + in the orbit reads "Add an idea to …" as text (the toolbar's + says it in its
      * description).
      */
-    fun drawn(idea: String): Rect = showsOnThePage("Add an idea to $idea", "the map's page to draw $idea")
+    fun drawn(idea: String, addTo: String = ADD_TO): Rect = showsOnThePage("$addTo $idea", "the map's page to draw $idea")
+
+    /** What the + in an orbit says before the idea's name, in English. */
+    const val ADD_TO = "Add an idea to"
 
     /** Waits until the map holds an idea with exactly this name, on the page or in its outline for screen readers. */
     fun onTheMap(idea: String): Rect = showsOnThePage(idea, "$idea on the map")
 
-    /** Taps the + in the orbit of `idea`, in the middle of the map. */
-    fun tapThePlus(idea: String) {
-        val plus = drawn(idea)
+    /**
+     * Taps the + in the orbit of `idea`, in the middle of the map, which says `addTo` before its name, once the map
+     * has stopped moving, as people wait for it to before they tap ([still]).
+     */
+    fun tapThePlus(idea: String, addTo: String = ADD_TO) {
+        drawn(idea, addTo)
+        still("the map of $idea to stop moving")
+        val plus = drawn(idea, addTo)
 
         if (plus.isEmpty) {
             throw AssertionError("The + in the orbit of $idea isn't on screen")
         }
 
-        device.click(plus.centerX(), plus.centerY())
+        tap(plus.centerX(), plus.centerY())
     }
 
     /** Words Orbit's own screens show (a row, a title, a button's label), not a field, nor the map's page. */
@@ -98,13 +114,14 @@ object Orbit {
 
     /**
      * Adds an idea to the idea in the middle of the map as people do: the + in the orbit opens a planet to type in,
-     * the words go in as keys, Enter adds it (and opens the next one), and Escape hides the keyboard, then closes
-     * that one.
+     * the words go in (`typing` them: [type] by default, or [typeKeys]), Enter adds it (and opens the next one), and
+     * once the map holds it, Escape hides the keyboard, then closes that one. The planet's own field, which reads the
+     * words before Enter, isn't what's looked for on the map: an Enter that added nothing doesn't pass.
      */
-    fun addIdea(to: String, words: String) {
-        tapThePlus(to)
+    fun addIdea(to: String, words: String, addTo: String = ADD_TO, typing: (String) -> Unit = ::type) {
+        tapThePlus(to, addTo)
         focusedField()
-        type(words)
+        typing(words)
         device.pressEnter()
         onTheMap(words)
         val field = By.clazz("android.widget.EditText").focused(true).pkg(ORBIT)
@@ -131,9 +148,39 @@ object Orbit {
         gone(shown, what)
     }
 
-    /** Types `words` as a keyboard would, into the field with the focus. */
+    /**
+     * Puts `words` in the field with the focus at once, through what the field offers accessibility services (its
+     * "set text"), and waits until the field reads them. That's not a keyboard's way: on the map's page the planet's
+     * field gets an `input` event alone, without the keys, `beforeinput` or composing a keyboard brings, which
+     * [typeKeys] goes through. Keys sent to the phone go through its keyboard app first, which on a busy emulator, as
+     * it starts, gives up on some of them (Gboard drops a key when the field takes over half a second to answer it),
+     * or hands them on after an Enter sent later: the words would be cut short by the keyboard, not by Orbit.
+     */
     fun type(words: String) {
-        shell("input text ${words.replace(" ", "%s")}")
+        val field = By.clazz("android.widget.EditText").focused(true)
+        shows(field, "a field to type in").text = words
+        shows(By.clazz("android.widget.EditText").focused(true).text(words), "the field to read \"$words\"")
+    }
+
+    /**
+     * Types `words` in the field with the focus as a keyboard's keys do, through the phone's keyboard app, which hands
+     * each on as it does what's typed on it: on the map's page, the keys, `beforeinput` and `input`. Each key waits for
+     * what the keyboard app needs to take it: the keyboard on screen (the keyboard app started, and taking the field's
+     * text), and the field reading every key before it, so none goes while the field is still answering the last.
+     */
+    fun typeKeys(words: String) {
+        eventually("the keyboard to type \"$words\" on") { keyboardShows() }
+        val automation = InstrumentationRegistry.getInstrumentation().getUiAutomation(Configurator.getInstance().uiAutomationFlags)
+        val keys = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD)
+
+        for (typed in 1..words.length) {
+            for (key in keys.getEvents(charArrayOf(words[typed - 1]))) {
+                automation.injectInputEvent(KeyEvent.changeTimeRepeat(key, SystemClock.uptimeMillis(), 0), true)
+            }
+
+            val soFar = words.substring(0, typed)
+            shows(By.clazz("android.widget.EditText").focused(true).text(soFar), "the field to read \"$soFar\"")
+        }
     }
 
     /**

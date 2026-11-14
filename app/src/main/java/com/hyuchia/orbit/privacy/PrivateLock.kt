@@ -2,6 +2,8 @@ package com.hyuchia.orbit.privacy
 
 import com.hyuchia.orbit.data.MapSummary
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
@@ -179,5 +181,18 @@ class PrivateLock(private val clock: () -> Long, screenLock: Boolean = true) {
 
     private fun publish() {
         state.value = current()
+    }
+}
+
+/**
+ * Each time private maps lock, calls off the pictures being drawn of those
+ * that hide now, wherever they're drawn (`revoke`, the pages'): `summary`
+ * says what's known of a map, and a map whose details aren't known counts as
+ * private, as it does everywhere. Runs until this scope ends.
+ */
+fun CoroutineScope.callOffPicturesAsPrivateMapsLock(lock: PrivateLock, summary: (String) -> MapSummary?, revoke: (hides: (String) -> Boolean) -> Unit): Job = launch {
+    lock.newlyLocked.collect {
+        val view = lock.view.value
+        revoke { id -> summary(id)?.let(view::hides) ?: true }
     }
 }

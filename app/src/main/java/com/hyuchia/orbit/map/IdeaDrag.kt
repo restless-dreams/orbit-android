@@ -31,9 +31,17 @@ import java.util.UUID
 import kotlin.math.roundToInt
 
 /**
+ * How deep an outline nests ([ideaOutline]): an idea deeper than this is
+ * listed at this depth, under the last idea there. So a branch a hundred
+ * thousand ideas deep is an outline about the size of its ideas' names,
+ * not of its depth squared. The same as `OUTLINE_DEEPEST` in web/bridge.ts.
+ */
+const val OUTLINE_DEEPEST = 32
+
+/**
  * An idea and the ideas under it as plain text, for other apps: its name,
- * then a list, nested as they are. The same outline copying an idea gives
- * (`outline` in web/bridge.ts).
+ * then a list, nested as they are, up to [OUTLINE_DEEPEST] levels. The same
+ * outline copying an idea gives (`outline` in web/bridge.ts).
  */
 fun ideaOutline(nodes: List<MapNode>, id: String): String {
     val children = nodes.groupBy { it.parentId }
@@ -41,10 +49,11 @@ fun ideaOutline(nodes: List<MapNode>, id: String): String {
     val lines = mutableListOf(outlineName(node))
     // A map can go a hundred thousand ideas deep: a list kept by hand, rather than a call for each level.
     val waiting = ArrayDeque(children[node.id].orEmpty().sortedBy { it.index }.map { it to 0 })
+    val indents = Array(OUTLINE_DEEPEST + 1) { "  ".repeat(it) }
 
     while (waiting.isNotEmpty()) {
         val (child, depth) = waiting.removeFirst()
-        lines += "${"  ".repeat(depth)}- ${outlineName(child)}"
+        lines += "${indents[minOf(depth, OUTLINE_DEEPEST)]}- ${outlineName(child)}"
         children[child.id].orEmpty().sortedByDescending { it.index }.forEach { waiting.addFirst(it to depth + 1) }
     }
 

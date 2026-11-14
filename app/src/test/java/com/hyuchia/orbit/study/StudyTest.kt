@@ -232,7 +232,14 @@ class StudyTest {
         val ser = StudyCard(box = 1, due = today + 1, first = today, at = 5)
         val estar = StudyCard(box = 2, due = today + 3, first = today - 9, at = 4)
         val tablet = mapOf("tablet" to mapOf("estar" to estar))
-        assertEquals(mapOf("estar" to estar, "ser" to ser), StudyChange.Answer("ser", ser).applyTo(mapOf("estar" to estar), emptyMap()))
+        assertEquals(mapOf("estar" to estar, "ser" to ser), StudyChange.Answer("ser", ser, before = null).applyTo(mapOf("estar" to estar), emptyMap()))
+
+        // A later answer there instead (another device's, folded in as the folder was left) stays; this device's own
+        // answer before it is answered over, whatever the phone's clock did meanwhile.
+        val tabletLater = StudyCard(box = 4, due = today + 16, first = today - 9, at = 9)
+        assertEquals(mapOf("ser" to tabletLater), StudyChange.Answer("ser", ser, before = null).applyTo(mapOf("ser" to tabletLater), emptyMap()))
+        assertEquals(mapOf("ser" to tabletLater), StudyChange.Answer("ser", ser, before = estar).applyTo(mapOf("ser" to tabletLater), emptyMap()))
+        assertEquals(mapOf("ser" to ser), StudyChange.Answer("ser", ser, before = tabletLater).applyTo(mapOf("ser" to tabletLater), emptyMap()))
         assertEquals(mapOf("estar" to estar), StudyChange.Forget(setOf("ser", "gone")).applyTo(mapOf("estar" to estar, "ser" to ser), emptyMap()))
 
         // Taken back, this device's own answer before comes back beside the tablet's, or none.

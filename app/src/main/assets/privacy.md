@@ -1,15 +1,15 @@
 # Privacy policy
 
-*Last changed on November 5, 2026.*
+*Last changed on November 12, 2026.*
 
-**Orbit keeps your maps on your phone.** It has no accounts, no ads and no tracking. It doesn't send your maps, or anything about you, to us or to anyone else. Apart from a daily look for new versions in Orbit from its website (see Updates), and the anonymous information about casting that Google's Cast library sends in Orbit from Google Play (see Casting to a TV), what leaves your phone is only what you send, as below.
+**Orbit keeps your maps on your phone.** It has no accounts, no ads and no tracking. It doesn't send your maps, or anything about you, to us or to anyone else. Apart from a daily look for new versions in Orbit from its website (see Updates), the anonymous information about casting that Google's Cast library sends in Orbit from Google Play (see Casting to a TV), and what Android hears when Orbit crashes (see Crashes), what leaves your phone is only what you send, as below.
 
 ## What stays on your phone
 
 - **Your maps,** with their pictures, their sounds, their versions and the trash, in Orbit's own storage, which other apps can't read. Orbit has no account and no cloud, so your maps are only on this device: they reach others only as below, when you keep them in a folder, send, share or show them, or when your phone backs them up.
 - **Voice memos** you record for an idea. Orbit uses the microphone, once you allow it, only while you record one, never in the background, and the memo stays in its map, like its pictures.
 - **Your settings.**
-- **Crash reports,** if Orbit ever closes unexpectedly. They say what went wrong and which versions of Orbit and Android you have, never what's in your maps, and they leave your phone only if you share one.
+- **Crash reports,** if Orbit ever closes unexpectedly. They say what went wrong and which versions of Orbit and Android you have, never what's in your maps, and they leave your phone only if you share one. Android hears of the crash too (see Crashes).
 
 ## What leaves your phone
 
@@ -22,6 +22,7 @@
 - **YouTube and Vimeo videos** play inside Orbit, in YouTube's and Vimeo's own players: YouTube's in its privacy-enhanced mode, so what you watch there doesn't shape what YouTube shows you, and Vimeo's told not to track, with no third-party cookies in either. They see what your phone plays, and that it's played in Orbit, as YouTube asks apps to say. A YouTube video's preview picture comes from YouTube whenever a map that has it is drawn, so YouTube sees which videos your maps have. YouTube's player is part of YouTube's API Services, so [YouTube's terms of service](https://www.youtube.com/t/terms) and [Google's privacy policy](https://policies.google.com/privacy) apply to it, and [Vimeo's privacy policy](https://vimeo.com/privacy) to Vimeo's. Vimeo protects its videos, so its player may ask your phone's protected-content system, as a browser's would, and nothing else of your phone.
 - **Links** open in your browser.
 - **Backups.** If your phone backs up its apps (Android's backup, or moving to a new phone), your maps and settings are part of it, under your phone's backup settings. Private maps go into it only when it's encrypted end to end, as Android's backup to Google is on a phone with a screen lock, or when you move to a new phone; after restoring one that left them out, Orbit says so. Your maps' versions and the trash are left out of online backups, as are pictures, sounds and videos that don't fit in them. Moving from a phone with Android 12 or later to a new one takes everything: the versions and the trash too, and what Orbit still has to delete from a folder you keep maps in. From a phone with Android 10 or 11, the move leaves those out, as an online backup does.
+- **Crashes.** When Orbit closes unexpectedly or stops responding, Android hears of it, as it does of any app's crash: what went wrong and where in Orbit's code, without your maps' names or anything in them, as Orbit's own report has it. Android keeps it in your phone's logs and, if your phone shares usage and diagnostics, may send it to Google or your phone's maker, under their privacy policies: that's how Google Play shows us that Orbit from Google Play crashed, and where in its code. Your phone's settings decide whether it goes, not Orbit.
 
 ## Updates
 

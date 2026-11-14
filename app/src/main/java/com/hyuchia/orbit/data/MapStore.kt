@@ -1,5 +1,6 @@
 package com.hyuchia.orbit.data
 
+import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
 import kotlinx.coroutines.Dispatchers
@@ -10,11 +11,15 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.descriptors.elementNames
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.longOrNull
 import java.io.File
 import java.io.IOException
 import java.util.UUID
@@ -57,6 +62,15 @@ internal class MapStore(
      * Nothing is thinned out or emptied for good while it can't.
      */
     val clockTrusted: () -> Boolean,
+
+    /** Moves a map's folder between the maps and the trash in one step, as [File.renameTo] does, and says whether it did. */
+    val rename: (File, File) -> Boolean = { file, to -> file.renameTo(to) },
+
+    /** The folder the maps are kept in now, as the settings say, or null when they aren't kept in one. */
+    val syncFolder: suspend () -> String? = { null },
+
+    /** Hears each name held for a file coming into a map's media folder ([IncomingMedia.Names]). */
+    holding: (String) -> Unit = {},
 ) {
     val mutex = Mutex()
     val summaries = MutableStateFlow<List<MapSummary>?>(null)
@@ -87,15 +101,64 @@ internal class MapStore(
     }
 
     /**
-     * How many bytes the pictures, videos and sounds the map has that its
-     * text, or `markdown`, points at come to, leaving out the file named
-     * `except` in its media folder: one that's counted on its own, as a
-     * picture is with the motion it's given.
+     * The pictures, videos, sounds and files of the map's that go with it to
+     * other people, that its folder has ([sharedNames]): each in its media
+     * folder itself, never one a link there leads to ([mapMediaFile]).
      */
-    fun mediaSize(id: String, markdown: String? = null, except: String? = null): Long {
+    fun sharedFiles(folder: File, markdown: String): List<File> = sharedNames(markdown).mapNotNull { mapMediaFile(folder, it) }
+
+    /** What's on its way into the maps' folders, which their texts don't point at yet (see [IncomingMedia]). */
+    val incoming = IncomingMedia(holding)
+
+    /**
+     * How many bytes the pictures, videos and sounds the map has that its
+     * text, or `markdown`, points at come to, with what's on its way into its
+     * folder ([incoming]) but `besides`, leaving out the file named `except`
+     * in its media folder: one that's counted on its own, as a picture is
+     * with the motion it's given.
+     */
+    fun mediaSize(id: String, markdown: String? = null, except: String? = null, besides: IncomingMedia.Arrival? = null): Long {
         val folder = folder(id)
         val text = markdown ?: runCatching { File(folder, MAP_FILE).readTextSafely() }.getOrDefault("")
-        return mediaFiles(folder, text).filter { it.name != except }.sumOf { it.length() }
+        val pointedAt = carriedNames(text).toSet()
+        val media = File(folder, MEDIA_DIRECTORY)
+        val own = pointedAt.filter { it != except }.map { File(media, it) }.filter { it.isFile }.sumOf { it.length() }
+        // What the map's own text points at is the map's: what came in for it counts no more as coming in.
+        return own + incoming.taken(id, pointedAt + listOfNotNull(except), besides, settling = markdown == null)
+    }
+
+    /**
+     * Lets a copy start into map `id`, taking as much of its room as `take`
+     * says, given what the map comes to with all else on its way in; `take`
+     * refuses it with a [MediaRefusedException] instead. It's counted and
+     * taken at the same moment, so two copies at once never both take the
+     * last of the room. The file named `except` in its media folder is left
+     * out of what the map comes to, as [mediaSize] leaves it. Close the
+     * arrival when the copy didn't come in, and say what did once it's in
+     * ([arrived]).
+     */
+    fun arriving(id: String, except: String? = null, take: (mapMedia: Long) -> Long): IncomingMedia.Arrival = synchronized(incoming) {
+        val mapMedia = mediaSize(id, except = except)
+        incoming.add(id, take(mapMedia), mapMedia)
+    }
+
+    /**
+     * The copy `arrival` let in is in, as `files`: they count against the
+     * map's room by their own sizes until its text points at them. When
+     * `refusal` says why they don't fit after all, given what the map comes
+     * to with all else on its way in, as for a file that came out bigger than
+     * it said, they go, and they're refused with a [MediaRefusedException].
+     */
+    fun arrived(arrival: IncomingMedia.Arrival, files: List<File>, refusal: ((mapMedia: Long) -> String?)? = null) {
+        synchronized(incoming) {
+            refusal?.invoke(mediaSize(arrival.id, besides = arrival))?.let { problem ->
+                files.forEach(File::delete)
+                arrival.close()
+                throw MediaRefusedException(problem)
+            }
+
+            arrival.arrived(files)
+        }
     }
 
     fun checkWritable() {
@@ -129,12 +192,68 @@ internal class MapStore(
         }
     }
 
-    /** Changes the map's details as they are now, under the lock; a change that gives them back as they were writes nothing. */
-    suspend fun updateMetadata(id: String, change: (MapMetadata) -> MapMetadata) = withContext(Dispatchers.IO) {
+    /**
+     * Makes several maps' folders whole before any of them shows up, all or
+     * none: each filled in a hidden folder, as [settle] fills one (`fill`
+     * hears its place in `ids`), and only once every one is are they given
+     * their names, `ids` in order. Whatever stops it leaves none of them, and
+     * none of their hidden folders: one named already, never listed yet, goes
+     * back.
+     */
+    fun settleAll(ids: List<String>, fill: (index: Int, staging: File) -> Unit): List<File> {
+        val stagings = ids.map { File(directory, ".new-${UUID.randomUUID()}") }
+        val named = mutableListOf<File>()
+
+        try {
+            stagings.forEachIndexed { index, staging ->
+                staging.mkdirs()
+                fill(index, staging)
+            }
+
+            ids.forEachIndexed { index, id ->
+                val folder = folder(id)
+
+                if (!stagings[index].renameTo(folder)) {
+                    throw IOException("Couldn't add the map $id")
+                }
+
+                named += folder
+            }
+
+            return named
+        } catch (failed: Throwable) {
+            named.forEachIndexed { index, folder ->
+                if (!folder.renameTo(stagings[index])) {
+                    folder.deleteRecursively()
+                }
+            }
+
+            throw failed
+        } finally {
+            stagings.forEach { it.deleteRecursively() }
+        }
+    }
+
+    /**
+     * Changes the map's details as they are now, under the lock; a change
+     * that gives them back as they were writes nothing. A map that's gone
+     * takes no change, and neither do the maps while a newer Orbit keeps
+     * them: quietly, or, `strict`, with the [IOException] [checkWritable]
+     * gives, for a change that has to be written or tried again.
+     */
+    suspend fun updateMetadata(id: String, strict: Boolean = false, change: (MapMetadata) -> MapMetadata) = withContext(Dispatchers.IO) {
         mutex.withLock {
             val folder = folder(id)
 
-            if (!File(folder, MAP_FILE).isFile || !canWrite.value) {
+            if (!File(folder, MAP_FILE).isFile) {
+                return@withLock
+            }
+
+            if (!canWrite.value) {
+                if (strict) {
+                    checkWritable()
+                }
+
                 return@withLock
             }
 
@@ -261,24 +380,33 @@ internal class MapStore(
     }
 
     /** A new map's id, unlike any map's here, in the trash, or with a history left behind. */
-    fun newFolder(title: String): String {
-        val taken = directory.list().orEmpty().toSet() +
-            trashDirectory.list().orEmpty().map { it.substringBeforeLast('-') } +
-            historyDirectory.list().orEmpty()
-        return MapText.folderName(title, taken)
-    }
+    fun newFolder(title: String): String = MapText.folderName(title, takenIds())
+
+    /** The ids a new map can't have: those of the maps here, in the trash, and with a history left behind. */
+    fun takenIds(): MutableSet<String> =
+        (directory.list().orEmpty().asList() + trashDirectory.list().orEmpty().map { it.substringBeforeLast('-') } + historyDirectory.list().orEmpty()).toHashSet()
 
     /**
      * The files of deleted maps still to delete from the folder, a record
-     * each. Each is read on its own, so one this version can't read doesn't
-     * lose the rest; one whose `private` it can't read was a private map's, so
-     * its file, back in the folder, comes back private ([SyncRecord.private]).
-     * Throws [IOException] when they're there but can't be read, now or at
-     * all (damaged, not a list of records): none is taken for no deletions,
-     * so no deleted map's file comes back as a map like any other, and
-     * nothing writes over them.
+     * each. Each is read on its own: one whose `private` this version can't
+     * read was a private map's, so its file, back in the folder, comes back
+     * private ([SyncRecord.private]). One that can't be read whole, as
+     * damage leaves one (its `file` reshaped, say, or not a record at all),
+     * neither stops the rest nor is dropped: what of it can be read is kept,
+     * as a private map's deletion, since it may have been one, and as an
+     * untold one without its `file` ([SyncRecord.untold]). Throws
+     * [IOException] when they're there but can't be read, now or at all
+     * (damaged, not a list of records): none is taken for no deletions, so
+     * no deleted map's file comes back as a map like any other, and nothing
+     * writes over them.
      */
-    fun readTombstones(): List<SyncRecord> {
+    fun readTombstones(): List<SyncRecord> = readTombstoneFields().map { it.record }
+
+    /** One of the folder's deletions as read: what this version reads of it, as it's written, and its fields this version couldn't read. */
+    private class Tombstone(val record: SyncRecord, val written: JsonElement, val unread: Set<String> = emptySet())
+
+    /** Each of the folder's deletions as [readTombstones] reads it, with its fields as they're written: what a newer version added to it included. */
+    private fun readTombstoneFields(): List<Tombstone> {
         if (!tombstones.isFile) {
             return emptyList()
         }
@@ -291,20 +419,115 @@ internal class MapStore(
             throw IOException("The folder's deletions can't be read", damaged)
         }
 
-        return records.mapNotNull { record -> runCatching { mapsJson.decodeFromJsonElement(SyncRecord.serializer(), record) }.getOrNull() ?: privateTombstone(record) }
+        return records.map { record ->
+            val fields = record as? JsonObject
+            val read = fields?.let { runCatching { mapsJson.decodeFromJsonElement(SyncRecord.serializer(), it) }.getOrNull() ?: privateTombstone(it) }
+            read?.let { Tombstone(it, record) } ?: salvagedTombstone(record)
+        }
     }
 
     /** A deleted map's record whose `private` this version can't read, as a private map's; null when the rest can't be read either. */
-    private fun privateTombstone(record: JsonElement): SyncRecord? {
-        val fields = record as? JsonObject ?: return null
-        return runCatching { mapsJson.decodeFromJsonElement(SyncRecord.serializer(), JsonObject(fields - "private")) }.getOrNull()?.copy(private = true)
+    private fun privateTombstone(fields: JsonObject): SyncRecord? =
+        runCatching { mapsJson.decodeFromJsonElement(SyncRecord.serializer(), JsonObject(fields - "private")) }.getOrNull()?.copy(private = true)
+
+    /**
+     * A deleted map's record that can't be read whole: each of its fields
+     * this version can read, a private map's, and those it can't kept as
+     * they're written, for when the record is written again.
+     */
+    private fun salvagedTombstone(written: JsonElement): Tombstone {
+        val fields = written as? JsonObject ?: JsonObject(emptyMap())
+
+        fun text(name: String): String? = (fields[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
+
+        fun number(name: String): Long? = (fields[name] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull
+
+        val record = SyncRecord(
+            folder = text("folder").orEmpty(),
+            file = text("file").orEmpty(),
+            hash = text("hash").orEmpty(),
+            modified = number("modified") ?: 0,
+            size = number("size") ?: -1,
+            missingSince = number("missingSince"),
+            writing = text("writing"),
+            private = true,
+            install = text("install"),
+        )
+
+        val read = mapsJson.encodeToJsonElement(SyncRecord.serializer(), record).jsonObject
+        val known = SyncRecord.serializer().descriptor.elementNames.toSet()
+        return Tombstone(record, written, fields.keys.filterTo(HashSet()) { it in known && fields[it] != read[it] })
     }
 
+    /**
+     * Writes the folder's deletions. A record that was there already is
+     * written as it was, with what a newer version added to it, or a
+     * `private` this one can't read; one changed here (its file found
+     * missing, say) keeps what a newer version added, and the fields this
+     * version couldn't read as they were; only new ones are written as this
+     * version writes them. Throws [IOException] when they can't be written,
+     * or, with none left, deleted.
+     */
     fun writeTombstones(records: List<SyncRecord>) {
         if (records.isEmpty()) {
-            tombstones.delete()
-        } else {
-            writeAtomically(tombstones, mapsJson.encodeToString(ListSerializer(SyncRecord.serializer()), records.distinct()))
+            if (!tombstones.delete() && tombstones.exists()) {
+                throw IOException("The folder's deletions couldn't be deleted")
+            }
+
+            return
+        }
+
+        val kept = runCatching { readTombstoneFields() }.getOrDefault(emptyList())
+
+        val fields = records.distinct().map { record ->
+            val written = mapsJson.encodeToJsonElement(SyncRecord.serializer(), record)
+            val same = kept.firstOrNull { it.record == record }
+            // One that lost its text as its file went (see [SyncRecord.textless]) is the same deletion, by its file.
+            val changed = kept.firstOrNull { it.record.folder == record.folder && it.record.file == record.file && (it.record.hash == record.hash || record.textless) }
+            same?.written ?: changed?.let { before -> changedTombstone(written, before) } ?: written
+        }
+
+        writeAtomically(tombstones, JsonArray(fields).toString())
+    }
+
+    /**
+     * `written`, a deletion changed here, with what `before` held that this
+     * version doesn't know or couldn't read, as it was: a field it couldn't
+     * read only while the change left it as it read it, so one it changed
+     * (`missingSince`, as its file was found missing) is written as it is now.
+     */
+    private fun changedTombstone(written: JsonElement, before: Tombstone): JsonElement {
+        val fields = before.written as? JsonObject ?: return written
+        val kept = keepUnknownFields(written, fields, SyncRecord.serializer().descriptor) as JsonObject
+        val read = mapsJson.encodeToJsonElement(SyncRecord.serializer(), before.record).jsonObject
+        return JsonObject(kept + fields.filterKeys { it in before.unread && kept[it] == read[it] })
+    }
+
+    /**
+     * Forgets the deletions a deletion that didn't finish left: it records
+     * the map's file first, then moves the map to the trash ([MapTrash.delete]),
+     * so one Orbit stopped in between finds the map still among `maps`, with
+     * the same file in the folder, or whose file can't be told and its very
+     * text ([SyncRecord.untold]). And so does a map brought back from the
+     * trash just before Orbit stopped, whose deletion was still to go. Their
+     * files stay in the folder. Deletions that can't be read stay as they are.
+     */
+    fun forgetUnfinishedDeletions(maps: List<MapSummary>) {
+        val records = try {
+            readTombstones()
+        } catch (unreadable: IOException) {
+            return
+        }
+
+        val files = maps.mapNotNullTo(HashSet()) { map -> map.metadata.sync?.let { it.folder to it.file } }
+        val untold = maps.filter { it.metadata.folderFileUnknown }.mapTo(mutableListOf()) { it.contentKey }
+
+        val left = records.filterNot { record ->
+            if (record.untold) untold.remove(record.hash) else (record.folder to record.file) in files
+        }
+
+        if (left.size != records.size) {
+            runCatching { writeTombstones(left) }.onFailure { Logs.warn("MapRepository", "Couldn't forget a deletion that didn't finish", it) }
         }
     }
 }
@@ -322,6 +545,8 @@ internal abstract class MapPart(protected val store: MapStore) {
     protected val clock: () -> Long get() = store.clock
     protected val installed: Long get() = store.installed
     protected val clockTrusted: () -> Boolean get() = store.clockTrusted
+    protected val rename: (File, File) -> Boolean get() = store.rename
+    protected val syncFolder: suspend () -> String? get() = store.syncFolder
     protected val mutex: Mutex get() = store.mutex
     protected val summaries: MutableStateFlow<List<MapSummary>?> get() = store.summaries
     protected val trashed: MutableStateFlow<List<TrashedMap>> get() = store.trashed
@@ -336,13 +561,19 @@ internal abstract class MapPart(protected val store: MapStore) {
 
     protected fun mediaFiles(folder: File, markdown: String): List<File> = store.mediaFiles(folder, markdown)
 
-    protected fun mediaSize(id: String, markdown: String? = null, except: String? = null): Long = store.mediaSize(id, markdown, except)
+    protected fun sharedFiles(folder: File, markdown: String): List<File> = store.sharedFiles(folder, markdown)
+
+    protected fun mediaSize(id: String, markdown: String? = null, except: String? = null, besides: IncomingMedia.Arrival? = null): Long = store.mediaSize(id, markdown, except, besides)
+
+    protected fun arriving(id: String, except: String? = null, take: (mapMedia: Long) -> Long): IncomingMedia.Arrival = store.arriving(id, except, take)
+
+    protected fun arrived(arrival: IncomingMedia.Arrival, files: List<File>, refusal: ((mapMedia: Long) -> String?)? = null) = store.arrived(arrival, files, refusal)
 
     protected fun checkWritable() = store.checkWritable()
 
     protected fun settle(id: String, fill: (File) -> Unit): File = store.settle(id, fill)
 
-    protected suspend fun updateMetadata(id: String, change: (MapMetadata) -> MapMetadata) = store.updateMetadata(id, change)
+    protected suspend fun updateMetadata(id: String, strict: Boolean = false, change: (MapMetadata) -> MapMetadata) = store.updateMetadata(id, strict, change)
 
     protected fun summarize(folder: File): MapSummary = store.summarize(folder)
 
@@ -359,6 +590,8 @@ internal abstract class MapPart(protected val store: MapStore) {
     protected fun mediaArrived(id: String, names: Set<String>) = store.mediaArrived(id, names)
 
     protected fun newFolder(title: String): String = store.newFolder(title)
+
+    protected fun takenIds(): MutableSet<String> = store.takenIds()
 
     protected fun readTombstones(): List<SyncRecord> = store.readTombstones()
 

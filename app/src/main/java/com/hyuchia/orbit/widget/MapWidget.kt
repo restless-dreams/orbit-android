@@ -1,8 +1,5 @@
 package com.hyuchia.orbit.widget
 
-import android.appwidget.AppWidgetManager
-import android.appwidget.AppWidgetProviderInfo
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
@@ -13,7 +10,6 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.os.Build
 import android.util.LruCache
-import androidx.collection.intSetOf
 import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -76,6 +72,7 @@ import androidx.glance.unit.ColorProvider
 import com.hyuchia.orbit.ACTION_OPEN_MAP
 import com.hyuchia.orbit.EXTRA_MAP_ID
 import com.hyuchia.orbit.EXTRA_OPEN_MARK
+import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.MainActivity
 import com.hyuchia.orbit.OpenMark
 import com.hyuchia.orbit.R
@@ -87,9 +84,12 @@ import com.hyuchia.orbit.home.describe
 import com.hyuchia.orbit.theme.mapStyle
 import com.hyuchia.orbit.theme.mapTheme
 import com.hyuchia.orbit.theme.orbitColorScheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -98,7 +98,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.runningFold
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 /** The map a widget shows, in its Glance state; without one, it shows the pinned map, or the last opened. */
 val WidgetMapKey = stringPreferencesKey("map")
@@ -163,6 +166,7 @@ class MapWidget : GlanceAppWidget() {
     /** What the launcher's list of widgets shows (Android 15 and later): the map a new widget shows, as it shows it. */
     override suspend fun providePreview(context: Context, widgetCategory: Int) {
         val map = shownMap(loadedMaps(context), null)
+        previewShows(map?.id)
         val dynamicColor = context.container.settings.settings.first().dynamicColor
         val picture = map?.takeUnless { it.metadata.isPrivate }?.let { picture(context, it, homeScreenIsDark(context), dynamicColor) }
 
@@ -189,11 +193,66 @@ class MapWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = MapWidget()
 }
 
-/** Draws every map widget again, after a map changed; nothing to do without any on the home screen. */
-suspend fun updateMapWidgets(context: Context) {
+/**
+ * Draws every map widget again, after a map changed; nothing to do without
+ * any on the home screen. A drawing that fails (Glance's work, or its store,
+ * refusing it) is logged, and the next change draws them again: it never stops
+ * the widgets following the maps.
+ */
+suspend fun updateMapWidgets(context: Context): Boolean = updateMapWidgets {
     if (GlanceAppWidgetManager(context).getGlanceIds(MapWidget::class.java).isNotEmpty()) {
         MapWidget().updateAll(context)
     }
+}
+
+/** Draws the widgets with `draw`, as [updateMapWidgets] does: a failure is logged, never thrown. Whether they were drawn. */
+internal suspend fun updateMapWidgets(draw: suspend () -> Unit): Boolean = try {
+    draw()
+    true
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (failed: Exception) {
+    Logs.warn("Widgets", "Couldn't draw the widgets again", failed)
+    false
+}
+
+/** How long the widgets wait to be drawn again after a drawing failed, each time it fails again. */
+val WIDGET_RETRIES = listOf(5.seconds, 30.seconds, 2.minutes)
+
+/**
+ * Keeps the home screen's widgets drawn with `draw`, which says whether it
+ * drew them, as the maps change ([follow]). A drawing that fails is tried
+ * again after each of `retries` until one takes, so a map made private never
+ * keeps its name and picture on a widget because one drawing failed; the next
+ * change stops the retries and draws them itself. Should the last fail too,
+ * they're drawn again as Orbit comes back on screen ([cameBack]).
+ */
+class WidgetRedrawing(private val draw: suspend () -> Boolean, private val retries: List<Duration> = WIDGET_RETRIES) {
+    /** Whether the widgets may show what changed since they were last drawn: the last drawing failed. */
+    private val behind = AtomicBoolean(false)
+
+    /** Draws the widgets each time `redraws` says to ([widgetRedraws]), until it's cancelled. */
+    suspend fun follow(redraws: Flow<Unit>) = redraws.collectLatest { redraw() }
+
+    /** Draws the widgets now, and again after each of the retries while it fails. */
+    suspend fun redraw() {
+        for (wait in listOf(Duration.ZERO) + retries) {
+            delay(wait)
+
+            if (drawn()) {
+                return
+            }
+        }
+    }
+
+    /** Orbit came back on screen: widgets the last drawing left behind are drawn again. */
+    suspend fun cameBack() {
+        if (behind.get()) {
+            drawn()
+        }
+    }
+
+    private suspend fun drawn(): Boolean = draw().also { behind.set(!it) }
 }
 
 /** The private maps as the widgets are drawn, and whether a map became private since they were last drawn. */
@@ -219,41 +278,6 @@ fun widgetRedraws(maps: Flow<List<MapSummary>?>, settle: Duration): Flow<Unit> =
         .debounce { if (it.madePrivate) Duration.ZERO else settle }
         .map {}
 
-/**
- * Shows the launcher's list of widgets the map a new widget would show, on
- * Android 15 and later; before, the list shows Orbit's icon. The launcher
- * allows this a few times an hour, so it's done as Orbit starts. Whether the
- * launcher took it.
- */
-suspend fun offerWidgetPreview(context: Context): Boolean {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-        return false
-    }
-
-    val result = GlanceAppWidgetManager(context).setWidgetPreviews(MapWidgetReceiver::class, intSetOf(AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN))
-    return result == GlanceAppWidgetManager.SET_WIDGET_PREVIEWS_RESULT_SUCCESS
-}
-
-/**
- * Shows the launcher's list of widgets again after a map was made private,
- * or stopped being private: the list never shows a private map's name or
- * picture. When the launcher won't take a new preview now (it allows a few
- * an hour), the old one goes, and the list shows Orbit's icon until the next.
- */
-suspend fun refreshWidgetPreview(context: Context, madePrivate: Boolean) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-        return
-    }
-
-    val offered = runCatching { offerWidgetPreview(context) }.getOrDefault(false)
-
-    if (!offered && madePrivate) {
-        runCatching {
-            AppWidgetManager.getInstance(context).removeWidgetPreview(ComponentName(context, MapWidgetReceiver::class.java), AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN)
-        }
-    }
-}
-
 /** The widget for `map`, as the launcher shows it while asking where it goes. */
 suspend fun mapWidgetPreview(context: Context, map: MapSummary): GlanceAppWidget {
     val dynamicColor = context.container.settings.settings.first().dynamicColor
@@ -264,7 +288,7 @@ suspend fun mapWidgetPreview(context: Context, map: MapSummary): GlanceAppWidget
 /** The size the launcher gives a new widget on a phone, three cells by two: the layout its preview shows. */
 val MapWidgetPreviewSize = TwoRows
 
-private suspend fun loadedMaps(context: Context): List<MapSummary> {
+internal suspend fun loadedMaps(context: Context): List<MapSummary> {
     val maps = context.container.maps
 
     if (maps.maps.value == null) {
@@ -594,24 +618,22 @@ private fun Progress(map: MapSummary, color: ColorProvider, words: Boolean = tru
     val progress = map.outline.progress
 
     if (progress.total > 0) {
-        if (words) {
-            // Goals are reached, and to-dos done: when they're all goals, the words say so.
-            val counted = if (progress.goals == progress.total) {
-                R.plurals.widget_progress_reached
-            } else {
-                R.plurals.widget_progress_done
-            }
+        // Goals are reached, and to-dos done: when they're all goals, the words say so.
+        val counted = if (progress.goals == progress.total) {
+            R.plurals.widget_progress_reached
+        } else {
+            R.plurals.widget_progress_done
+        }
 
-            Text(
-                context.resources.getQuantityString(counted, progress.finished, progress.finished, progress.total),
-                maxLines = 1,
-                style = TextStyle(color = color, fontSize = 12.sp),
-            )
+        val said = context.resources.getQuantityString(counted, progress.finished, progress.finished, progress.total)
+
+        if (words) {
+            Text(said, maxLines = 1, style = TextStyle(color = color, fontSize = 12.sp))
         }
 
         Spacer(GlanceModifier.height(4.dp))
-        // As the map's rings fill: goals by how far along they are.
-        ProgressBar(progress.share.toFloat())
+        // As the map's rings fill: goals by how far along they are. Without room for the words, screen readers hear them from it.
+        ProgressBar(progress.share.toFloat(), description = said.takeUnless { words })
     } else if (words) {
         Text(describe(context.resources, map), maxLines = 1, style = TextStyle(color = color, fontSize = 12.sp))
     }
@@ -620,10 +642,12 @@ private fun Progress(map: MapSummary, color: ColorProvider, words: Boolean = tru
 /**
  * A map's progress bar in Orbit's colors. Before Android 12 a widget's bar
  * takes the launcher's colors whatever it's asked, so there it's a picture
- * of the bar, drawn again as the home screen turns light or dark.
+ * of the bar, drawn again as the home screen turns light or dark, which says
+ * `description` to screen readers, as Android 12 and later's bar says its
+ * percentage.
  */
 @Composable
-private fun ProgressBar(share: Float) {
+private fun ProgressBar(share: Float, description: String?) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         LinearProgressIndicator(
             progress = share,
@@ -640,7 +664,7 @@ private fun ProgressBar(share: Float) {
 
     Image(
         provider = ImageProvider(progressBarPicture(share, fill, track)),
-        contentDescription = null,
+        contentDescription = description,
         contentScale = ContentScale.FillBounds,
         modifier = GlanceModifier.fillMaxWidth().height(4.dp),
     )

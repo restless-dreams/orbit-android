@@ -14,14 +14,18 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 
 private const val DAY = 24 * 60 * 60 * 1000L
 
@@ -45,7 +49,7 @@ class StudyControlTest {
     )
 
     private val sent = mutableListOf<MapCommand>()
-    private val now = 1_800_000_000_000L
+    private var now = 1_800_000_000_000L
     private var progress: Map<String, StudyCard> = emptyMap()
     private var elsewhere: Map<String, Map<String, StudyCard>> = emptyMap()
     private var newADay = NEW_CARDS_A_DAY
@@ -56,25 +60,43 @@ class StudyControlTest {
     /** While it's there, each change waits for it before it's written, as one does while the storage is slow. */
     private var holding: CompletableDeferred<Unit>? = null
 
+    /** While true, the storage takes no change, as a full one: each fails as it's written. */
+    private var full = false
+
+    /** How many times a change was tried, written or not. */
+    private var tries = 0
+
+    /** How many times the screen was told answers that waited are written after all. */
+    private var savedAfterAll = 0
+
     /** Writes a change as the maps do: to this device's answers as they are when it's written, beside the other devices'. */
     private val keep: suspend (StudyChange) -> Unit = { change ->
         holding?.await()
+        tries += 1
+
+        if (full) {
+            throw IOException("No space left on device")
+        }
+
         progress = change.applyTo(progress, elsewhere)
         kept += progress
     }
 
-    private val TestScope.control: StudyControl
-        get() = StudyControl(
-            scope = backgroundScope,
-            ui = ui,
-            send = { sent += it },
-            progress = { progress },
-            keep = keep,
-            today = { today },
-            elsewhere = { elsewhere },
-            newADay = { newADay },
-            now = { now },
-        )
+    /** Studying the map on a screen of its own, in `scope`, with the map's `answers`. */
+    private fun TestScope.studying(scope: CoroutineScope = backgroundScope, answers: StudyWriting = StudyWriting(backgroundScope, keep)) = StudyControl(
+        scope = scope,
+        ui = ui,
+        send = { sent += it },
+        progress = { progress },
+        answers = answers,
+        today = { today },
+        elsewhere = { elsewhere },
+        newADay = { newADay },
+        now = { now },
+        saved = { savedAfterAll += 1 },
+    )
+
+    private val TestScope.control: StudyControl get() = studying()
 
     private val study: Study get() = ui.value.study!!
 
@@ -369,6 +391,46 @@ class StudyControlTest {
     }
 
     @Test
+    fun `an answer taken back after another device's later one came in shows that one, and goes on from it`() = runTest {
+        val control = control
+        control.start("verbs")
+        control.reveal()
+        control.answer(knew = true)
+        runCurrent()
+
+        // The tablet answered Ser later, well along, and the folder, left since, folded its answer in over this one.
+        val later = StudyCard(box = 4, due = today, first = today - 30, at = now + 60_000)
+        progress = progress + ("ser" to later)
+        control.undo()
+        runCurrent()
+        assertEquals(later, progress["ser"])
+        assertEquals(later.daysIfKnown(today), study.ifKnown)
+
+        // Known now, it goes on from the tablet's box, not from where this device had it.
+        control.answer(knew = true)
+        runCurrent()
+        assertEquals(StudyCard(box = 5, due = today + 35, first = today - 30, at = now), progress["ser"])
+    }
+
+    @Test
+    fun `a card answered again in a session keeps the new answer, even with the clock set back meanwhile`() = runTest {
+        val control = control
+        control.start("verbs")
+        control.reveal()
+        control.answer(knew = false)
+        control.reveal()
+        control.answer(knew = true)
+        assertEquals("ser", study.current)
+
+        // The phone's clock goes back a minute before Ser comes round again.
+        now -= 60_000
+        control.reveal()
+        control.answer(knew = true)
+        runCurrent()
+        assertEquals(StudyCard(box = 1, due = today + 1, first = today, at = now), progress["ser"])
+    }
+
+    @Test
     fun `a card the map no longer has, as it changed elsewhere, leaves the session at once, and the next one comes hidden`() = runTest {
         val control = control
         control.start("verbs")
@@ -460,7 +522,7 @@ class StudyControlTest {
     fun `answers given right before the map closes are still written once it has`() = runTest {
         // The screen's scope goes as the map closes; the answers are written on the app's, which stays.
         val screen = CoroutineScope(backgroundScope.coroutineContext + Job())
-        val control = StudyControl(screen, ui, { sent += it }, { progress }, keep, { today }, { elsewhere }, { newADay }, { now }, writing = backgroundScope)
+        val control = studying(scope = screen)
         holding = CompletableDeferred()
         control.start("verbs")
         control.reveal()
@@ -490,5 +552,134 @@ class StudyControlTest {
         sent.clear()
         control.pageLoaded()
         assertEquals(listOf(MapCommand.Present(true), MapCommand.HideChildren(listOf("ser", "estar")), MapCommand.Focus("ser")), sent)
+    }
+
+    @Test
+    fun `an answer the storage can't take isn't counted as kept, the map says so, and a session begun again still counts it`() = runTest {
+        val control = control
+        full = true
+        control.start("verbs")
+        control.reveal()
+        control.answer(knew = true)
+        runCurrent()
+        assertEquals(AnswersUnsaved.Storage, ui.value.answersUnsaved)
+        assertTrue(progress.isEmpty())
+
+        // However long it's waited for, it isn't written: the folder maps are kept in isn't told it is.
+        var written = false
+
+        backgroundScope.launch {
+            control.written()
+            written = true
+        }
+
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertFalse(written)
+
+        // A session begun again goes on from it: Ser is known, so only Estar is new today.
+        control.stop()
+        control.start("verbs")
+        assertEquals(listOf("estar"), study.queue)
+        assertTrue(progress.isEmpty())
+    }
+
+    @Test
+    fun `an answer the storage couldn't take is tried again until it takes it, and written once`() = runTest {
+        val control = control
+        full = true
+        control.start("verbs")
+        control.reveal()
+        control.answer(knew = true)
+        runCurrent()
+        assertEquals(1, tries)
+        control.stop()
+
+        // Room again: the next try writes it, and the map says so, as the session is over.
+        full = false
+        advanceTimeBy(ANSWER_RETRY_MILLISECONDS - 1)
+        runCurrent()
+        assertTrue(progress.isEmpty())
+        assertEquals(AnswersUnsaved.Storage, ui.value.answersUnsaved)
+
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals(setOf("ser"), progress.keys)
+        assertEquals(1, kept.size)
+        assertNull(ui.value.answersUnsaved)
+        assertEquals(1, savedAfterAll)
+        control.written()
+    }
+
+    @Test
+    fun `answers given while one can't be kept wait behind it, each new one tries again, and Try again writes them all in order`() = runTest {
+        val control = control
+        full = true
+        control.start("verbs")
+        control.reveal()
+        control.answer(knew = true)
+        runCurrent()
+        assertEquals(1, tries)
+        control.reveal()
+        control.answer(knew = true)
+        runCurrent()
+        assertEquals(2, tries)
+        // Estar's answer taken back: written before the answer, it would leave the answer in.
+        control.undo()
+        runCurrent()
+        assertEquals(3, tries)
+        assertTrue(progress.isEmpty())
+
+        full = false
+        control.tryAgain()
+        runCurrent()
+        assertEquals(listOf(setOf("ser"), setOf("ser", "estar"), setOf("ser")), kept.map { it.keys })
+        assertNull(ui.value.answersUnsaved)
+        // Still in the session, which shows they're written by the note going: nothing more is said.
+        assertEquals(0, savedAfterAll)
+    }
+
+    @Test
+    fun `answers a screen that closed couldn't keep count in the next screen's session, which says so, and are written once`() = runTest {
+        val writes = StudyWrites(backgroundScope, { _, change -> keep(change) })
+        assertSame(writes.of("verbs"), writes.of("verbs"))
+        val screen = CoroutineScope(backgroundScope.coroutineContext + Job())
+        val first = studying(scope = screen, answers = writes.of("verbs"))
+        full = true
+        first.start("verbs")
+        first.reveal()
+        first.answer(knew = true)
+        runCurrent()
+        first.stop()
+        first.close()
+        screen.cancel()
+
+        // The map opens again, on a new screen.
+        ui.value = MapUi(ready = true, map = MapState("Spanish verbs", nodes))
+        val second = studying(answers = writes.of("verbs"))
+        runCurrent()
+        assertEquals(AnswersUnsaved.Storage, ui.value.answersUnsaved)
+        second.start("verbs")
+        assertEquals(listOf("estar"), study.queue)
+
+        full = false
+        advanceTimeBy(ANSWER_RETRY_MILLISECONDS)
+        runCurrent()
+        assertEquals(setOf("ser"), progress.keys)
+        assertEquals(1, kept.size)
+        assertNull(ui.value.answersUnsaved)
+    }
+
+    @Test
+    fun `a newer Orbit keeping the maps is why answers wait, as the maps say`() = runTest {
+        val writing = StudyWriting(backgroundScope, keep, problemOf = { AnswersUnsaved.Newer })
+        val control = studying(answers = writing)
+        full = true
+        control.start("verbs")
+        control.reveal()
+        control.answer(knew = false)
+        runCurrent()
+        assertEquals(AnswersUnsaved.Newer, ui.value.answersUnsaved)
+        assertEquals(AnswersUnsaved.Newer, writing.problem.value)
     }
 }

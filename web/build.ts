@@ -1,5 +1,6 @@
 // Bundles the pages' scripts, with Orbit. Orbit comes from a local
-// checkout, built first with `bun run build` there:
+// checkout, built first with `bun run build` there, and since its sources
+// last changed (orbit-build.ts):
 //
 //   ORBIT_PATH=../../orbit bun run build    (from web/; that's the default)
 //
@@ -21,19 +22,14 @@
 // And one of each message between the app and the pages, from
 // protocol-examples.ts, into the app's tests
 // (app/src/test/resources/page-protocol.json).
-import { join, resolve } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { parse } from 'acorn';
+import { orbitBuild, orbitPath } from './orbit-build';
 import { protocolExamples } from './protocol-examples';
 import { ENGLISH_WORDS } from './words';
 
-const orbitPath = resolve(import.meta.dir, process.env.ORBIT_PATH ?? '../../orbit');
-const orbitEntry = join(orbitPath, 'dist/index.js');
-
-if (!existsSync(orbitEntry)) {
-  console.error(`No Orbit build at ${orbitEntry}. Run \`bun run build\` in your Orbit checkout, or point ORBIT_PATH at it.`);
-  process.exit(1);
-}
+const orbitEntry = orbitBuild('dist/index.js');
 
 const assets = join(import.meta.dir, '../app/src/main/assets/map');
 const receiver = join(import.meta.dir, 'dist/cast-receiver');

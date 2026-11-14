@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.privacy.CountsOverTheMap
 import com.hyuchia.orbit.ui.Hint
 import kotlinx.coroutines.delay
 import java.text.NumberFormat
@@ -250,7 +251,7 @@ private fun DropOffer.icon(): ImageVector = when (this) {
 
 /** Asks whether a picture and a movie let go together are one live photo: joining them makes the picture play its motion. */
 @Composable
-private fun LiveOfferDialog(offer: LiveOffer, onAnswer: (Boolean) -> Unit) {
+internal fun LiveOfferDialog(offer: LiveOffer, onAnswer: (Boolean) -> Unit) {
     val text = if (offer.picture != null && offer.movie != null) {
         stringResource(R.string.drop_live_offer, offer.picture, offer.movie)
     } else {
@@ -260,7 +261,11 @@ private fun LiveOfferDialog(offer: LiveOffer, onAnswer: (Boolean) -> Unit) {
     AlertDialog(
         onDismissRequest = { onAnswer(false) },
         icon = { Icon(Icons.Outlined.MotionPhotosOn, contentDescription = null) },
-        title = { Text(stringResource(R.string.drop_live_offer_title)) },
+        title = {
+            // It names the picture and the movie: a lock covers it.
+            CountsOverTheMap()
+            Text(stringResource(R.string.drop_live_offer_title))
+        },
         text = { Text(text) },
         confirmButton = { TextButton(onClick = { onAnswer(true) }) { Text(stringResource(R.string.drop_live_join)) } },
         dismissButton = { TextButton(onClick = { onAnswer(false) }) { Text(stringResource(R.string.drop_live_keep_apart)) } },

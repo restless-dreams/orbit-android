@@ -122,7 +122,9 @@ class MetadataFileTest {
 
             for (damaged in listOf("{ not json", "", "[1, 2]", "\"private\"")) {
                 file.writeText(damaged)
-                assertEquals(fresh.copy(isPrivate = true), MetadataFile.read(file, fresh))
+                assertEquals(fresh.copy(isPrivate = true, unreadable = true), MetadataFile.read(file, fresh))
+                // Nor do they say where its file is in the folder maps are kept in.
+                assertTrue(MetadataFile.read(file, fresh).folderFileUnknown)
             }
 
             file.writeText("""{"created":3,"private":true}""")
@@ -130,7 +132,7 @@ class MetadataFileTest {
 
             // Details that can't be read for now aren't known: a change mustn't write over them, and readers take them as a private map's.
             assertThrows(IOException::class.java) { MetadataFile.read(file, fresh) }
-            assertEquals(fresh.copy(isPrivate = true), MetadataFile.readOrPrivate(file, fresh))
+            assertEquals(fresh.copy(isPrivate = true, unreadable = true), MetadataFile.readOrPrivate(file, fresh))
         } finally {
             File(folder, "meta.json").setReadable(true)
             folder.deleteRecursively()

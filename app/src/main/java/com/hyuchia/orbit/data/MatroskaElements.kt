@@ -20,8 +20,8 @@ import java.util.zip.CRC32
  * out ([SoundTags]). A file cut short in its last cluster, as a recording
  * that stopped or a copy that didn't finish, goes as far as its last whole
  * block: the block the cut falls in stays out, as no player can play it,
- * and the segment and the cluster, and the index's entries for what was
- * cut away, say where it ends now.
+ * the segment and the cluster say where it ends now, and the index's
+ * entries and the cues for what was cut away are Void.
  */
 internal object MatroskaElements {
     /** Whether a file's first bytes start with EBML's header, as WebM and Matroska do. */
@@ -171,13 +171,14 @@ internal object MatroskaElements {
      * file begins, or at `limit`. One the file was cut short in, whose size
      * says it goes on past `limit` or whose last cluster does, ends before
      * the block or cluster the cut falls in, and says so: its size, and its
-     * index, whose entries for what was cut away become Void too. Null when
-     * no cluster of it is left.
+     * index and cues, whose entries for what was cut away become Void too
+     * ([cuesKept]). Null when no cluster of it is left.
      */
     private fun segment(bytes: Bytes, segment: Element, limit: Long, patches: MutableList<Patch>): Ending? {
         val end = minOf(segment.end ?: limit, limit)
         val gone = mutableSetOf<Long>()
         val indexes = mutableListOf<Element>()
+        val cues = mutableListOf<Element>()
         var position = segment.body
         var clusters = 0
         var cutShort = false
@@ -200,7 +201,8 @@ internal object MatroskaElements {
             }
 
             when (part.id) {
-                CLUSTER, CUES -> Unit
+                CLUSTER -> Unit
+                CUES -> cues += part
                 SEEK_HEAD -> indexes += part
                 INFO -> patches += info(bytes, part)
                 TRACKS -> patches += tracks(bytes, part)
@@ -242,6 +244,13 @@ internal object MatroskaElements {
 
         if (cutAway && clusters == 0) {
             return null
+        }
+
+        // Cues before the clusters, as some writers put them, point at what was cut away too: before the index, which may point at them.
+        if (cutAway) {
+            for (cue in cues) {
+                patches += cuesKept(bytes, cue, segment.body, position, gone)
+            }
         }
 
         for (index in indexes) {
@@ -436,6 +445,70 @@ internal object MatroskaElements {
     }
 
     /**
+     * A segment's cues once it's cut short at `end`, from its `start`,
+     * without those for what was cut away: a cue's positions in a cluster
+     * that starts past where it ends now, or at a block in one that does,
+     * made Void, and a cue with none left made Void whole. Cues with no cue
+     * left are Void themselves, and among what's `gone`, so the index
+     * doesn't point at them; what's left points where it did.
+     */
+    private fun cuesKept(bytes: Bytes, cues: Element, start: Long, end: Long, gone: MutableSet<Long>): List<Patch> {
+        // Each cue's positions cut away, by where they start, and whether that's all of them, by where the cue starts.
+        val cutAway = mutableSetOf<Long>()
+        val noneLeft = mutableSetOf<Long>()
+
+        for (point in partsOf(bytes, cues).filter { it.id == CUE_POINT }) {
+            val positions = partsOf(bytes, point).filter { it.id == CUE_TRACK_POSITIONS }
+            val going = positions.filter { pointsPast(bytes, it, start, end) }
+            cutAway += going.map { it.start }
+
+            if (going.size == positions.size) {
+                noneLeft += point.start
+            }
+        }
+
+        if (partsOf(bytes, cues).none { it.id == CUE_POINT && it.start !in noneLeft }) {
+            gone += CUES
+            return voided(cues)
+        }
+
+        return withParts(bytes, cues) { point ->
+            when {
+                point.id == VOID -> emptied(point)
+                point.start in noneLeft -> voided(point)
+                point.id == CUE_POINT -> withParts(bytes, point) { part -> if (part.start in cutAway) voided(part) else emptyList() }
+                else -> emptyList()
+            }
+        }
+    }
+
+    /**
+     * Whether a cue's positions point at what a segment cut short at `end`,
+     * from its `start`, doesn't have: a cluster that starts past it, or a
+     * block that does in a cluster before it, as far as the cluster's own
+     * start says; or no cluster at all.
+     */
+    private fun pointsPast(bytes: Bytes, positions: Element, start: Long, end: Long): Boolean {
+        val parts = partsOf(bytes, positions)
+        // A position past 2⁶³ reads as less than nothing: it's past the end all the same.
+        val cluster = parts.firstOrNull { it.id == CUE_CLUSTER_POSITION }?.let { valueOf(bytes, it) }?.takeIf { it >= 0 }?.let { start + it } ?: return true
+
+        if (cluster >= end) {
+            return true
+        }
+
+        val relative = parts.firstOrNull { it.id == CUE_RELATIVE_POSITION }?.let { valueOf(bytes, it) } ?: return false
+        val body = headerAt(bytes, cluster)?.takeIf { it.id == CLUSTER }?.body ?: return false
+        return relative < 0 || body + relative >= end
+    }
+
+    /** The unsigned number an element holds, in up to eight bytes. */
+    private fun valueOf(bytes: Bytes, element: Element): Long {
+        val value = bytes.read(element.body, (element.end!! - element.body).toInt().coerceAtMost(8))
+        return value.unsigned(0, value.size)
+    }
+
+    /**
      * The patches `patchesOf` gives a master element's parts, and its
      * checksum again when it has one and they change what it covers: all
      * that comes after it in the element, as it goes.
@@ -525,6 +598,10 @@ internal object MatroskaElements {
     private const val SIMPLE_BLOCK = 0xA3L
     private const val BLOCK_GROUP = 0xA0L
     private const val CUES = 0x1C53BB6BL
+    private const val CUE_POINT = 0xBBL
+    private const val CUE_TRACK_POSITIONS = 0xB7L
+    private const val CUE_CLUSTER_POSITION = 0xF1L
+    private const val CUE_RELATIVE_POSITION = 0xF0L
     private const val VOID = 0xECL
     private const val CRC32 = 0xBFL
 

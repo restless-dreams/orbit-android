@@ -164,6 +164,37 @@ class IdeaFilesTest {
     }
 
     @Test
+    fun aMapsZipNeverFollowsALinkOutOfItsFolderAndStopsForAFileReplacedAfterThePersonAnswered() = runBlocking {
+        val repository = repository()
+        val id = mapWith(repository, trip, "file-boarding-pass.pdf" to pdf, "file-budget.xlsx" to "PK!".toByteArray())
+        val media = File(repository.folder(id), MEDIA_DIRECTORY)
+
+        fun entries(zip: ByteArray): List<String> = ZipInputStream(ByteArrayInputStream(zip)).use { input -> generateSequence { input.nextEntry?.name }.toList() }
+
+        // The budget a link to a file outside the map, as the review's probe made one: it isn't the map's, and goes nowhere.
+        val outside = File(files, "outside.xlsx").apply { writeText("another map's budget") }
+        File(media, "file-budget.xlsx").delete()
+        Files.createSymbolicLink(File(media, "file-budget.xlsx").toPath(), outside.toPath())
+        val uncleaned = repository.uncleaned(id)
+        assertEquals(setOf("file-boarding-pass.pdf"), uncleaned.names)
+
+        // The person chose to share the boarding pass as it is.
+        val answers = AsTheyAreFiles(asked = uncleaned.stamps.values.toSet(), chosen = uncleaned.stamps.values.toSet())
+        val zip = ByteArrayOutputStream().also { repository.writeZip(id, it, answers) }.toByteArray()
+        assertEquals(listOf("map.md", "media/file-boarding-pass.pdf", "orbit.json"), entries(zip))
+
+        // Another boarding pass in its place, the same size, before it goes: the zip stops, for the person to be asked about it.
+        writeAtomically(File(media, "file-boarding-pass.pdf"), "%PDX".toByteArray())
+        val stopped = runCatching { repository.writeZip(id, ByteArrayOutputStream(), answers) }.exceptionOrNull()
+        assertTrue("$stopped", stopped is FileChanged)
+        // A way out that can't ask leaves it here.
+        val lasting = ByteArrayOutputStream().also { repository.writeZip(id, it, answers.lasting()) }.toByteArray()
+        assertEquals(listOf("map.md", "orbit.json"), entries(lasting))
+        // Asked about as it is now, it's another file.
+        assertFalse(repository.uncleaned(id).stamps.values.any { it in answers.chosen })
+    }
+
+    @Test
     fun aMapsZipCarriesItsIdeasFilesOnlyWhenChosenToGoAsTheyAreAndTakesInOnlyThoseItsTextNames() = runBlocking {
         val repository = repository()
         val id = mapWith(repository, trip, "file-boarding-pass.pdf" to pdf, "file-budget.xlsx" to "PK!".toByteArray())
@@ -173,7 +204,7 @@ class IdeaFilesTest {
         val clean = ByteArrayOutputStream().also { repository.writeZip(id, it) }.toByteArray()
         assertEquals(listOf("map.md", "orbit.json"), entries(clean))
 
-        val chosen = ByteArrayOutputStream().also { repository.writeZip(id, it, asTheyAre = setOf("file-boarding-pass.pdf", "file-budget.xlsx")) }.toByteArray()
+        val chosen = ByteArrayOutputStream().also { repository.writeZip(id, it, asTheyAre = chosenAsTheyAreIn(repository.folder(id), "file-boarding-pass.pdf", "file-budget.xlsx")) }.toByteArray()
         assertEquals(listOf("map.md", "media/file-boarding-pass.pdf", "media/file-budget.xlsx", "orbit.json"), entries(chosen))
 
         // A zip from elsewhere, its files before its text: those its ideas hold come in, a page it doesn't name stays out.

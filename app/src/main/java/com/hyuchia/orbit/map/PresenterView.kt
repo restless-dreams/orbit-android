@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,12 +35,15 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledIconButton
@@ -51,6 +55,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -64,11 +69,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -85,6 +94,7 @@ import com.hyuchia.orbit.page.MapInsets
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.present.Audience
 import com.hyuchia.orbit.present.CastButton
+import com.hyuchia.orbit.present.ScreenTrouble
 import com.hyuchia.orbit.present.ShownMedia
 import com.hyuchia.orbit.rememberWords
 import com.hyuchia.orbit.theme.OrbitTheme
@@ -104,6 +114,8 @@ private val StageDark = Color(0xFF0B0C0F)
 private const val MEDIA_TICK_MILLISECONDS = 250L
 /** Narrower than this, as on a phone, the presenter's bar takes two lines: where the audience watches has one of its own. */
 private val PresenterBarOneLine = 600.dp
+/** Between the presenter's buttons to step, and where the presentation is, when they're on one line. */
+private val PresenterStepsGap = 16.dp
 
 /**
  * The presenter's screen while the audience watches others: a second
@@ -127,9 +139,9 @@ fun PresenterView(
     map: @Composable () -> Unit,
     onBrowsers: () -> Unit,
 ) {
-    // This screen's map is a preview: all of it shows, above the buttons for pictures and videos when the map has them.
-    val hasMedia = ui.hasMedia
-    LaunchedEffect(hasMedia) { model.setInsets(if (hasMedia) MapInsets(bottom = StageBarRoom.value) else MapInsets()) }
+    // This screen's map is a preview: all of it shows, above the buttons for pictures, videos and sounds when the map has them.
+    val barRoom = ui.stageBarRoom
+    LaunchedEffect(barRoom) { model.setInsets(if (barRoom) MapInsets(bottom = StageBarRoom.value) else MapInsets()) }
     val node = ui.nodes[presentation.current]
     val next = presentation.next?.let { ui.nodes[it] }
 
@@ -141,7 +153,7 @@ fun PresenterView(
 
             if (wide) {
                 Row(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                    Stage(model, node, presentation, playsMapVideos, map, Modifier.weight(1f).fillMaxHeight())
+                    Stage(model, node, presentation, playsMapVideos, ui.pageProblem, map, Modifier.weight(1f).fillMaxHeight())
 
                     Column(Modifier.weight(1f).fillMaxHeight()) {
                         Notes(model, node, next, presentation, seconds)
@@ -149,7 +161,7 @@ fun PresenterView(
                 }
             } else {
                 Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    Stage(model, node, presentation, playsMapVideos, map, Modifier.fillMaxWidth().weight(0.42f))
+                    Stage(model, node, presentation, playsMapVideos, ui.pageProblem, map, Modifier.fillMaxWidth().weight(0.42f))
                     Spacer(Modifier.size(16.dp))
 
                     Column(Modifier.fillMaxWidth().weight(0.58f)) {
@@ -167,6 +179,7 @@ private fun PresenterBar(model: MapViewModel, presentation: Presentation, screen
     val words = rememberWords()
     val watching = browsers?.watching?.collectAsState()?.value
     val notice = screen?.notice?.collectAsState()?.value
+    val trouble = screen?.trouble?.collectAsState()?.value
     val where = listOfNotNull(
         stringResource(R.string.present_rehearsing).takeIf { presentation.rehearsing },
         screen?.let { audience -> audience.name?.let { stringResource(R.string.present_on_screen, it) } ?: stringResource(R.string.present_on_the_tv) },
@@ -219,6 +232,8 @@ private fun PresenterBar(model: MapViewModel, presentation: Presentation, screen
             }
         }
 
+        trouble?.let { ScreenTroubleNotice(it, onMend = model::loadScreenAgain) }
+
         notice?.let {
             Text(
                 stringResource(it.message),
@@ -226,6 +241,51 @@ private fun PresenterBar(model: MapViewModel, presentation: Presentation, screen
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 4.dp),
             )
+        }
+    }
+}
+
+/**
+ * What went wrong on the audience's screen, under the presenter's bar, with
+ * the way to mend it: the presentation loads there again, at the idea on
+ * screen. As the map's own problem shows ([PageProblemNotice]), a page that
+ * Android stopped to free memory is in the secondary colors, and what
+ * didn't load or reach the TV in the error's. Screen readers hear it as it
+ * comes. With longer words or big text, the button goes under them, at the
+ * end, rather than squeeze them.
+ */
+@Composable
+private fun ScreenTroubleNotice(trouble: ScreenTrouble, onMend: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val stopped = trouble == ScreenTrouble.Stopped
+    val content = if (stopped) colors.onSecondaryContainer else colors.onErrorContainer
+
+    Surface(
+        color = if (stopped) colors.secondaryContainer else colors.errorContainer,
+        contentColor = content,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
+    ) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.weight(1f).widthIn(min = 200.dp)) {
+                Icon(if (stopped) Icons.Outlined.Memory else Icons.Outlined.ErrorOutline, contentDescription = null, modifier = Modifier.size(20.dp))
+                Text(
+                    stringResource(trouble.message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
+
+            TextButton(onClick = onMend, contentPadding = ButtonDefaults.TextButtonWithIconContentPadding, colors = ButtonDefaults.textButtonColors(contentColor = content)) {
+                Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(stringResource(trouble.action))
+            }
         }
     }
 }
@@ -283,7 +343,9 @@ private fun Clock(startedAt: Long) {
  * What the audience sees, smaller: the map, or over it the picture or the
  * video's poster the presenter shows them, with how the video is going. At
  * its foot, the idea's picture and video to show them, or the video's
- * controls and the way back to the map.
+ * controls and the way back to the map. When this screen's page stopped or
+ * didn't load (`problem`), it says so in the map's place, with the way to
+ * load it again: the audience's screens have pages of their own, and go on.
  */
 @Composable
 private fun Stage(
@@ -291,6 +353,7 @@ private fun Stage(
     node: MapNode?,
     presentation: Presentation,
     playsMapVideos: Boolean,
+    problem: PageProblem?,
     map: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -318,11 +381,19 @@ private fun Stage(
             }
         }
 
-        if (node != null && (node.image != null || node.video != null)) {
+        if (problem != null) {
+            PageProblemNotice(problem, onLoadAgain = model::reload, modifier = Modifier.align(Alignment.Center))
+        } else if (node != null && hasStageButtons(node)) {
             StageButtons(model, node, media, Modifier.align(Alignment.BottomCenter))
         }
     }
 }
+
+/** Whether the stage has buttons for `node`: its picture or video to show the audience, or its sound to play from this phone. */
+internal fun hasStageButtons(node: MapNode): Boolean = node.image != null || node.video != null || node.audio != null
+
+/** Whether the stage keeps room at its foot for its buttons, so they never cover the map: when any idea has a picture, video or sound. */
+internal val MapUi.stageBarRoom: Boolean get() = hasMedia || hasSounds
 
 /** The picture, or the video's poster, as the audience sees it big, with the video's state and time. */
 @Composable
@@ -637,43 +708,63 @@ private fun ColumnScope.Notes(model: MapViewModel, node: MapNode?, next: MapNode
         }
     }
 
+    PresenterSteps(presentation, onStep = { by -> model.step(by, seconds) }, onPlaying = { playing -> model.setPlaying(playing, seconds) })
+}
+
+/**
+ * The presenter's big buttons to step back, play or pause, and step on,
+ * with where the presentation is between them. Where they don't fit on one
+ * line, as in a split screen or the narrowest window Android makes, where
+ * it is takes a line of its own above them, and step on is as big as the
+ * others.
+ */
+@Composable
+internal fun PresenterSteps(presentation: Presentation, onStep: (Int) -> Unit, onPlaying: (Boolean) -> Unit) {
     val previous = stringResource(R.string.present_previous_idea)
     val playOrPause = stringResource(if (presentation.playing) R.string.present_pause else R.string.present_play_on_its_own)
     val next = stringResource(R.string.present_next_idea)
+    val position = stringResource(R.string.present_position, presentation.index + 1, presentation.order.size)
+    val style = MaterialTheme.typography.titleMedium
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
-        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-    ) {
-        Hint(previous, MapKeys.PreviousIdea) {
-            FilledTonalIconButton(
-                onClick = { model.step(-1, seconds) },
-                enabled = presentation.index > 0,
-                modifier = Modifier.size(IconButtonDefaults.mediumContainerSize()),
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = previous)
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 8.dp), contentAlignment = Alignment.Center) {
+        val small = IconButtonDefaults.mediumContainerSize()
+        val big = IconButtonDefaults.largeContainerSize()
+        val positionWidth = with(density) { measurer.measure(position, style).size.width.toDp() }
+        val oneLine = maxWidth >= small.width * 2 + big.width + positionWidth + PresenterStepsGap * 3
+
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!oneLine) {
+                Text(position, style = style)
             }
-        }
 
-        Hint(playOrPause) {
-            FilledTonalIconButton(
-                onClick = { model.setPlaying(!presentation.playing, seconds) },
-                modifier = Modifier.size(IconButtonDefaults.mediumContainerSize()),
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(if (oneLine) PresenterStepsGap else 8.dp, Alignment.CenterHorizontally),
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Icon(if (presentation.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = playOrPause)
-            }
-        }
+                Hint(previous, MapKeys.PreviousIdea) {
+                    FilledTonalIconButton(onClick = { onStep(-1) }, enabled = presentation.index > 0, modifier = Modifier.size(small)) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = previous)
+                    }
+                }
 
-        Text(stringResource(R.string.present_position, presentation.index + 1, presentation.order.size), style = MaterialTheme.typography.titleMedium)
+                Hint(playOrPause) {
+                    FilledTonalIconButton(onClick = { onPlaying(!presentation.playing) }, modifier = Modifier.size(small)) {
+                        Icon(if (presentation.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = playOrPause)
+                    }
+                }
 
-        Hint(next, MapKeys.NextIdea) {
-            FilledIconButton(
-                onClick = { model.step(1, seconds) },
-                enabled = presentation.index < presentation.order.lastIndex,
-                modifier = Modifier.size(IconButtonDefaults.largeContainerSize()),
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = next)
+                if (oneLine) {
+                    Text(position, style = style)
+                }
+
+                Hint(next, MapKeys.NextIdea) {
+                    FilledIconButton(onClick = { onStep(1) }, enabled = presentation.index < presentation.order.lastIndex, modifier = Modifier.size(if (oneLine) big else small)) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = next)
+                    }
+                }
             }
         }
     }

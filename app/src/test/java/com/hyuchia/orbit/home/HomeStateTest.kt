@@ -118,6 +118,19 @@ class HomeStateTest {
     }
 
     @Test
+    fun `a new map starts with the picked tag only as the maps that show have it`() {
+        val withJournal = maps + journal
+        val locked = PrivateView(locked = true)
+        // Only the locked journal has Health: a new map starts with no tag, as Home shows every map.
+        assertNull(newMapTag(withJournal, "health", locked))
+        // Travel is the trip's too: it's kept, spelled as the maps that show spell it.
+        assertEquals("travel", newMapTag(withJournal + journal.copy(id = "journal-2", outline = journal.outline.copy(tags = listOf("Travel"))), "TRAVEL", locked))
+        // Unlocked, or kept open while the others locked, its tags are any map's.
+        assertEquals("Health", newMapTag(withJournal, "health", PrivateView(locked = false)))
+        assertEquals("Health", newMapTag(withJournal, "health", PrivateView(locked = true, keptOpen = setOf("journal"))))
+    }
+
+    @Test
     fun `unlocked, private maps are found, tagged and shown as any other, and can be locked again`() {
         val unlocked = homeState(maps + journal, "lisbon", AppSettings(), tag = null, privacy = PrivateView(locked = false))
         assertEquals(listOf("trip", "journal", "talk"), unlocked.results?.map { it.map.id })

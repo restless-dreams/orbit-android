@@ -60,6 +60,7 @@ import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
 import com.hyuchia.orbit.data.IdeaDate
 import com.hyuchia.orbit.page.MapNode
+import com.hyuchia.orbit.privacy.CountsOverTheMap
 import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.TimeWords
@@ -100,6 +101,7 @@ internal fun IdeaDayPicker(date: IdeaDate?, onPick: (IdeaDate) -> Unit, onDismis
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) } },
     ) {
+        CountsOverTheMap()
         DatePicker(state = state)
     }
 }
@@ -121,7 +123,10 @@ internal fun IdeaTimePicker(date: IdeaDate, onPick: (IdeaDate) -> Unit, onDismis
     TimePickerDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = { onPick(date.copy(time = LocalTime.of(state.hour, state.minute))) }) { Text(stringResource(R.string.common_done)) } },
-        title = { Text(stringResource(R.string.map_date_time_title)) },
+        title = {
+            CountsOverTheMap()
+            Text(stringResource(R.string.map_date_time_title))
+        },
         modeToggleButton = {
             TimePickerDialogDefaults.DisplayModeToggle(
                 onDisplayModeChange = { typing = !typing },
@@ -201,7 +206,10 @@ internal fun NotificationsAsk(onDone: () -> Unit) {
     AlertDialog(
         onDismissRequest = ::asked,
         icon = { Icon(Icons.Outlined.NotificationsActive, contentDescription = null) },
-        title = { Text(stringResource(R.string.reminders_ask_title)) },
+        title = {
+            CountsOverTheMap()
+            Text(stringResource(R.string.reminders_ask_title))
+        },
         text = { Text(stringResource(R.string.reminders_ask_text)) },
         confirmButton = {
             TextButton(

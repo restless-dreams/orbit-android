@@ -12,6 +12,11 @@
         <item quantity="many">Se agregaron %2$d archivos a “%1$s”</item>
         <item quantity="other">Se agregaron %2$d archivos a “%1$s”</item>
     </plurals>
+    <plurals name="files_idea_gone">
+        <item quantity="one">El archivo no se agregó: su idea ya no está</item>
+        <item quantity="many">Los %d archivos no se agregaron: su idea ya no está</item>
+        <item quantity="other">Los %d archivos no se agregaron: su idea ya no está</item>
+    </plurals>
     <string name="files_copying">Copiando %1$s…</string>
     <plurals name="files_left">
         <item quantity="one">%1$d más después</item>

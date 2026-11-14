@@ -80,7 +80,9 @@ sealed interface Response {
      * A `temporary` file, made for this answer alone, goes whole, and is
      * deleted once it's written, or once writing it fails.
      */
-    class FromFile(val type: String, val file: File, val headers: Map<String, String> = emptyMap(), val temporary: Boolean = false) : Response
+    class FromFile(val type: String, val file: File, val headers: Map<String, String> = emptyMap(), val temporary: Boolean = false) : Response {
+        fun withHeaders(more: Map<String, String>) = FromFile(type, file, headers + more, temporary)
+    }
 
     /** Server-sent events: the connection stays open and gets each event as it's sent, until either side closes. */
     class Events(val stream: EventStream) : Response

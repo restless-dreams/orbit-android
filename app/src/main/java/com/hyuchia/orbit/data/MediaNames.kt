@@ -86,6 +86,35 @@ object MediaNames {
         }
     }
 
+    /**
+     * `markdown` with its code written over, so what's left names only the
+     * files the map shows: Orbit shows code as it's written, so a `media/…`
+     * in code is only words there, as Orbit's own reading of a link has it.
+     * Each character of the code but spaces and line breaks becomes a
+     * backtick, so every other character stays where it was: a place found
+     * in what's left is that place in `markdown`. What's code is what
+     * Orbit's reader takes for code ([MapCode]).
+     */
+    fun withoutCode(markdown: String): String {
+        val code = MapCode.ranges(markdown)
+
+        if (code.isEmpty()) {
+            return markdown
+        }
+
+        val written = StringBuilder(markdown)
+
+        for (range in code) {
+            for (index in range) {
+                if (!written[index].isWhitespace()) {
+                    written.setCharAt(index, '`')
+                }
+            }
+        }
+
+        return written.toString()
+    }
+
     /** The name of a live photo's motion beside the still named `stem` (without its extension): `stem-motion.mp4`. */
     fun motionName(stem: String, extension: String): String = "$stem-motion.$extension"
 

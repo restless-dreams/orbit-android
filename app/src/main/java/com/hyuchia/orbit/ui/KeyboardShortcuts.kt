@@ -49,6 +49,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindowProvider
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.privacy.LocalWindowsOverMap
 
 /** A key as it was pressed or let go: what shortcuts match. `typed` is the character it types, without Ctrl or Alt. */
 data class KeyPress(
@@ -391,21 +392,26 @@ private fun KeyCap(name: String) {
  * `MainActivity.dispatchKeyEvent`), and Android's own list of shortcuts
  * (Meta+/) lists them over it too. A window that keeps the keys to itself,
  * such as a picture full screen or a private map's lock, leaves the screens'
- * shortcuts out with `shortcuts` false.
+ * shortcuts out with `shortcuts` false. Over an open map, the window counts
+ * among those its lock covers ([LocalWindowsOverMap]).
  */
 @Composable
 fun EscapeCloses(shortcuts: Boolean, onDismiss: () -> Unit) {
     val view = LocalView.current
     val dismiss by rememberUpdatedState(onDismiss)
     val registry = LocalShortcuts.current?.takeIf { shortcuts }
+    val overMap = LocalWindowsOverMap.current
 
-    DisposableEffect(view, registry) {
+    DisposableEffect(view, registry, overMap) {
         val window = generateSequence(view.parent) { it.parent }.filterIsInstance<DialogWindowProvider>().firstOrNull()?.window
         val original = window?.callback
 
         if (window == null || original == null) {
             return@DisposableEffect onDispose {}
         }
+
+        // A window over an open map: its lock covers it with a window of its own, however it locks.
+        overMap?.opened()
 
         window.callback = object : Window.Callback by original {
             override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -435,7 +441,10 @@ fun EscapeCloses(shortcuts: Boolean, onDismiss: () -> Unit) {
             }
         }
 
-        onDispose { window.callback = original }
+        onDispose {
+            window.callback = original
+            overMap?.closed()
+        }
     }
 }
 

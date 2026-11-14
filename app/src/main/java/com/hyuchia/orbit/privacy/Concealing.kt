@@ -33,7 +33,7 @@ fun mentionedAlreadyHere(alreadyHere: Int, privateAlreadyHere: Int, concealing: 
 
 /**
  * How many files to mention that an import brought into maps already here, `filledIn`, `privateFilledIn`
- * of them into private ones: while private maps hide (`concealing`), those aren't counted.
+ * of them into private ones, or left out of them: while private maps hide (`concealing`), those aren't counted.
  */
 fun mentionedFilledIn(filledIn: Int, privateFilledIn: Int, concealing: Boolean): Int =
     if (concealing) (filledIn - privateFilledIn).coerceAtLeast(0) else filledIn

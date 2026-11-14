@@ -41,7 +41,9 @@ import java.io.IOException
  * in the map's folder, in one change that one Undo takes back. A sketch
  * there already reopens, to draw on further; a picture of another kind is
  * replaced only once the person says so, with Undo after. The drawing
- * itself is a [SketchSession]'s, which outlasts a screen made again.
+ * itself is a [SketchSession]'s, which outlasts a screen made again, and a
+ * page that stops: it waits, whole, for Load again to draw the map anew, and
+ * goes back on its planet then.
  */
 class Sketching(
     private val scope: CoroutineScope,
@@ -50,14 +52,23 @@ class Sketching(
     private val id: String,
     private val page: () -> MapPage,
 
-    /** Sets an attribute of an idea; null removes it. */
-    private val update: (nodeId: String, key: String, value: JsonElement?) -> Unit,
+    /**
+     * Sets an attribute of an idea, null removing it, and waits for the page
+     * to say what came of it: true once the idea has it, its save on the
+     * way; false when the idea isn't on the map now. It throws
+     * [PageException] when Orbit declined it, or the page didn't say, as one
+     * that stopped (see [MapViewModel.change]).
+     */
+    private val change: suspend (nodeId: String, key: String, value: JsonElement?) -> Boolean,
 
     /** Says something on the screen. */
     private val say: (MapEvent) -> Unit,
 
     /** The file in the map's folder a picture's address points at, if it's one. */
     private val file: (src: String) -> File?,
+
+    /** Which change to each idea's picture is its latest: a copy that lands while the planet is sketched on is asked about. */
+    private val pictures: PictureTurns = PictureTurns(),
 ) {
     private val drawing = MutableStateFlow<SketchSession?>(null)
 
@@ -72,6 +83,18 @@ class Sketching(
 
     /** The room the screen's own bars take around the planet while it's sketched on, in dp. */
     private var room = MapInsets()
+
+    /** The picture the idea had as the sketch opened (null for none), which the sketch may take the place of without asking. */
+    private var over: String? = null
+
+    /** The turn the idea's picture was at as the sketch opened: a copy that lands on it meanwhile ends it. */
+    private var turn: PictureTurns.Turn? = null
+
+    /** The description the sketch is being kept with, while the person is asked whether it takes a new picture's place. */
+    private var describedAs = ""
+
+    /** How many times a drawing that waited for a new page has been brought back up close there, until the page holds it. */
+    private var bringingBack = 0
 
     private var work: Job? = null
 
@@ -128,7 +151,8 @@ class Sketching(
         room = insets
         val sketching = ui.value.sketch
 
-        if (sketching != null && sketching.phase in setOf(SketchPhase.Opening, SketchPhase.Drawing, SketchPhase.Describing)) {
+        // A sketch waiting for the map to be drawn again has no planet up close: the new page brings it up in the room there is then.
+        if (sketching != null && !sketching.held && sketching.phase in setOf(SketchPhase.Opening, SketchPhase.Drawing, SketchPhase.Describing)) {
             page().send(MapCommand.Spotlight(sketching.nodeId, insets))
         }
     }
@@ -144,6 +168,8 @@ class Sketching(
         val paper = sketch?.paper ?: paperOf(node)
         val colors = penColors(ui.value)
         reopened = sketch
+        over = node.image?.src
+        turn = pictures.now(nodeId)
         drawing.value = SketchSession(paper, sketch?.strokes.orEmpty(), colors, color = inkFor(paper, colors))
         ui.update { it.copy(sketch = SketchUi(nodeId, SketchPhase.Opening, replacing = replacing, description = node.image?.alt.orEmpty().takeIf { sketch != null }.orEmpty())) }
         page().send(MapCommand.Spotlight(nodeId, room))
@@ -153,6 +179,10 @@ class Sketching(
     fun spotlight(message: MapMessage.Spotlight) {
         val sketching = ui.value.sketch ?: return
 
+        if (message.phase == "start" || message.phase == "rest") {
+            bringingBack = 0
+        }
+
         when (message.phase) {
             "start" -> ui.update { it.copy(sketch = sketching.copy(scrim = scrimColor(message.scrim) ?: sketching.scrim)) }
             "rest" -> ui.update {
@@ -161,6 +191,13 @@ class Sketching(
                 it.copy(sketch = sketching.copy(nodeId = message.id, circle = circle, phase = phase, scrim = scrimColor(message.scrim) ?: sketching.scrim))
             }
             "end" -> {
+                // A drawing brought back to a new page that isn't laid out yet (slow to draw) hears the planet can't come up:
+                // with its idea still there, it waits, and is brought up again in a moment.
+                if (bringingBack in 1 until MOST_BRINGS && sketching.phase == SketchPhase.Opening && sketching.nodeId in ui.value.nodes) {
+                    bringBackLater(sketching.nodeId)
+                    return
+                }
+
                 if (sketching.phase != SketchPhase.Closing && drawing.value?.changed == true) {
                     // The idea went, or the map was drawn again, before the sketch was kept.
                     say(MapEvent.Snackbar(ShownText.Resource(R.string.sketch_lost)))
@@ -173,11 +210,13 @@ class Sketching(
 
     /**
      * Done drawing: the description comes up, which the sketch is kept with.
-     * With nothing drawn there's nothing to describe: a new sketch leaves
-     * nothing behind, and one cleared of its strokes comes off its idea.
+     * A stroke still being drawn is kept as it is. With nothing drawn there's
+     * nothing to describe: a new sketch leaves nothing behind, and one
+     * cleared of its strokes comes off its idea.
      */
     fun done() {
         val sketching = ui.value.sketch?.takeIf { it.phase == SketchPhase.Drawing } ?: return
+        drawing.value?.finishInk()
 
         if (drawing.value?.strokes?.isEmpty() == true) {
             save(sketching.description)
@@ -192,7 +231,7 @@ class Sketching(
         ui.update { state ->
             val sketching = state.sketch ?: return@update state
             val phase = if (sketching.phase == SketchPhase.Describing) SketchPhase.Drawing else sketching.phase
-            state.copy(sketch = sketching.copy(phase = phase, discarding = false))
+            state.copy(sketch = sketching.copy(phase = phase, discarding = false, confirming = false))
         }
     }
 
@@ -207,8 +246,10 @@ class Sketching(
     fun save(description: String) {
         val sketching = ui.value.sketch?.takeIf { it.phase == SketchPhase.Describing || it.phase == SketchPhase.Drawing } ?: return
         val session = drawing.value ?: return
+        session.finishInk()
         val nodeId = sketching.nodeId
         val alt = description.trim().ifEmpty { null }
+        describedAs = description
         ui.update { it.copy(sketch = sketching.copy(phase = SketchPhase.Saving)) }
 
         work = scope.launch {
@@ -219,13 +260,16 @@ class Sketching(
                 node == null -> Unit
                 reopened == null && session.strokes.isEmpty() -> Unit
                 session.strokes.isEmpty() -> {
-                    update(nodeId, "image", null)
+                    if (!taken(nodeId, null)) {
+                        return@launch
+                    }
+
                     say(MapEvent.Snackbar(ShownText.Resource(R.string.sketch_taken_off), undo = true))
                 }
-                reopened != null && !session.changed -> if (alt != image?.alt) {
-                    update(nodeId, "image", mediaChange("alt", alt))
+                reopened != null && !session.changed -> if (alt != image?.alt && !taken(nodeId, mediaChange("alt", alt))) {
+                    return@launch
                 }
-                else -> if (!keep(nodeId, session, alt, image?.caption.takeIf { reopened != null }, sketching.replacing)) {
+                else -> if (!keep(nodeId, session, alt, image?.caption.takeIf { reopened != null && !sketching.replacing }, sketching.replacing)) {
                     return@launch
                 }
             }
@@ -234,8 +278,42 @@ class Sketching(
         }
     }
 
-    /** Writes the sketch and puts it on the idea; false, back to drawing, when it couldn't be kept. */
+    /**
+     * Gives idea `nodeId`'s picture `image` (null takes it off) and waits for
+     * the page to take it; false, back to drawing with the drawing whole, when
+     * it didn't, as a page that stopped meanwhile.
+     */
+    private suspend fun taken(nodeId: String, image: JsonElement?): Boolean {
+        val taken = try {
+            change(nodeId, "image", image)
+        } catch (stopped: CancellationException) {
+            throw stopped
+        } catch (unanswered: PageException) {
+            Logs.warn("OrbitMap", "The page didn't take the sketch's change", unanswered)
+            false
+        }
+
+        if (!taken) {
+            backToDrawing(ShownText.Resource(R.string.sketch_not_kept))
+        }
+
+        return taken
+    }
+
+    /**
+     * Writes the sketch and puts it on the idea; false, back to drawing, when
+     * it couldn't be kept: one the page says it can't show stays off the
+     * idea, which keeps the picture it had. A page that doesn't say in time
+     * whether it shows, as one off screen, doesn't keep it off; but it's kept
+     * only once the page says the idea took it, so a page that stopped, or
+     * an idea gone meanwhile, never closes the canvas on a sketch kept
+     * nowhere.
+     */
     private suspend fun keep(nodeId: String, session: SketchSession, alt: String?, caption: String?, replacing: Boolean): Boolean {
+        if (askedAboutLanding(nodeId)) {
+            return false
+        }
+
         val src = try {
             maps.addSketch(id, SketchSvg.write(session.sketch).toByteArray())
         } catch (refused: MediaRefusedException) {
@@ -247,24 +325,56 @@ class Sketching(
             return false
         }
 
-        update(
-            nodeId,
-            "image",
-            buildJsonObject {
-                put("src", JsonPrimitive(src))
-                alt?.let { put("alt", JsonPrimitive(it)) }
-                caption?.let { put("caption", JsonPrimitive(it)) }
-            },
-        )
+        // The page loads it first: a planet never trades its picture for one it says it can't show, and a page that stopped shows none.
+        if (shown(src) == false) {
+            maps.takeBack(id, listOf(src))
+            backToDrawing(ShownText.Resource(R.string.sketch_not_kept))
+            return false
+        }
 
-        // The canvas lifts once the planet shows the sketch under it, never onto a planet without it.
-        try {
-            page().request(Boolean.serializer()) { job -> MapCommand.PictureShown(job, src) }
+        // A picture that landed as the page loaded the sketch is asked about too.
+        if (askedAboutLanding(nodeId)) {
+            maps.takeBack(id, listOf(src))
+            return false
+        }
+
+        val image = buildJsonObject {
+            put("src", JsonPrimitive(src))
+            alt?.let { put("alt", JsonPrimitive(it)) }
+            caption?.let { put("caption", JsonPrimitive(it)) }
+        }
+
+        // Kept once the page says the idea took it, the map's save with it on its way to the app first.
+        val taken = try {
+            change(nodeId, "image", image)
         } catch (stopped: CancellationException) {
             throw stopped
         } catch (unanswered: PageException) {
-            Logs.warn("OrbitMap", "The page didn't say the sketch showed", unanswered)
+            Logs.warn("OrbitMap", "The page didn't take the sketch", unanswered)
+            // Asked to take the sketch, the idea's picture turned: the next Done goes from the picture there is then.
+            turn = pictures.now(nodeId)
+
+            // Declined, it's nowhere; unanswered, a page that answers late may yet have put it on the idea, so its file
+            // stays for the tidying up, which deletes it once nothing points at it.
+            if (unanswered.kind == PageException.Kind.Refused) {
+                maps.takeBack(id, listOf(src))
+            } else {
+                maps.letGo(id, listOf(src))
+            }
+
+            backToDrawing(ShownText.Resource(R.string.sketch_not_kept))
+            return false
         }
+
+        if (!taken) {
+            turn = pictures.now(nodeId)
+            maps.takeBack(id, listOf(src))
+            backToDrawing(ShownText.Resource(R.string.sketch_not_kept))
+            return false
+        }
+
+        // The canvas lifts once the planet shows the sketch under it, never onto a planet without it.
+        shown(src)
 
         if (replacing) {
             say(MapEvent.Snackbar(ShownText.Resource(R.string.sketch_replaced_the_picture), undo = true))
@@ -273,9 +383,55 @@ class Sketching(
         return true
     }
 
+    /**
+     * Whether a picture landed on idea `nodeId` while it was sketched on, as
+     * one chosen before the sketch began that took a while to copy in: the
+     * sketch takes its place only once the person says so
+     * ([replaceLanded]), so true asks them, back to drawing.
+     */
+    private fun askedAboutLanding(nodeId: String): Boolean {
+        val now = ui.value.nodes[nodeId]?.image?.src
+        val landed = turn?.let { !pictures.current(it) } == true || (now != null && now != over)
+
+        if (!landed) {
+            return false
+        }
+
+        ui.update { state -> state.copy(sketch = state.sketch?.let { it.copy(phase = if (it.held) SketchPhase.Opening else SketchPhase.Drawing, confirming = true) }) }
+        return true
+    }
+
+    /** The person said the sketch may take the place of the picture that landed on its idea while they drew: it's kept, with Undo. */
+    fun replaceLanded() {
+        val sketching = ui.value.sketch?.takeIf { it.confirming } ?: return
+        over = ui.value.nodes[sketching.nodeId]?.image?.src
+        turn = pictures.now(sketching.nodeId)
+        ui.update { state -> state.copy(sketch = state.sketch?.copy(confirming = false, replacing = true)) }
+        save(describedAs)
+    }
+
+    /**
+     * Whether the page says the picture at `src` loaded, and is drawn where
+     * the map has it: false when it says it can't load, or the page stopped;
+     * null when it doesn't say in time, as a page off screen, which draws no
+     * frames.
+     */
+    private suspend fun shown(src: String): Boolean? = try {
+        page().request(Boolean.serializer()) { job -> MapCommand.PictureShown(job, src) }
+    } catch (stopped: CancellationException) {
+        throw stopped
+    } catch (unanswered: PageException) {
+        Logs.warn("OrbitMap", "The page didn't say the sketch showed", unanswered)
+        false.takeIf { unanswered.kind == PageException.Kind.Stopped }
+    }
+
+    /** Back to drawing, saying why; a sketch waiting for the map to be drawn again waits on, and the map's place says why. */
     private fun backToDrawing(problem: ShownText) {
-        ui.update { state -> state.copy(sketch = state.sketch?.copy(phase = SketchPhase.Drawing)) }
-        say(MapEvent.Snackbar(problem))
+        ui.update { state -> state.copy(sketch = state.sketch?.let { it.copy(phase = if (it.held) SketchPhase.Opening else SketchPhase.Drawing) }) }
+
+        if (ui.value.sketch?.held != true) {
+            say(MapEvent.Snackbar(problem))
+        }
     }
 
     /**
@@ -291,11 +447,22 @@ class Sketching(
                 work?.cancel()
                 finish()
             }
-            SketchPhase.Opening -> close()
-            SketchPhase.Drawing, SketchPhase.Describing -> if (drawing.value?.changed == true && !letGo) {
+            // Strokes drawn are asked about as they would be on the planet: while the drawing waits for the map to be drawn
+            // again, and while it's brought back up close to it, however long that takes.
+            SketchPhase.Opening -> if (drawing.value?.changed == true && !letGo) {
                 ui.update { it.copy(sketch = sketching.copy(discarding = true)) }
             } else {
                 close()
+            }
+            SketchPhase.Drawing, SketchPhase.Describing -> {
+                // A stroke still being drawn is a change too: kept, it's asked about with the rest.
+                drawing.value?.finishInk()
+
+                if (drawing.value?.changed == true && !letGo) {
+                    ui.update { it.copy(sketch = sketching.copy(discarding = true)) }
+                } else {
+                    close()
+                }
             }
             SketchPhase.Saving, SketchPhase.Closing -> Unit
         }
@@ -303,6 +470,12 @@ class Sketching(
 
     /** The canvas lifts off the planet, then the map flies back; the page says when it's back ([spotlight]). */
     private fun close() {
+        // Waiting for the map to be drawn again, there's no planet up close to fly back from.
+        if (ui.value.sketch?.held == true) {
+            finish()
+            return
+        }
+
         ui.update { state -> state.sketch?.let { state.copy(sketch = it.copy(phase = SketchPhase.Closing, discarding = false)) } ?: state }
 
         scope.launch {
@@ -321,17 +494,68 @@ class Sketching(
     private fun finish() {
         drawing.value = null
         reopened = null
+        bringingBack = 0
         val back = (returnTo as? Panel.Editor)?.takeIf { panel -> ui.value.nodes.containsKey(panel.id) }?.copy(afterSketch = true)
         returnTo = null
         ui.update { it.copy(sketch = null, panel = back ?: it.panel) }
     }
 
-    /** The page went, and its planet with it: the sketch ends where it is. */
-    fun drop() {
-        work?.cancel()
+    /**
+     * The page that drew the map stopped, or didn't load, or another takes
+     * its place (Load again): its planet went with it, but the drawing waits,
+     * whole, its description too, and goes back on its planet once a page
+     * draws the map again ([pageReady]). One being kept as the page stopped
+     * waits too, unless the page took it first. Asked about, or still being
+     * read to draw on further, the sketch just stops: nothing was drawn.
+     */
+    fun pageStopped() {
+        val sketching = ui.value.sketch ?: return
 
-        if (ui.value.sketch != null) {
+        when (sketching.phase) {
+            SketchPhase.Reading, SketchPhase.Asking -> {
+                work?.cancel()
+                finish()
+            }
+            SketchPhase.Closing -> finish()
+            SketchPhase.Opening, SketchPhase.Drawing, SketchPhase.Describing, SketchPhase.Saving -> ui.update { state ->
+                state.copy(sketch = state.sketch?.copy(phase = SketchPhase.Opening, circle = null, held = true, discarding = false))
+            }
+        }
+    }
+
+    /**
+     * A page drew the map again, after Load again: a drawing that waited
+     * goes back on its planet, which the page brings up close again. Its
+     * idea gone meanwhile, the sketch ends, saying so if anything was drawn.
+     */
+    fun pageReady() {
+        val sketching = ui.value.sketch?.takeIf { it.held } ?: return
+
+        if (sketching.nodeId !in ui.value.nodes) {
+            if (drawing.value?.changed == true) {
+                say(MapEvent.Snackbar(ShownText.Resource(R.string.sketch_lost)))
+            }
+
             finish()
+            return
+        }
+
+        ui.update { state -> state.copy(sketch = state.sketch?.copy(held = false)) }
+        bringingBack = 1
+        page().send(MapCommand.Spotlight(sketching.nodeId, room))
+    }
+
+    /** Brings the drawing that waited up close again on idea `nodeId`'s planet, in a moment, unless the sketch ended or the page stopped meanwhile. */
+    private fun bringBackLater(nodeId: String) {
+        bringingBack += 1
+
+        scope.launch {
+            delay(BRING_BACK_WAIT)
+            val sketching = ui.value.sketch
+
+            if (sketching != null && !sketching.held && sketching.phase == SketchPhase.Opening && sketching.nodeId == nodeId) {
+                page().send(MapCommand.Spotlight(nodeId, room))
+            }
         }
     }
 
@@ -352,6 +576,12 @@ class Sketching(
 
         /** The longest the flight back takes, and then some (ms). */
         private const val LONGEST_FLIGHT = 2_000L
+
+        /** How long a drawing that waited for a new page waits before it's brought up close again, the page not laid out yet (ms). */
+        private const val BRING_BACK_WAIT = 500L
+
+        /** How many times it's brought up close, ten seconds' worth, before the sketch ends as one whose planet is gone. */
+        private const val MOST_BRINGS = 20
 
         /** The paper when the planet's color can't be read: a light neutral. */
         private const val PLAIN_PAPER = 0xFFECE6F0.toInt()

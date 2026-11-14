@@ -15,8 +15,10 @@ import com.hyuchia.orbit.page.AppTheme
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.awaitCancellation
@@ -28,6 +30,7 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -49,7 +52,9 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
+import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.ServerSocket
 import java.net.Socket
 import java.nio.file.Files
 import java.util.Locale
@@ -57,6 +62,7 @@ import java.util.Random
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -103,15 +109,17 @@ class SendingTest {
 
     /**
      * A device taking maps, listening on the loopback, with its offers'
-     * `times`, its `clock` and the `room` it says it has as a test needs them.
+     * `times`, its `clock`, a map's `answerTime` and the `room` it says it
+     * has as a test needs them.
      */
     private suspend fun newHost(
         times: OfferTimes = OfferTimes(),
         clock: () -> Long = { System.nanoTime() / 1_000_000 },
         room: () -> Long = { files.usableSpace },
         mapLimit: Long = OFFER_LIMIT,
+        answerTime: suspend () -> Unit = { delay(times.waiting) },
     ): NearbyHost {
-        val made = NearbyHost(context, maps, scope, anyone, english, listenOn = { null }, times = times, clock = clock, room = room, mapLimit = mapLimit)
+        val made = NearbyHost(context, maps, scope, anyone, english, listenOn = { null }, times = times, clock = clock, room = room, mapLimit = mapLimit, answerTime = answerTime, asset = { name -> File("src/main/assets/map/$name").readText() })
         // It clears what an earlier launch left in its folder as it starts: that's done before anything arrives.
         scope.coroutineContext.job.children.toList().joinAll()
         made.start(accepting = true)
@@ -124,9 +132,10 @@ class SendingTest {
         clock: () -> Long = { System.nanoTime() / 1_000_000 },
         room: () -> Long = { files.usableSpace },
         mapLimit: Long = OFFER_LIMIT,
+        answerTime: suspend () -> Unit = { delay(times.waiting) },
     ) = runBlocking {
         host.stop()
-        host = newHost(times, clock, room, mapLimit)
+        host = newHost(times, clock, room, mapLimit, answerTime)
     }
 
     @After
@@ -336,7 +345,7 @@ class SendingTest {
         assertEquals(listOf(offer.check), checker.shown.toList())
         assertEquals(listOf(SendState.Sending, SendState.Confirming(offer.check), waiting), states.toList())
 
-        val id = host.accept(offer, keepBoth = false)!!
+        val id = (host.accept(offer, keepBoth = false) as Accepted.Opened).id
         assertEquals(SendState.Opened, waitFor(states) { it == SendState.Opened })
         assertTrue(maps.read(id).contains("Lisbon"))
         assertArrayEquals(photo, File(maps.folder(id), "media/photo.jpg").readBytes())
@@ -520,7 +529,7 @@ class SendingTest {
         assertEquals(emptyList<String>(), offersFolder.list().orEmpty().toList())
         assertArrayEquals(photo, offer.bundle.pictures.getValue("beach.jpg").readBytes())
 
-        val id = host.accept(offer, keepBoth = false)!!
+        val id = (host.accept(offer, keepBoth = false) as Accepted.Opened).id
         assertArrayEquals(photo, maps.picture(id, "beach.jpg")!!.readBytes())
         assertEquals(emptyList<String>(), File(files, "unpacking").list().orEmpty().toList())
         waitFor(states) { it == SendState.Opened }
@@ -552,6 +561,421 @@ class SendingTest {
         waitFor(states) { it == SendState.Declined }
         assertFalse(unpacked.exists())
         assertEquals(emptyList<String>(), File(files, "unpacking").list().orEmpty().toList())
+    }
+
+    @Test
+    fun `Decline tapped on a map on its way as it arrives declines the map it became, so its sender never hears otherwise`() = runBlocking<Unit> {
+        // The dialog of the map on its way is still up as the map arrives, and its Decline is tapped then.
+        val compared = CompletableDeferred<Unit>()
+
+        val (_, states) = send(host.key.text, bundle("# Trip\n- Beach ![](media/beach.jpg)\n", mapOf("beach.jpg" to picture(200_000, seed = 11))), checker = Checker {
+            compared.await()
+            true
+        })
+
+        val stale = incoming()
+        compared.complete(Unit)
+        val offer = arrived()
+        waitFor(states) { it is SendState.Waiting }
+        val unpacked = offer.bundle.pictures.getValue("beach.jpg")
+        val before = maps.maps.value.orEmpty().size
+
+        host.decline(stale)
+
+        assertEquals(SendState.Declined, waitFor(states) { it == SendState.Declined || it == SendState.Opened })
+        assertTrue(host.offers.value.isEmpty())
+        assertEquals(Accepted.AnsweredAlready, host.accept(offer, keepBoth = false))
+        assertEquals("declined", state(offer.id))
+        assertEquals(before, maps.maps.value.orEmpty().size)
+        assertFalse(unpacked.exists())
+    }
+
+    @Test
+    fun `Decline tapped on a map on its way once it was opened changes nothing`() = runBlocking<Unit> {
+        val compared = CompletableDeferred<Unit>()
+
+        val (_, states) = send(host.key.text, bundle("# Trip\n- Beach\n"), checker = Checker {
+            compared.await()
+            true
+        })
+
+        val stale = incoming()
+        compared.complete(Unit)
+        val offer = arrived()
+        val opened = host.accept(offer, keepBoth = false) as Accepted.Opened
+
+        host.decline(stale)
+
+        assertEquals("opened", state(offer.id))
+        assertEquals(SendState.Opened, waitFor(states) { it == SendState.Declined || it == SendState.Opened })
+        assertNotNull(maps.summary(opened.id))
+    }
+
+    @Test
+    fun `an offer takes one answer, and tapping Open again, or Decline after it, changes nothing`() = runBlocking<Unit> {
+        val (_, states) = send(host.key.text, bundle("# Trip\n- Beach ![](media/beach.jpg)\n", mapOf("beach.jpg" to picture(200_000, seed = 7))))
+        val offer = arrived()
+        val before = maps.maps.value.orEmpty().size
+
+        val opened = host.accept(offer, keepBoth = false) as Accepted.Opened
+        assertEquals(Accepted.AnsweredAlready, host.accept(offer, keepBoth = true))
+        host.decline(offer)
+
+        assertEquals(SendState.Opened, waitFor(states) { it == SendState.Opened || it == SendState.Declined })
+        assertEquals("opened", state(offer.id))
+        assertEquals(before + 1, maps.maps.value.orEmpty().size)
+        assertTrue(File(maps.folder(opened.id), "media/beach.jpg").isFile)
+    }
+
+    @Test
+    fun `a map whose time to be answered ran out is declined, can't be opened after, and its sender hears so`() = runBlocking<Unit> {
+        // The map's time runs out when the test says, once it has seen the map arrive: never before, however slow the machine.
+        val timeUp = CompletableDeferred<Unit>()
+        restart(answerTime = { timeUp.await() })
+        val (_, states) = send(host.key.text, bundle("# Trip\n- Beach ![](media/beach.jpg)\n", mapOf("beach.jpg" to picture(200_000, seed = 9))))
+        val offer = arrived()
+        val before = maps.maps.value.orEmpty().size
+        timeUp.complete(Unit)
+
+        assertEquals(SendState.Declined, waitFor(states) { it == SendState.Declined || it is SendState.Failed })
+        assertEquals(Accepted.AnsweredAlready, host.accept(offer, keepBoth = false))
+        assertEquals("declined", state(offer.id))
+        assertEquals(before, maps.maps.value.orEmpty().size)
+        assertEquals(emptyList<String>(), File(files, "unpacking").list().orEmpty().toList())
+    }
+
+    @Test
+    fun `a sender waits for the answer as long as any release keeps a map waiting for one, and this one keeps it no longer than any sender waits`() {
+        // So a sender never says no answer came while the map can still be opened there: it hears the device decline it.
+        assertTrue(ANSWER_WAIT_MILLISECONDS > OfferTimes().waiting)
+        assertTrue(ANSWER_WAIT_MILLISECONDS > ANSWER_LIFETIME_UP_TO_0_5_0)
+        // Orbit 0.5.0 and earlier wait three minutes for the answer: a map here is declined by then.
+        assertTrue(OfferTimes().waiting <= 3 * 60 * 1000L)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a sender's waits are measured in time, however long each ask of the other device takes`() = runTest {
+        val times = SendTimes()
+        val waiting = setOf("opened", "declined")
+
+        // An ask that never comes back, and one that takes as long as a read used to be let take, past a minute.
+        listOf<suspend () -> String?>({ awaitCancellation() }, { delay(61_000L); "waiting" }).forEach { ask ->
+            val started = testScheduler.currentTime
+            assertNull(waitForState(times.answer, times.check, waiting, ask))
+            assertEquals(ANSWER_WAIT_MILLISECONDS, testScheduler.currentTime - started)
+
+            val showing = testScheduler.currentTime
+            assertNull(waitForState(times.confirming, times.check, setOf("declined"), ask))
+            assertEquals(CONFIRMING_LIFETIME_MILLISECONDS, testScheduler.currentTime - showing)
+        }
+
+        // An answer in time is heard at the next check.
+        val started = testScheduler.currentTime
+        var asks = 0
+        assertEquals("opened", waitForState(times.answer, times.check, waiting) { if (++asks == 3) "opened" else "waiting" })
+        assertEquals(3 * times.check, testScheduler.currentTime - started)
+    }
+
+    /**
+     * A device between the sender and the host that passes each request on,
+     * but holds those `held` picks by their first line open, unanswered, or
+     * answers them a byte at a time when `drip` says so, never to the end:
+     * a device that stopped answering, or answers as slowly as it can.
+     * `passed` hears each request passed on.
+     */
+    private inner class Stalling(
+        private val held: (String) -> Boolean,
+        private val drip: Boolean = false,
+        private val passed: (String) -> Unit = {},
+    ) : AutoCloseable {
+        private val server = ServerSocket(0, 50, InetAddress.getLoopbackAddress())
+        private val threads = Executors.newCachedThreadPool()
+
+        /** How many requests it held. */
+        val holding = AtomicInteger()
+
+        /** How many of those the sender closed as it stopped waiting for them. */
+        val closed = AtomicInteger()
+
+        val address: String get() = "127.0.0.1:${server.localPort}"
+
+        init {
+            threads.execute {
+                while (true) {
+                    val socket = runCatching { server.accept() }.getOrNull() ?: break
+                    threads.execute { runCatching { pass(socket) } }
+                }
+            }
+        }
+
+        private fun pass(socket: Socket) {
+            socket.use {
+                val input = socket.getInputStream()
+                val head = ByteArrayOutputStream()
+
+                while (!head.toString(Charsets.ISO_8859_1).endsWith("\r\n\r\n")) {
+                    val byte = input.read()
+
+                    if (byte < 0) {
+                        return
+                    }
+
+                    head.write(byte)
+                }
+
+                val text = head.toString(Charsets.ISO_8859_1)
+                val line = text.substringBefore("\r\n")
+                val body = input.readNBytes(Regex("(?im)^content-length: *([0-9]+)").find(text)?.groupValues?.get(1)?.toInt() ?: 0)
+
+                if (held(line)) {
+                    holding.incrementAndGet()
+
+                    try {
+                        if (drip) {
+                            val output = socket.getOutputStream()
+                            output.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".toByteArray())
+
+                            while (true) {
+                                output.write(' '.code)
+                                output.flush()
+                                Thread.sleep(100)
+                            }
+                        }
+
+                        // The sender sends nothing more: the read ends only as it closes the connection.
+                        input.read()
+                    } catch (gone: Exception) {
+                        // Closed by the sender, as it stopped waiting.
+                    }
+
+                    closed.incrementAndGet()
+                    return
+                }
+
+                Socket("127.0.0.1", host.port).use { upstream ->
+                    val forwarded = text.replace(Regex("(?im)^host: [^\r]*\r\n"), "Host: 127.0.0.1:${host.port}\r\n")
+                    upstream.getOutputStream().write(forwarded.toByteArray(Charsets.ISO_8859_1) + body)
+                    socket.getOutputStream().write(upstream.getInputStream().readBytes())
+                }
+
+                passed(line)
+            }
+        }
+
+        override fun close() {
+            server.close()
+            threads.shutdownNow()
+        }
+    }
+
+    /** Sends through `to` with `times`, keeping every state the sender passes through, and when, in milliseconds. */
+    private fun CoroutineScope.timedSend(to: String, times: SendTimes, checker: Checker = Checker()): Pair<Job, CopyOnWriteArrayList<Pair<SendState, Long>>> {
+        val states = CopyOnWriteArrayList<Pair<SendState, Long>>()
+        val job = launch(Dispatchers.IO) { sendMap(to, host.key.text, OFFER_VERSION, "Ana's Pixel", bundle("# Plan\n"), checker::check, times) { states += it to System.nanoTime() / 1_000_000 } }
+        return job to states
+    }
+
+    /** How long the sender took from the first state `from` picks to the first `to` picks, waiting for both. */
+    private suspend fun took(states: List<Pair<SendState, Long>>, from: (SendState) -> Boolean, to: (SendState) -> Boolean): Pair<SendState, Long> = withTimeout(15_000) {
+        while (states.none { to(it.first) }) {
+            delay(20)
+        }
+
+        val (ended, at) = states.first { to(it.first) }
+        val since = states.firstOrNull { from(it.first) } ?: throw AssertionError("Never there: ${states.map { it.first }}")
+        ended to at - since.second
+    }
+
+    @Test
+    fun `a device that stops answering once the map is there is waited for as long as the sender says, and no longer`() = runBlocking<Unit> {
+        val mapThere = AtomicBoolean(false)
+
+        listOf(false, true).forEach { drip ->
+            mapThere.set(false)
+
+            // After the map arrives, every ask of where it is is held open, or answered a byte every tenth of a second.
+            Stalling(held = { mapThere.get() && it.startsWith("GET /offer/") }, drip = drip, passed = { if (it.contains("/map ")) mapThere.set(true) }).use { device ->
+                val times = SendTimes(check = 50, answer = 1_500, ask = 300)
+                val (_, states) = timedSend(device.address, times)
+                val (ended, waited) = took(states, { it is SendState.Waiting }, { it is SendState.Failed || it == SendState.Declined || it == SendState.Opened })
+
+                assertEquals("drip $drip", SendState.Failed(R.string.nearby_send_no_answer), ended)
+                assertTrue("drip $drip: $waited", waited >= times.answer && waited < times.answer + times.ask + 5_000)
+                // Each ask was let go of in its time: none waits on.
+                assertTrue(device.holding.get() > 1)
+                assertTrue(eventually { device.closed.get() == device.holding.get() })
+            }
+
+            // Its place under the host's limits goes, for the next.
+            host.offers.value.forEach { host.decline(it) }
+        }
+    }
+
+    @Test
+    fun `a device that stops answering while the codes show is waited for as long as it waits for the map`() = runBlocking<Unit> {
+        Stalling(held = { it.startsWith("GET /offer/") }).use { device ->
+            val times = SendTimes(check = 50, confirming = 1_500, ask = 300)
+            // The person sending never says whether the codes match.
+            val (_, states) = timedSend(device.address, times, Checker { awaitCancellation() })
+            val (ended, waited) = took(states, { it is SendState.Confirming }, { it == SendState.Declined || it is SendState.Failed })
+
+            assertEquals(SendState.Declined, ended)
+            assertTrue("$waited", waited >= times.confirming && waited < times.confirming + times.ask + 5_000)
+            assertTrue(eventually { device.closed.get() == device.holding.get() })
+        }
+    }
+
+    @Test
+    fun `closing the sheet while an ask is held stops sending there and then`() = runBlocking<Unit> {
+        val mapThere = AtomicBoolean(false)
+
+        Stalling(held = { mapThere.get() && it.startsWith("GET /offer/") }, passed = { if (it.contains("/map ")) mapThere.set(true) }).use { device ->
+            // The ask has the ten seconds every release gives it: the sheet closes well within them.
+            val (job, states) = timedSend(device.address, SendTimes(check = 50))
+            assertTrue(eventually { device.holding.get() == 1 })
+
+            job.cancel()
+            withTimeout(2_000) { job.join() }
+            assertTrue(eventually { device.closed.get() == 1 })
+            assertFalse(states.toString(), states.any { it.first is SendState.Failed })
+        }
+    }
+
+    @Test
+    fun `closing the sheet while the codes show tells the other device for no longer than it may`() = runBlocking<Unit> {
+        // Nothing but the hello and the half of the code gets an answer: the asks, and the word that the map won't come, are held.
+        Stalling(held = { it.startsWith("GET /offer/") || it.contains("/cancel ") }).use { device ->
+            val times = SendTimes(check = 50, cancel = 500)
+            val (job, _) = timedSend(device.address, times, Checker { awaitCancellation() })
+            assertTrue(eventually { device.holding.get() >= 1 })
+
+            val closing = System.nanoTime()
+            job.cancel()
+            withTimeout(times.cancel + 2_000) { job.join() }
+            assertTrue((System.nanoTime() - closing) / 1_000_000 >= times.cancel)
+            assertTrue(eventually { device.closed.get() == device.holding.get() })
+        }
+    }
+
+    @Test
+    fun `closing the sheet while the hello is held stops sending there and then`() = runBlocking<Unit> {
+        Stalling(held = { it.startsWith("POST /offer ") }).use { device ->
+            val (job, states) = timedSend(device.address, SendTimes())
+            assertTrue(eventually { device.holding.get() == 1 })
+
+            job.cancel()
+            withTimeout(2_000) { job.join() }
+            assertTrue(eventually { device.closed.get() == 1 })
+            assertEquals(listOf<SendState>(SendState.Sending), states.map { it.first })
+        }
+    }
+
+    @Test
+    fun `declining a map as it arrives stops it at its next piece, and leaves nothing behind`() = runBlocking<Unit> {
+        val (id, hello) = agreed()
+        val map = sealedMap(hello, "# Plan\n- Slow\n")
+
+        Socket("127.0.0.1", host.port).use { slow ->
+            slow.soTimeout = 10_000
+            val output = slow.getOutputStream()
+            output.write("POST /offer/$id/map HTTP/1.1\r\nHost: $address\r\nContent-Length: ${map.size}\r\n\r\n".toByteArray())
+            output.write(map, 0, 10)
+            output.flush()
+            assertTrue(eventually { host.incoming.value.singleOrNull { it.id == id }?.uploading == true })
+
+            host.decline(host.incoming.value.single())
+            // The next piece to arrive stops it: the device answers without waiting for the rest.
+            output.write(map, 10, 10)
+            output.flush()
+            val status = slow.getInputStream().bufferedReader().readLine()
+            assertTrue(status, status.startsWith("HTTP/1.1 404"))
+        }
+
+        assertEquals("declined", state(id))
+        assertTrue(host.incoming.value.isEmpty())
+        assertTrue(host.offers.value.isEmpty())
+        assertEquals(emptyList<String>(), offersFolder.list().orEmpty().toList())
+        assertEquals(emptyList<String>(), File(files, "unpacking").list().orEmpty().toList())
+    }
+
+    @Test
+    fun `closing the sheet while the map is on its way stops it there and then, and the other device stops waiting for it`() = runBlocking<Unit> {
+        val looks = AtomicInteger(0)
+        val held = CountDownLatch(1)
+        val release = CountDownLatch(1)
+
+        // The device stops reading a megabyte into the map, as a slow one would: the sender's connection fills up.
+        restart(
+            room = {
+                if (looks.incrementAndGet() == 3) {
+                    held.countDown()
+                    release.await(30, TimeUnit.SECONDS)
+                }
+
+                files.usableSpace
+            },
+        )
+
+        try {
+            val (job, states) = send(host.key.text, bundle("# Trip\n- Beach ![](media/beach.jpg)\n", mapOf("beach.jpg" to picture(48_000_000, seed = 8))))
+            assertTrue(held.await(15, TimeUnit.SECONDS))
+            val coming = host.incoming.value.single()
+
+            // The sheet closes: the map stops going at once, though the device reads none of what's on its way.
+            withTimeout(10_000) { job.cancelAndJoin() }
+            assertTrue(eventually { host.incoming.value.isEmpty() })
+            assertEquals("declined", state(coming.id))
+            assertFalse(states.toString(), states.any { it is SendState.Waiting || it is SendState.Failed })
+        } finally {
+            release.countDown()
+        }
+
+        assertTrue(eventually { File(files, "unpacking").list().orEmpty().isEmpty() && offersFolder.list().orEmpty().isEmpty() })
+    }
+
+    @Test
+    fun `a map on its way stops as sending is cancelled, even before a thread was free to stop it`() = runBlocking<Unit> {
+        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
+            val socket = Socket()
+            socket.connect(server.localSocketAddress, 5_000)
+            // A device that reads none of it: the map's write fills the connection, and waits there.
+            val device = server.accept()
+            // Every thread that could close the connection is busy, as on a phone doing much at once.
+            val busy = Executors.newSingleThreadExecutor()
+            val free = CountDownLatch(1)
+            busy.execute { free.await(30, TimeUnit.SECONDS) }
+            val writing = CountDownLatch(1)
+            val stopped = CountDownLatch(1)
+
+            try {
+                val sending = launch(Dispatchers.IO) {
+                    closedOnCancel(socket, busy.asCoroutineDispatcher()) {
+                        writing.countDown()
+
+                        try {
+                            socket.getOutputStream().write(ByteArray(64 * 1024 * 1024))
+                        } catch (closed: IOException) {
+                            // As the connection closes, the write under way ends.
+                            stopped.countDown()
+                        }
+                    }
+                }
+
+                assertTrue(writing.await(15, TimeUnit.SECONDS))
+                // The sheet closes before anything could run to close the connection; then a thread is free.
+                sending.cancel()
+                free.countDown()
+                assertTrue(stopped.await(30, TimeUnit.SECONDS))
+                assertTrue(socket.isClosed)
+                withTimeout(10_000) { sending.join() }
+            } finally {
+                free.countDown()
+                device.close()
+                socket.close()
+                busy.shutdown()
+            }
+        }
     }
 
     @Test
@@ -848,6 +1272,36 @@ class SendingTest {
         assertEquals(507, full.status)
         assertEquals("There isn't room on the phone to make the map's zip. Free up some space there, and download it again.", full.body)
         assertEquals(emptyList<String>(), sharedZips)
+    }
+
+    @Test
+    fun `another site's page can't open a shared map for anyone, nor use up the tries at its code`() = runBlocking<Unit> {
+        val id = maps.add("# Trip\n\n- Lisbon\n")
+        val shared = host.share(id, AppTheme(dark = false, tokens = emptyMap()))
+        val code = shared.code
+        val crossSite = mapOf("Sec-Fetch-Site" to "cross-site")
+
+        // The same answer at the share's code as at any other, and no one in.
+        val page = Browser(host.port).get("/$code/", crossSite)
+        assertEquals(200, page.status)
+        assertNull(page.header("set-cookie"))
+        assertTrue(page.body.contains("join__onward"))
+        assertEquals(page.body, Browser(host.port).get("/000000/", crossSite).body)
+        assertEquals(403, Browser(host.port).get("/$code/map.zip", crossSite).status)
+        assertEquals(403, Browser(host.port).post("/$code/join", emptyMap(), crossSite).status)
+        assertTrue(shared.joining.members.value.isEmpty())
+
+        // Wrong codes from another site, past every limit, count for nothing.
+        repeat(110) { index -> Browser(host.port).get("/${100_000 + index}/", crossSite) }
+        assertEquals(0L, host.lockedOut.value)
+
+        // The page's way on comes from the phone's own address: the room answers it as it answers anyone, here with its form.
+        shared.joining.change(JoiningOptions(askNames = true))
+        assertTrue(Browser(host.port).get("/$code/", mapOf("Sec-Fetch-Site" to "same-origin")).body.contains("Your name"))
+        val browser = Browser(host.port)
+        assertEquals(303, browser.post("/$code/join", mapOf("name" to "Ana"), mapOf("Sec-Fetch-Site" to "same-origin")).status)
+        assertEquals(200, browser.get("/$code/map.zip", mapOf("Sec-Fetch-Site" to "same-origin")).status)
+        assertEquals(listOf("Ana"), shared.joining.members.value.map { it.name })
     }
 
     @Test

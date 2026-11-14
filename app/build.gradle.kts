@@ -39,8 +39,8 @@ android {
         minSdk = 29
         targetSdk = 36
         // One more with each release, whatever its name: stores and Android tie every update to it.
-        versionCode = 6
-        versionName = "0.5.0"
+        versionCode = 7
+        versionName = "0.5.1"
         // Big videos are made smaller only with an encoder in the phone's hardware, quick and kind to its battery
         // (media/VideoMaker.kt). Debug builds take the software one too, so emulators, which have no other, make them.
         buildConfigField("boolean", "SOFTWARE_VIDEO_ENCODING", "false")

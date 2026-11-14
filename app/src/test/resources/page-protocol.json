@@ -110,7 +110,11 @@
           "attrs": {
             "current": 1300
           }
-        }
+        },
+        "onto": {
+          "image": "media/temple.jpg"
+        },
+        "job": 15
       },
       {
         "type": "addToGoal",
@@ -133,7 +137,8 @@
             "type": "application/pdf",
             "size": 1250000
           }
-        ]
+        ],
+        "job": 16
       },
       {
         "type": "removeFile",
@@ -247,7 +252,8 @@
         "job": 7,
         "markdown": "# Trip to Japan\n",
         "text": "Call the hotel\nPack\n  - [ ] The adapter\n  - [x] Passports",
-        "parentId": null
+        "parentId": null,
+        "baseUrl": "https://appassets.androidplatform.net/maps/trip-to-japan/"
       },
       {
         "type": "copy",

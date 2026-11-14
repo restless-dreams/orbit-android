@@ -71,6 +71,7 @@ import androidx.core.view.isVisible
 import androidx.emoji2.emojipicker.EmojiPickerView
 import androidx.emoji2.emojipicker.RecentEmojiProvider
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.privacy.privateSheetProperties
 import com.hyuchia.orbit.theme.isDark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -112,6 +113,7 @@ fun EmojiPickerSheet(title: String, hasIcon: Boolean, onPick: (String?) -> Unit,
     }
 
     ModalBottomSheet(
+        properties = privateSheetProperties(),
         onDismissRequest = onDismiss,
         sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)),
         dragHandle = if (typingOnShortScreen) null else ({ BottomSheetDefaults.DragHandle() }),

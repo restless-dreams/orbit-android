@@ -1,17 +1,21 @@
 package com.hyuchia.orbit.page
 
 import com.hyuchia.orbit.FileWords
+import com.hyuchia.orbit.data.AsTheyAreFiles
+import com.hyuchia.orbit.data.FileStamp
 import com.hyuchia.orbit.data.OutgoingFile
 import com.hyuchia.orbit.data.OutgoingMedia
 import com.hyuchia.orbit.data.OutputFailed
 import com.hyuchia.orbit.data.PAGE_PICTURES_LIMIT
 import com.hyuchia.orbit.data.PageSound
 import com.hyuchia.orbit.data.TestMedia
+import com.hyuchia.orbit.data.chosenAsTheyAreIn
 import com.hyuchia.orbit.data.motionsFitting
 import com.hyuchia.orbit.data.picturesFitting
 import com.hyuchia.orbit.data.requireRoom
 import com.hyuchia.orbit.data.soundsFitting
 import com.hyuchia.orbit.nearby.scriptHash
+import com.hyuchia.orbit.sketch.Sketch
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -72,7 +76,7 @@ class WebPageTest {
     private fun inside(page: String, field: String): Map<String, String> = dataOf(page).getValue(field).jsonObject.mapValues { it.value.jsonPrimitive.content }
 
     /** The sounds a page of `markdown` carries inside, with those of `asTheyAre` that can't go clean, by the address the map gives them. */
-    private fun sounds(markdown: String, asTheyAre: Set<String> = emptySet()): Map<String, String> =
+    private fun sounds(markdown: String, asTheyAre: AsTheyAreFiles = AsTheyAreFiles.NONE): Map<String, String> =
         inside(page(markdown, media = PageMedia(folder, asTheyAre, sounds = soundsFitting(markdown, folder, asTheyAre = asTheyAre))), "sounds")
 
     private fun picture(): ByteArray = ByteArrayOutputStream().also { javax.imageio.ImageIO.write(java.awt.image.BufferedImage(16, 12, java.awt.image.BufferedImage.TYPE_INT_RGB), "png", it) }.toByteArray()
@@ -297,7 +301,7 @@ class WebPageTest {
         assertTrue(left.contains("![](media/picture-cut.jpg)"))
         assertFalse(left.contains("media/picture-whole.jpg"))
 
-        val chosen = markdownIn(page(markdown, media = PageMedia(folder, asTheyAre = setOf("picture-cut.jpg"))))
+        val chosen = markdownIn(page(markdown, media = PageMedia(folder, asTheyAre = chosenAsTheyAreIn(folder, "picture-cut.jpg"))))
         assertTrue(chosen.contains("data:image/jpeg;base64,${Base64.getEncoder().encodeToString(cut)}"))
         assertFalse(chosen.contains("media/picture-cut.jpg"))
     }
@@ -381,6 +385,100 @@ class WebPageTest {
         assertEquals(0, none.size())
     }
 
+    /** The most a page of `markdown` says it may come to, with those of the map's pictures that `pictures` says ([PageMedia]). */
+    private fun mostOf(markdown: String, media: PageMedia): Long {
+        var most = 0L
+        val output = ByteArrayOutputStream()
+        WebPage.write(output, asset("web-page.html"), "", "Trip", markdown, AppTheme(dark = false, tokens = emptyMap()), emptyList(), null, words, media = media) { most = it }
+        assertTrue("${output.size()} of $most", output.size() <= most)
+        return most
+    }
+
+    @Test
+    fun aPictureTheMapNamesManyTimesTakesTheRoomItGoesInEachTimeAndNoMore() {
+        val photo = File(media, "photo.jpg").apply { writeBytes(TestMedia.picture()) }
+        val cleaned = OutgoingMedia.of(photo)!!.size
+        // A small picture on each of a long list's ideas, as near a full storage as it may be.
+        val markdown = "# Trip\n" + (1..300).joinToString("") { "## Stop $it\n![](media/photo.jpg)\n" }
+
+        // Each of its 300 places carries it as it goes, cleaned, in Base64: the page makes room for that, and no more.
+        val withPictures = mostOf(markdown, PageMedia(folder))
+        val without = mostOf(markdown, PageMedia(folder, pictures = emptySet()))
+        assertEquals(300L * cleaned * 4 / 3, withPictures - without)
+    }
+
+    @Test
+    fun aFileNamedAsASketchButBiggerThanAnyIsNeverReadWholeAndGoesOnlyAsChosenWithRoomForAllOfIt() {
+        // Named as Orbit names a sketch, and starting as one, but bigger than any sketch can be: another drawing, or an
+        // animation a sync app named so. Sparse, so the test's storage holds next to none of it.
+        val big = File(media, "sketch-big.svg")
+        big.writeText("<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"orbit-sketch\">")
+        java.io.RandomAccessFile(big, "rw").use { it.setLength(3L * 1024 * 1024 * 1024) }
+        val markdown = "# Trip\n![Big](media/sketch-big.svg)\n"
+
+        // Never read whole, which memory can't hold: it can't go clean, so it stays out, and the page is written without it.
+        assertTrue(markdownIn(page(markdown, media = PageMedia(folder))).contains("![Big](media/sketch-big.svg)"))
+
+        // Chosen to go as it is, all of it: the page makes room for that before writing any of it, and without the room starts nowhere.
+        val chosen = PageMedia(folder, asTheyAre = chosenAsTheyAreIn(folder, "sketch-big.svg"))
+        val none = ByteArrayOutputStream()
+        var most = 0L
+
+        val full = runCatching {
+            WebPage.write(none, asset("web-page.html"), "", "Trip", markdown, AppTheme(dark = false, tokens = emptyMap()), emptyList(), null, words, media = chosen) { size ->
+                most = size
+                throw OutputFailed(java.io.IOException("No room for $size bytes"))
+            }
+        }
+
+        assertTrue(full.exceptionOrNull().toString(), full.exceptionOrNull() is OutputFailed)
+        assertTrue("$most", most >= big.length() * 4 / 3)
+        assertEquals(0, none.size())
+    }
+
+    @Test
+    fun aSketchDrawnOnSinceItsPageMadeRoomForItIsDrawnSmallerUntilItFitsOrStaysOut() {
+        val sketch = Sketch(0xFF6750A4.toInt())
+        val sides = mutableListOf<Int>()
+
+        // A PNG as big as its pixels, as one of noise is.
+        val drawn = { _: Sketch, side: Int ->
+            sides += side
+            ByteArray(side * side)
+        }
+
+        // As the page counted it, 1024 pixels across: it goes so, however busy.
+        assertEquals(1024 * 1024, sketchPng(sketch, most = 1024L * 1024, draw = drawn)?.size)
+        assertEquals(listOf(1024), sides)
+
+        // Busier since the page made room for it: half as wide fits that room.
+        sides.clear()
+        assertEquals(512 * 512, sketchPng(sketch, most = 300_000, draw = drawn)?.size)
+        assertEquals(listOf(1024, 512), sides)
+
+        // Not even a quarter fits: it stays out.
+        sides.clear()
+        assertEquals(null, sketchPng(sketch, most = 1_000, draw = drawn))
+        assertEquals(listOf(1024, 512, 256), sides)
+    }
+
+    @Test
+    fun aPictureThatGrewSinceItsPageMadeRoomForItStaysOutAndThePageKeepsToItsRoom() {
+        val photo = File(media, "photo.jpg").apply { writeBytes(TestMedia.picture()) }
+        val markdown = "# Trip\n![The lake](media/photo.jpg)\n"
+        val output = ByteArrayOutputStream()
+        var most = 0L
+
+        WebPage.write(output, asset("web-page.html"), "", "Trip", markdown, AppTheme(dark = false, tokens = emptyMap()), emptyList(), null, words, media = PageMedia(folder)) { size ->
+            most = size
+            // Written again once the page has made its room, as a sync app can: a photo many times the size.
+            photo.writeBytes(TestMedia.picture(1200, 900, noise = 7))
+        }
+
+        assertTrue("${output.size()} of $most", output.size() <= most)
+        assertTrue(markdownIn(output.toString(Charsets.UTF_8.name())).contains("![The lake](media/photo.jpg)"))
+    }
+
     @Test
     fun aPagesPartsHaveAFolderOfTheirOwnAndThoseOfAPageNeverFinishedGo() {
         val cache = File(folder, "cache")
@@ -406,7 +504,7 @@ class WebPageTest {
         val changing = File(media, "memo-changing.mp4").apply { writeBytes(ByteArray(1024 * 1024) { (it % 251).toByte() }) }
         val fado = File(media, "sound-fado.mp3").apply { writeBytes(TestMedia.mp3()) }
         val sounds = listOf(
-            PageSound(changing, OutgoingFile.Patched(changing, emptyList(), end = changing.length() + 1_000)),
+            PageSound(changing, OutgoingFile.Patched(changing, emptyList(), end = changing.length() + 1_000, stamp = FileStamp.of(changing)!!)),
             PageSound(fado, OutgoingMedia.of(fado)!!),
         )
         val spool = File(folder, "spool").apply { mkdirs() }
@@ -488,7 +586,7 @@ class WebPageTest {
         // One that can't be read through, as a memo cut short, stays out.
         assertEquals(setOf("media/memo-intro.mp4", "media/sound-fado.mp3", "media/video-walk.mp4"), sounds.keys)
         // Unless the person sharing chose to share it as it is: then it goes in, exactly as it is.
-        val chosen = sounds(markdown, asTheyAre = setOf("memo-cut.mp4"))
+        val chosen = sounds(markdown, asTheyAre = chosenAsTheyAreIn(folder, "memo-cut.mp4"))
         assertTrue(inside(chosen, "memo-cut.mp4").contentEquals(File(media, "memo-cut.mp4").readBytes()))
         assertFalse(inside(chosen, "memo-intro.mp4").says(place))
     }

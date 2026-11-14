@@ -12,6 +12,9 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.hyuchia.orbit.FileWords
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -275,6 +278,87 @@ class MapMediaIntakeTest {
 
         assertEquals("Interview", added.caption)
         assertEquals(sound.size.toLong(), File(maps.folder(id), added.src).length())
+    }
+
+    @Test
+    fun filesCopiedInOneAfterAnotherBeforeTheMapPointsAtAnyNeverComeToMoreThanItsRoom() = runBlocking {
+        // A map 3 MB short of its room, and two files of 2 MB chosen together for one idea: each is copied in before the
+        // map's text points at either, as a batch is.
+        val id = mapWith("video-1.mp4" to MAP_MEDIA_LIMIT - 3_000_000)
+        FILES["tickets"] = Shared("Tickets.pdf", "application/pdf", ByteArray(2_000_000))
+        FILES["hotel"] = Shared("Hotel.pdf", "application/pdf", ByteArray(2_000_000))
+        FILES["map"] = Shared("Map.pdf", "application/pdf", ByteArray(500_000))
+
+        val tickets = maps.addFile(id, address("tickets"), context.contentResolver) {}
+
+        // The first has the room the second would need: it's counted from the moment it's in.
+        try {
+            maps.addFile(id, address("hotel"), context.contentResolver) {}
+            fail("The second file should have been refused")
+        } catch (refused: MediaRefusedException) {
+            assertTrue(refused.message!!, refused.message!!.startsWith("This map's pictures, videos, sounds and files come to 999\u00A0MB already."))
+        }
+
+        assertEquals(listOf("file-tickets.pdf", "video-1.mp4"), media(id))
+
+        // Once the map points at it, it's counted once, as the map's own: what's left fits what's left.
+        val markdown = maps.read(id)
+        assertEquals(WriteResult.Written, maps.write(id, "$markdown- Tickets\n${filesAttribute(listOf(tickets))}\n", base = markdown))
+        assertEquals(MAP_MEDIA_LIMIT - 1_000_000, maps.mediaSize(id))
+        maps.addFile(id, address("map"), context.contentResolver) {}
+        assertEquals(MAP_MEDIA_LIMIT - 500_000, maps.mediaSizeNow(id))
+
+        // Taken off the map again, as Undo does, it leaves its room.
+        assertEquals(WriteResult.Written, maps.write(id, markdown, base = maps.read(id)))
+        assertEquals(MAP_MEDIA_LIMIT - 2_500_000, maps.mediaSize(id))
+        val hotel = maps.addFile(id, address("hotel"), context.contentResolver) {}
+        assertTrue(File(maps.folder(id), hotel.src).isFile)
+    }
+
+    @Test
+    fun aCopyUnderWayTakesItsRoomFromOneThatStartsMeanwhile() = runBlocking {
+        val id = mapWith("video-1.mp4" to MAP_MEDIA_LIMIT - 3_000_000)
+        FILES["tickets"] = Shared("Tickets.pdf", "application/pdf", ByteArray(2_000_000))
+        val started = CompletableDeferred<Unit>()
+        val making = CompletableDeferred<Unit>()
+
+        // A video of about 2 MB is made smaller on the phone, which takes a while.
+        val video = async(Dispatchers.IO) {
+            maps.addMadeVideo(id, estimate = 2_000_000) { file ->
+                started.complete(Unit)
+                making.await()
+                file.writeBytes(TestMedia.movie(2_000_000))
+            }
+        }
+
+        started.await()
+
+        // Meanwhile a file for another idea: the video being made has the room it would need.
+        try {
+            maps.addFile(id, address("tickets"), context.contentResolver) {}
+            fail("The file should have been refused while the video is made")
+        } catch (refused: MediaRefusedException) {
+            assertTrue(refused.message!!, refused.message!!.startsWith("This map's pictures, videos, sounds and files come to 999\u00A0MB already."))
+        }
+
+        making.complete(Unit)
+        val made = video.await()
+        assertTrue(File(maps.folder(id), made.src).isFile)
+        assertFalse(media(id).any { it.startsWith("file-") })
+    }
+
+    @Test
+    fun whatCameInThatTheMapNeverPointedAtLeavesItsRoomOnceNoScreenShowsTheMap() = runBlocking {
+        val id = mapWith("video-1.mp4" to MAP_MEDIA_LIMIT - 3_000_000)
+        FILES["tickets"] = Shared("Tickets.pdf", "application/pdf", ByteArray(2_000_000))
+        maps.showing(id, shown = true)
+
+        // Copied in for an idea the map's screen then never gave it to, as when its page went.
+        maps.addFile(id, address("tickets"), context.contentResolver) {}
+        assertEquals(MAP_MEDIA_LIMIT - 1_000_000, maps.mediaSizeNow(id))
+
+        maps.showing(id, shown = false)
+        assertEquals(MAP_MEDIA_LIMIT - 3_000_000, maps.mediaSizeNow(id))
     }
 
     private companion object {

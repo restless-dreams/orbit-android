@@ -18,6 +18,11 @@
         <item quantity="one">Added a file to “%1$s”</item>
         <item quantity="other">Added %2$d files to “%1$s”</item>
     </plurals>
+    <!-- Files that took a while to copy in, whose idea was deleted meanwhile: they weren't added. -->
+    <plurals name="files_idea_gone">
+        <item quantity="one">The file wasn’t added: its idea is gone</item>
+        <item quantity="other">The %d files weren’t added: their idea is gone</item>
+    </plurals>
     <!-- While a file is copied in. %1$s is its name. -->
     <string name="files_copying">Copying %1$s…</string>
     <!-- Under the file being copied, while more follow it. -->

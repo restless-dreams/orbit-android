@@ -26,6 +26,7 @@ import com.hyuchia.orbit.page.MapPrinter
 import com.hyuchia.orbit.privacy.keepPrivateMapsOutOfRecents
 import com.hyuchia.orbit.reminders.EXTRA_IDEA_DUE
 import com.hyuchia.orbit.reminders.EXTRA_IDEA_NAME
+import com.hyuchia.orbit.reminders.EXTRA_IDEA_OCCURRENCE
 import com.hyuchia.orbit.reminders.EXTRA_IDEA_PATH
 import com.hyuchia.orbit.reminders.IdeaToShow
 import com.hyuchia.orbit.theme.LocalAppSettings
@@ -38,12 +39,10 @@ import com.hyuchia.orbit.ui.KeyboardShortcutsDialog
 import com.hyuchia.orbit.ui.LocalShortcuts
 import com.hyuchia.orbit.ui.ShortcutRegistry
 import com.hyuchia.orbit.ui.closeShareSheet
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -55,10 +54,6 @@ const val ACTION_OPEN_MAP = "com.hyuchia.orbit.OPEN_MAP"
 const val EXTRA_MAP_ID = "map"
 
 class MainActivity : ComponentActivity() {
-    // Each request is handled once, even when it arrives before the screens are up.
-    private val requests = Channel<AppRequest>(Channel.BUFFERED)
-    private val incoming = requests.receiveAsFlow()
-
     /** The keyboard shortcuts of the screens on display. */
     private val shortcuts = ShortcutRegistry()
 
@@ -121,7 +116,7 @@ class MainActivity : ComponentActivity() {
 
                 OrbitTheme(dark = dark) {
                     ThemedWindowBackground()
-                    OrbitApp(incoming)
+                    OrbitApp(app.intake.requested)
 
                     if (shortcuts.listOpen) {
                         KeyboardShortcutsDialog(shortcuts.groups, onDismiss = { shortcuts.listOpen = false })
@@ -169,10 +164,14 @@ class MainActivity : ComponentActivity() {
         handle(intent)
     }
 
-    /** Shortcuts, files opened with Orbit and text shared to it. */
+    /**
+     * Shortcuts, files opened with Orbit and text shared to it: each is
+     * handled once, by the screen there is or the next one, even when it
+     * comes before the screens are up, or as this one is made again.
+     */
     private fun handle(intent: Intent?) {
         val request = appRequestOf(this, intent) ?: return
-        requests.trySend(request)
+        container.intake.request(request)
     }
 }
 
@@ -183,12 +182,23 @@ class MainActivity : ComponentActivity() {
  * else, or one that's missing what it needs.
  */
 internal fun appRequestOf(context: Context, intent: Intent?): AppRequest? = when {
-    intent?.component?.className == ATTACH_FILES -> attachedFiles(intent)?.let(AppRequest::AttachFiles)
+    intent?.component?.className == ATTACH_FILES -> attachedFiles(intent)?.let(AppRequest::AttachFiles) ?: attachedText(intent)
     else -> requestOf(context, intent)
 }
 
-/** The alias files of any kind are shared to, to join an idea ([AppRequest.AttachFiles]). */
+/** The alias files of any kind are shared to, to join an idea ([AppRequest.AttachFiles]), or text ([AppRequest.AttachText]). */
 private const val ATTACH_FILES = "com.hyuchia.orbit.AttachFiles"
+
+/**
+ * Text shared to [ATTACH_FILES] with no file, as a browser shares a page:
+ * Android offers the alias for any share, text alone included, which joins
+ * the idea as ideas, as pasting text there would. Null when there's none.
+ */
+private fun attachedText(intent: Intent): AppRequest.AttachText? {
+    // Text with styles comes as a CharSequence that isn't a String, as for a share to the main screen.
+    val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.takeIf { it.isNotBlank() && intent.action == Intent.ACTION_SEND } ?: return null
+    return AppRequest.AttachText(text, intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString()?.takeIf { it.isNotBlank() })
+}
 
 /** The files a share to [ATTACH_FILES] hands over: its stream, or its streams for several; null for none. */
 private fun attachedFiles(intent: Intent): List<Uri>? {
@@ -209,7 +219,8 @@ private fun requestOf(context: Context, intent: Intent?): AppRequest? = when (in
 
         // A reminder's idea, which only Orbit's own intents carry.
         val idea = intent.getStringExtra(EXTRA_IDEA_DUE)?.takeIf { ownMark }?.let { due ->
-            IdeaToShow(id, intent.getStringExtra(EXTRA_IDEA_NAME).orEmpty(), due, intent.getIntArrayExtra(EXTRA_IDEA_PATH)?.toList().orEmpty())
+            val path = intent.getIntArrayExtra(EXTRA_IDEA_PATH)?.toList().orEmpty()
+            IdeaToShow(id, intent.getStringExtra(EXTRA_IDEA_NAME).orEmpty(), due, path, occurrence = intent.getIntExtra(EXTRA_IDEA_OCCURRENCE, 0))
         }
 
         AppRequest.OpenMap(id, ownMark, idea)

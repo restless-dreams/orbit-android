@@ -236,7 +236,9 @@ internal fun backupFiles(files: File, quota: Long, newPhone: Boolean, privateMap
     for (entry in entries.filter { isMap(it) && it.name !in leftOut }.sortedWith(compareByDescending<File> { File(it, MAP_FILE).lastModified() }.thenBy { it.name })) {
         val media = File(entry, MEDIA_DIRECTORY)
 
-        if (!chosen.takeWhole(filesIn(entry).filter { it.parentFile != media })) {
+        // Not what's Orbit's own in its folder, named with a dot: a history waiting there to join the rest (`.history`) goes as
+        // the history does, to a new phone alone.
+        if (!chosen.takeWhole(filesIn(entry).filter { it.parentFile != media && !inDotFolder(it, entry) })) {
             continue
         }
 
@@ -264,6 +266,7 @@ internal fun backupFiles(files: File, quota: Long, newPhone: Boolean, privateMap
         val trash = File(files, TRASH_DIRECTORY)
         val trashLeftOut = if (privateMaps) emptySet() else privateMapsIn(trash)
         filesIn(history).filter { it.relativeTo(history).invariantSeparatorsPath.substringBefore('/') !in leftOut }.forEach(chosen::take)
+        entries.filter { isMap(it) && it.name !in leftOut }.sortedBy { it.name }.flatMap { filesIn(File(it, TRASHED_HISTORY)) }.forEach(chosen::take)
         bySize(earlier).forEach(chosen::take)
         filesIn(trash).filter { it.relativeTo(trash).invariantSeparatorsPath.substringBefore('/') !in trashLeftOut }.forEach(chosen::take)
         File(files, FOLDER_DELETIONS).takeIf { it.isFile }?.let(chosen::take)
@@ -452,6 +455,9 @@ private fun isWidgetState(file: File): Boolean = file.name.startsWith("appWidget
 /** The files in `directory` and the folders in it, but not ones a write left unfinished, in the order of their paths. */
 private fun filesIn(directory: File): List<File> =
     directory.walkTopDown().filter { it.isFile && !unfinished(it) }.sortedBy { it.path }.toList()
+
+/** Whether `file`, in the map's `folder`, is in a folder of Orbit's own there, named with a dot. */
+private fun inDotFolder(file: File, folder: File): Boolean = file.relativeTo(folder).invariantSeparatorsPath.split('/').dropLast(1).any { it.startsWith(".") }
 
 /** Whether a write left `file` unfinished ([writeAtomically] writes beside a file, then gives it its name). */
 private fun unfinished(file: File): Boolean = file.name.endsWith(".partial")

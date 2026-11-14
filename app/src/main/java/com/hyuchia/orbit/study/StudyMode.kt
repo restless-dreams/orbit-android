@@ -10,10 +10,12 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
@@ -127,8 +129,10 @@ import com.hyuchia.orbit.privacy.LocalMapLocked
 import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.MarkdownNote
+import com.hyuchia.orbit.ui.UnsavedNote
 import com.hyuchia.orbit.ui.WavyProgress
 import com.hyuchia.orbit.ui.isShort
+import com.hyuchia.orbit.ui.lastOf
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -271,8 +275,18 @@ fun StudyMode(model: MapViewModel, ui: MapUi, background: Color, map: @Composabl
                     ),
             )
 
+            // Answers the storage couldn't take show under the bar until they're written, and the map makes room for them.
+            val unsaved = lastOf(ui.answersUnsaved) ?: AnswersUnsaved.Storage
+
             val bar = @Composable { modifier: Modifier ->
-                StudyTopBar(study, ui, onStop = model::stopStudy, onUndo = model::undoAnswer, modifier = modifier)
+                Column(modifier.widthIn(max = PanelWidest), horizontalAlignment = Alignment.CenterHorizontally) {
+                    StudyTopBar(study, ui, onStop = model::stopStudy, onUndo = model::undoAnswer, modifier = if (barBeside) Modifier.fillMaxWidth() else Modifier)
+
+                    AnimatedVisibility(ui.answersUnsaved != null, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
+                        // A short screen keeps its side column for the card: the note is its title and Try again there.
+                        UnsavedAnswers(unsaved, onTryAgain = model::tryAnswersAgain, compact = barBeside, modifier = Modifier.padding(top = 8.dp))
+                    }
+                }
             }
 
             val panel = @Composable { modifier: Modifier ->
@@ -505,6 +519,29 @@ private fun StudyTopBar(study: Study, ui: MapUi, onStop: () -> Unit, onUndo: () 
             }
         }
     }
+}
+
+/**
+ * Answers a study session gave that the storage couldn't take, and why: the
+ * device's storage is full, and they're tried again until it takes them, or
+ * a newer Orbit keeps the maps, and they go when Orbit closes. Under the
+ * session's bar, `compact` on a short screen, and over the map once the
+ * session is over.
+ */
+@Composable
+fun UnsavedAnswers(problem: AnswersUnsaved, onTryAgain: () -> Unit, modifier: Modifier = Modifier, compact: Boolean = false) {
+    val storage = problem == AnswersUnsaved.Storage
+
+    // While a newer Orbit keeps the maps, this one can't save these answers at all: trying again can't help, and updating
+    // Orbit closes it, so the note says what's lost, and that the answers after are saved.
+    UnsavedNote(
+        title = stringResource(if (storage) R.string.study_answers_unsaved_title else R.string.study_answers_unsaved_newer_title),
+        body = stringResource(if (storage) R.string.study_answers_unsaved_body else R.string.study_answers_unsaved_newer),
+        onTryAgain = onTryAgain.takeIf { storage },
+        storage = storage,
+        compact = compact,
+        modifier = modifier,
+    )
 }
 
 /** Where a card sits in the map: the ideas from where studying began down to the card's own, "Biology › Cells". */

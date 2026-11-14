@@ -33,12 +33,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
@@ -81,14 +85,83 @@ import kotlin.math.roundToInt
  * can only be looked at, rows open no editor and checkboxes only show.
  */
 @Composable
-fun OutlinePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
+fun OutlinePanel(model: MapViewModel, ui: MapUi, sheet: Boolean, outline: MapOutline) {
+    val nodes = ui.map?.nodes.orEmpty()
+    val untitled = stringResource(R.string.common_untitled)
+    val fallbackColor = MaterialTheme.colorScheme.primaryContainer.toArgb()
+
+    val actions = OutlineActions(
+        onDismiss = { model.show(null) },
+        onFocus = { node -> model.focus(node.id, point = true) },
+        onEdit = { node -> model.show(Panel.Editor(node.id)) },
+        onCheck = { node, checked -> model.update(node.id, "status", JsonPrimitive(if (checked) "done" else "todo")) },
+        onDragOut = { view, node ->
+            val started = model.drops.canDragOut && startIdeaDrag(view, model.id, nodes, node.id, untitled, parseCssColor(node.drawnColor)?.toArgb() ?: fallbackColor)
+
+            if (started) {
+                model.drops.wentOut()
+            }
+
+            started
+        },
+    )
+
+    OutlinePanel(ui, sheet, outline, actions)
+}
+
+/**
+ * The outline while its panel is open, kept above the panel: the ideas
+ * folded in it, where its list is, and the idea in focus it last showed. The
+ * panel moves between a sheet over the map and the map's side as a phone or
+ * tablet turns, and is made anew there: the outline stays as it was.
+ */
+@Stable
+class MapOutline internal constructor(folded: Collection<String> = emptyList(), val place: ListPlace = ListPlace(), shownSun: String? = null) {
+    /** The ideas folded, their own ideas out of the list, by id. */
+    val folded: SnapshotStateMap<String, Boolean> = mutableStateMapOf<String, Boolean>().apply { folded.forEach { put(it, true) } }
+
+    /** The idea in focus the list last brought into view, or null before it has. */
+    internal var shownSun: String? = shownSun
+
+    companion object {
+        /** Keeps the folds, where the list is and the idea it showed when the activity is made again. */
+        val Saver: Saver<MapOutline, Any> = listSaver(
+            save = { listOf(ArrayList(it.folded.filterValues { folded -> folded }.keys), it.place.index, it.place.offset, it.shownSun) },
+            restore = {
+                @Suppress("UNCHECKED_CAST")
+                MapOutline(it[0] as List<String>, ListPlace(it[1] as Int, it[2] as Int), it[3] as String?)
+            },
+        )
+    }
+}
+
+/** The map's outline, for its panel ([OutlinePanel]): a new one each time it opens (`open`). */
+@Composable
+fun rememberMapOutline(open: Boolean): MapOutline = rememberSaveable(open, saver = MapOutline.Saver) { MapOutline() }
+
+/**
+ * What the outline's rows do, to the map: close the panel, fly to an idea,
+ * open its editor, tick it off, and drag it out of the outline (true once
+ * the drag has started).
+ */
+internal class OutlineActions(
+    val onDismiss: () -> Unit,
+    val onFocus: (MapNode) -> Unit,
+    val onEdit: (MapNode) -> Unit,
+    val onCheck: (MapNode, Boolean) -> Unit,
+    val onDragOut: (View, MapNode) -> Boolean,
+)
+
+/** The outline's panel, as a sheet over the map or beside it (`sheet` false), with what's kept of it in `outline`. */
+@Composable
+internal fun OutlinePanel(ui: MapUi, sheet: Boolean, outline: MapOutline, actions: OutlineActions) {
     val nodes = ui.map?.nodes.orEmpty()
     val progress = ui.progress
     val locale = LocalConfiguration.current.locales[0]
     val words = rememberWords()
     // One for the list: each idea's date is written with it.
     val timeWords = rememberTimeWords()
-    val folded: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() }
+    val folded = outline.folded
 
     val hidden = remember(nodes, folded.toMap()) {
         val hiddenIds = mutableSetOf<String>()
@@ -105,16 +178,22 @@ fun OutlinePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
     }
 
     val visible = nodes.filter { it.id !in hidden }
-    // Beside the map on a tablet, the list starts afresh once the panes stop moving (see PaneListState).
-    val pane = rememberPaneListState()
+    // Beside the map on a tablet, the list starts afresh once the panes stop moving (see PaneListState). Moved between
+    // a sheet and the map's side, it starts where it was.
+    val pane = rememberPaneListState(outline.place)
     val sunId = ui.sun?.id
-    var shownSun by remember { mutableStateOf<String?>(null) }
 
-    // The idea in focus is in view as the outline opens, and comes into view each time it changes.
+    // The idea in focus is in view as the outline opens, and comes into view each time it changes; the outline moved
+    // with the screen turning leaves its list where it was.
     LaunchedEffect(sunId) {
         val index = visible.indexOfFirst { it.id == sunId }
-        val opening = shownSun == null
-        shownSun = sunId
+        val opening = outline.shownSun == null
+
+        if (!opening && outline.shownSun == sunId) {
+            return@LaunchedEffect
+        }
+
+        outline.shownSun = sunId
 
         if (index < 0) {
             return@LaunchedEffect
@@ -132,11 +211,9 @@ fun OutlinePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
     }
 
     val total = nodes.firstOrNull()?.let { progress.under(it) }
-    val untitled = stringResource(R.string.common_untitled)
     val changeable = ui.readOnly == null
-    val fallbackColor = MaterialTheme.colorScheme.primaryContainer.toArgb()
 
-    PanelFrame(title = stringResource(R.string.common_outline), sheet = sheet, onDismiss = { model.show(null) }, partial = true, scrim = false) {
+    PanelFrame(title = stringResource(R.string.common_outline), sheet = sheet, onDismiss = actions.onDismiss, partial = true, scrim = false) {
         if (total != null && total.total > 0) {
             Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
@@ -161,24 +238,20 @@ fun OutlinePanel(model: MapViewModel, ui: MapUi, sheet: Boolean) {
                         onFold = { folded[node.id] = !(folded[node.id] ?: false) },
                         onOpen = {
                             if (sheet) {
-                                model.show(null)
+                                actions.onDismiss()
                             }
 
-                            model.focus(node.id, point = true)
+                            actions.onFocus(node)
                         },
                         // A map that can only be looked at has no editor to open, and its to-dos stay as they are.
-                        onEdit = if (changeable) ({ model.show(Panel.Editor(node.id)) }) else null,
-                        onCheck = if (changeable) ({ checked -> model.update(node.id, "status", JsonPrimitive(if (checked) "done" else "todo")) }) else null,
+                        onEdit = if (changeable) ({ actions.onEdit(node) }) else null,
+                        onCheck = if (changeable) ({ checked -> actions.onCheck(node, checked) }) else null,
                         onDragOut = { view ->
-                            val started = model.drops.canDragOut && startIdeaDrag(view, model.id, nodes, node.id, untitled, parseCssColor(node.drawnColor)?.toArgb() ?: fallbackColor)
-
-                            if (started) {
-                                model.drops.wentOut()
-                            }
+                            val started = actions.onDragOut(view, node)
 
                             // A sheet is a window over the map: it steps aside, so the idea can land on the map as well as in another app.
                             if (started && sheet) {
-                                model.show(null)
+                                actions.onDismiss()
                             }
 
                             started

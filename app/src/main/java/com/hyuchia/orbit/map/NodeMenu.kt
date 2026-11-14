@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.data.isVoiceMemo
 import com.hyuchia.orbit.page.MapNode
+import com.hyuchia.orbit.privacy.CountsOverTheMap
 import com.hyuchia.orbit.sketch.isSketchName
 import com.hyuchia.orbit.theme.parseCssColor
 import com.hyuchia.orbit.ui.ColorChoices
@@ -170,6 +171,9 @@ fun NodeMenu(
 
     Box(Modifier.offset(x.dp, y.dp)) {
         DropdownMenu(expanded = true, onDismissRequest = onDismiss, modifier = Modifier.width(260.dp)) {
+            // A window of its own, naming the idea: a lock covers it.
+            CountsOverTheMap()
+
             when (page) {
                 MenuPage.Main -> {
                     Text(

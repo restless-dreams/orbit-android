@@ -80,7 +80,18 @@ private class SharedFolder : SyncFolder {
         return study[device]?.get(name)?.first ?: throw FileNotFoundException(name)
     }
 
+    /** Makes the next study record written stop halfway, its start left there, throwing this: a failure, or Orbit stopping there. */
+    var cutNextStudyWrite: (() -> Throwable)? = null
+
     override fun writeStudyRecord(device: String, name: String, text: String) {
+        val cut = cutNextStudyWrite
+
+        if (cut != null) {
+            cutNextStudyWrite = null
+            study.getOrPut(device) { mutableMapOf() }[name] = text.take(text.length / 2) to ++time
+            throw cut()
+        }
+
         study.getOrPut(device) { mutableMapOf() }[name] = text to ++time
     }
 
@@ -121,7 +132,10 @@ class FolderStudyTest {
         val maps = MapRepository(File(files, "$id/maps"), File(files, "$id/trash"), starters, words)
         val settings = SettingsRepository(settingsStoreIn(File(files, "$id/settings.preferences_pb")))
         private val record = FolderDevice(id, name, FolderDevice.PHONE, "0.4.0", 5, 1, listOf("jpg", "mp4", "png"), 0)
-        val sync = FolderSync(maps, settings, CoroutineScope(Dispatchers.Default), File(files, "$id/folder-notes.json"), words, TestEditor(words), device = { record }) { folder }
+        val sync = syncing()
+
+        /** A sync of this device's maps, as Orbit started again has it: nothing in memory but what it keeps in its files. */
+        fun syncing() = FolderSync(maps, settings, CoroutineScope(Dispatchers.Default), File(files, "$id/folder-notes.json"), words, TestEditor(words), device = { record }) { folder }
 
         suspend fun start(keepsMapsInFolder: Boolean = true): Device {
             maps.load()
@@ -447,5 +461,83 @@ class FolderStudyTest {
         val written = Json.parseToJsonElement(folder.study.getValue(phoneId).getValue("Verbs.md.json").first).jsonObject
         assertEquals("1", written.getValue("compatible").jsonPrimitive.content)
         assertNull(written["streak"])
+    }
+
+    /** Orbit stopping in the middle of a sync: past each step's own catch, as nothing runs after it. */
+    private class Died : Error()
+
+    @Test
+    fun `this device's own record that holds JSON this version can't make out is never written over or deleted, until it can`() = runTest {
+        val phone = Device(phoneId, "Pixel 8").start()
+        val verbs = phone.maps.add("# Spanish verbs\n- Ser\n  - soy\n")
+        phone.maps.saveStudy(verbs, mapOf("ser" to card(box = 1, due = today + 1, at = now - day)))
+        phone.sync.syncNow()
+        val file = "${phone.map("Spanish verbs").metadata.sync!!.file}.json"
+
+        // JSON, but no record this version can make out: someone's, as a newer Orbit's is, kept as it is.
+        val garbled = """{"format":1,"map":"${file.removeSuffix(".json")}","cards":"not this version's"}"""
+        folder.writeStudyRecord(phoneId, file, garbled)
+        phone.maps.saveStudy(verbs, mapOf("ser" to card(box = 2, due = today + 3, at = now)))
+        phone.sync.syncNow()
+        assertEquals(garbled, folder.study.getValue(phoneId).getValue(file).first)
+
+        phone.maps.saveStudy(verbs, emptyMap())
+        phone.sync.syncNow()
+        assertEquals(garbled, folder.study.getValue(phoneId).getValue(file).first)
+
+        // Once it reads as a record again, it's this device's to write.
+        folder.writeStudyRecord(phoneId, file, """{"format":1,"compatible":1,"map":"${file.removeSuffix(".json")}","cards":{}}""")
+        phone.maps.saveStudy(verbs, mapOf("ser" to card(box = 3, due = today + 7, at = now + day)))
+        phone.sync.syncNow()
+        assertEquals(3, phone.records().getValue(file).cards.getValue("ser").box)
+    }
+
+    @Test
+    fun `this device's own record an earlier version's write left only the start of is written again, and later answers reach the other device`() = runTest {
+        val phone = Device(phoneId, "Pixel 8").start()
+        val tablet = Device(tabletId, "Pixel Tablet").start()
+        val verbs = phone.maps.add("# Spanish verbs\n- Ser\n  - soy\n")
+        val nouns = phone.maps.add("# Nouns\n- Casa\n  - house\n")
+        val ser = card(box = 1, due = today + 1, at = now - day)
+        phone.maps.saveStudy(verbs, mapOf("ser" to ser))
+        phone.sync.syncNow()
+        val file = "${phone.map("Spanish verbs").metadata.sync!!.file}.json"
+
+        // Cut short by Orbit 0.5.0 stopping as it wrote it: the start of a record, with nothing noted of it.
+        val whole = folder.study.getValue(phoneId).getValue(file).first
+        folder.writeStudyRecord(phoneId, file, whole.take(whole.length / 2))
+        val casa = card(box = 2, due = today + 3, at = now)
+        phone.maps.saveStudy(nouns, mapOf("casa" to casa))
+        phone.sync.syncNow()
+        tablet.sync.syncNow()
+
+        assertEquals(mapOf("ser" to ser), phone.records().getValue(file).cards)
+        assertEquals(mapOf(phoneId to mapOf("casa" to casa)), tablet.map("Nouns").metadata.studyElsewhere)
+        assertEquals(mapOf(phoneId to mapOf("ser" to ser)), tablet.map("Spanish verbs").metadata.studyElsewhere)
+    }
+
+    /** This device's own record, its write cut short by `cut`: Orbit started again writes it whole. */
+    private suspend fun assertCutShortWrittenAgain(cut: () -> Throwable) {
+        val phone = Device(phoneId, "Pixel 8").start()
+        val verbs = phone.maps.add("# Spanish verbs\n- Ser\n  - soy\n")
+        phone.maps.saveStudy(verbs, mapOf("ser" to card(box = 1, due = today + 1, at = now - day)))
+        folder.cutNextStudyWrite = cut
+        phone.sync.syncNow()
+        val file = "${phone.map("Spanish verbs").metadata.sync!!.file}.json"
+        assertNull(FolderStudy.decode(folder.study.getValue(phoneId).getValue(file).first))
+
+        // Started again, with nothing of that sync in memory: the record is this device's own write, cut short.
+        phone.syncing().syncNow()
+        assertEquals(1, phone.records().getValue(file).cards.getValue("ser").box)
+    }
+
+    @Test
+    fun `this device's own record a failure left only the start of is written again whole`() = runTest {
+        assertCutShortWrittenAgain { IOException("Cut short") }
+    }
+
+    @Test
+    fun `this device's own record Orbit stopping left only the start of is written again whole`() = runTest {
+        assertCutShortWrittenAgain { Died() }
     }
 }

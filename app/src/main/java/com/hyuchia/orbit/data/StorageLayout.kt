@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import java.io.File
+import java.io.IOException
 
 /**
  * The layout this version keeps its files in. Each change to the layout is a
@@ -52,6 +53,9 @@ internal class StorageLayout(
     val history: File,
     private val backups: File,
     private val clock: () -> Long,
+
+    /** Moves a file to where it's going, in one step, and says whether it did: [File.renameTo], unless a test's storage fails it. */
+    private val move: (File, File) -> Boolean = { file, to -> file.renameTo(to) },
 ) {
     private val record = File(maps, ".layout.json")
 
@@ -59,6 +63,8 @@ internal class StorageLayout(
      * Brings the files to this version's layout. Returns false when a newer
      * version laid them out in a way this one can't safely change, or left a
      * record of its layout this one can't read: the maps are then only read.
+     * Throws [java.io.IOException] when a step couldn't be done whole: the
+     * record then stays as it was, so the next launch runs the steps again.
      */
     fun prepare(): Boolean {
         val current = read()
@@ -96,8 +102,15 @@ internal class StorageLayout(
     fun read(): LayoutRecord? =
         record.takeIf { it.isFile }?.let { runCatching { layoutJson.decodeFromString(LayoutRecord.serializer(), it.readText()) }.getOrNull() }
 
-    /** Earlier versions kept each map as a lone `.md` file: each gets its folder. */
+    /**
+     * Earlier versions kept each map as a lone `.md` file: each gets its
+     * folder. One that can't be moved stays where it is, without an empty
+     * folder in its name's place, and the step throws once the others have
+     * moved: the layout isn't recorded as done, so the next launch moves it.
+     */
     fun moveFlatFilesIntoFolders() {
+        var stayed = 0
+
         maps.listFiles { file -> file.isFile && file.name.endsWith(".md") }.orEmpty().forEach { file ->
             val taken = maps.list().orEmpty().toSet()
             val folder = File(maps, MapText.folderName(file.name.removeSuffix(".md"), taken))
@@ -105,9 +118,16 @@ internal class StorageLayout(
             val modified = file.lastModified()
             val target = File(folder, MAP_FILE)
 
-            if (file.renameTo(target)) {
+            if (move(file, target)) {
                 target.setLastModified(modified)
+            } else {
+                folder.delete()
+                stayed += 1
             }
+        }
+
+        if (stayed > 0) {
+            throw IOException("$stayed maps couldn't be moved into folders of their own")
         }
     }
 

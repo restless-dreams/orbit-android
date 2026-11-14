@@ -6,6 +6,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
+import com.hyuchia.orbit.page.PageException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -78,7 +79,9 @@ interface SyncFolder {
      * under the name the folder's app gave it, which may be another (as when
      * a file by that name arrived since `media/` was listed). Throws
      * [NoRoomForMedia] when the folder is on this device and hasn't room for
-     * a new one, before any of it is written.
+     * a new one, or for what it adds past the one there, before any of it
+     * is written; and [MediaWriteStopped] for one that stopped partway, with
+     * what it left, when the folder can tell.
      */
     fun writeMedia(name: String, from: File): FolderFile
 
@@ -109,11 +112,29 @@ interface SyncFolder {
 data class FolderFile(val name: String, val modified: Long, val size: Long)
 
 /**
+ * A picture or video [SyncFolder.writeMedia] began writing that stopped
+ * partway (`cause`): what it left in the folder's `media/`, by the very
+ * document it wrote, as a listing describes it, under the name the
+ * folder's app gave it; null when nothing of it is left.
+ */
+class MediaWriteStopped(val left: FolderFile?, cause: Throwable) : IOException(cause.message, cause)
+
+/**
  * A map here, as a sync compares it: its text's [digest], and its file in
  * the folder when it has one. A map whose text can't be read (`readable`
- * false) is left alone, and so is its file.
+ * false) is left alone, and so is its file. One whose details can't say
+ * whether it has a file there, nor which (`untold`,
+ * [MapMetadata.folderFileUnknown]), has no record either; whether it's
+ * `private` says how files a sync can't tell from its own come in.
  */
-internal data class LocalMap(val id: String, val hash: String, val record: SyncRecord?, val readable: Boolean = true)
+internal data class LocalMap(
+    val id: String,
+    val hash: String,
+    val record: SyncRecord?,
+    val readable: Boolean = true,
+    val untold: Boolean = false,
+    val private: Boolean = false,
+)
 
 /**
  * A file in the folder, with its text when it had to be read: new to Orbit,
@@ -124,6 +145,18 @@ internal data class LocalMap(val id: String, val hash: String, val record: SyncR
 internal data class RemoteFile(val file: FolderFile, val text: String?, val unreadable: Boolean = false) {
     val name: String get() = file.name
     val hash: String? = text?.let(::digest)
+}
+
+/**
+ * A private map whose file a sync can't find, nor tell from a file new to
+ * the maps: one of those may be its file, renamed or changed elsewhere.
+ */
+internal sealed interface PrivateDoubt {
+    /** A map here, by its id: its file gone from where it was, or its details can't say which file is its. */
+    data class Here(val id: String) : PrivateDoubt
+
+    /** A map deleted here, by its deletion: its file gone from where it was, or its deletion can't say which file is its. */
+    data class Deleted(val record: SyncRecord) : PrivateDoubt
 }
 
 /** What a sync does, as [planSync] plans it. */
@@ -153,14 +186,42 @@ internal sealed interface SyncStep {
     /** Its file is back in the folder after a sync missed it. */
     data class Found(val id: String, val record: SyncRecord) : SyncStep
 
-    /** A file new in the folder: it becomes a map. */
-    data class Add(val file: RemoteFile) : SyncStep
+    /**
+     * A file new in the folder: it becomes a map, a private one when it may
+     * be the file of one of the private maps this sync can't find their own
+     * file for (`doubts`, see [planSync]): when it may be the same map,
+     * changed, by what it holds ([mayBeTheSameMap]). One that's a map's
+     * deleted here, changed since, comes back as a map, a private one when
+     * the deleted map was, and only then are its deletions (`forgets`)
+     * forgotten: a sync that fails or stops before it's there leaves them,
+     * to say so again.
+     */
+    data class Add(val file: RemoteFile, val doubts: List<PrivateDoubt> = emptyList(), val forgets: List<SyncRecord> = emptyList()) : SyncStep
 
-    /** A map deleted here, its file in the folder as the map left it: the file goes too. */
-    data class DeleteFile(val record: SyncRecord) : SyncStep
+    /**
+     * A map deleted here, its file in the folder as the map left it (`file`,
+     * by another name when its deletion couldn't tell it): the file goes
+     * too, and so does the deletion, but a private map's, which stays as one
+     * whose file is gone does, for a while.
+     */
+    data class DeleteFile(val record: SyncRecord, val file: String = record.file) : SyncStep
 
-    /** A map deleted here whose file is gone already, or changed in the folder since: then it comes back as a new map. */
+    /** A map deleted here whose file changed in the folder since, which a map here took as its own: its deletion is forgotten. */
     data class Forget(val record: SyncRecord) : SyncStep
+
+    /** A map deleted here whose file is gone from the folder, for the first time: a later sync has to agree before its deletion is forgotten. */
+    data class MissingDeletion(val record: SyncRecord) : SyncStep
+
+    /**
+     * A map deleted here whose file has been gone from the folder for two
+     * syncs at least [MISSING_CONFIRMATION] apart, or whose file couldn't be
+     * told and hasn't been found by its text since: its deletion is
+     * forgotten, once the rest of the sync went through with nothing left
+     * for a later one, so a file it couldn't read, that may be it, still
+     * finds its deletion; or anyway once it's `overdue`, gone for
+     * [DELETION_PATIENCE].
+     */
+    data class Gone(val record: SyncRecord, val overdue: Boolean = false) : SyncStep
 }
 
 /**
@@ -176,6 +237,14 @@ internal const val MISSING_CONFIRMATION = 10 * 60 * 1000L
  * follows it out: a sync app on a new phone may take that long to fill it.
  */
 internal const val FOREIGN_CONFIRMATION = 24 * 60 * 60 * 1000L
+
+/**
+ * How long a deleted map's deletion waits, once its file is gone from the
+ * folder, for a sync that leaves nothing for later before it's forgotten all
+ * the same: a file in the folder that can never be read doesn't keep it,
+ * and the files new to the maps coming in private, for good.
+ */
+internal const val DELETION_PATIENCE = 24 * 60 * 60 * 1000L
 
 /** The most maps one sync sends to the trash as their files leave the folder, before it asks first (see [FolderSyncState.held]). */
 internal const val MOST_REMOVALS = 3
@@ -196,7 +265,15 @@ internal const val MOST_REMOVALS = 3
  * be read, and maps whose text couldn't be, are left for a later sync. A
  * file that holds the text this device was writing to it, and hasn't seen
  * there whole yet ([SyncRecord.writing]), is this device's own: as it was
- * when they last matched, not a change from elsewhere.
+ * when they last matched, not a change from elsewhere. A deleted map's file
+ * gone from the folder keeps its deletion until a later sync, at least
+ * [MISSING_CONFIRMATION] on, agrees, as a map's does. A private map whose
+ * file is gone from where it was (renamed, maybe, and changed), here or
+ * deleted here, or whose details or deletion can't say which file is its
+ * ([SyncRecord.untold]), is a doubt about the files new to the maps
+ * ([PrivateDoubt]): one that may be the same map comes in private, so a
+ * private map never comes back as a map like any other. Not in a folder
+ * emptied or swapped, whose files are another folder's.
  */
 internal fun planSync(
     folder: String,
@@ -210,10 +287,17 @@ internal fun planSync(
     val steps = mutableListOf<SyncStep>()
     val byName = files.associateBy { it.name }
     val claimed = files.filter { it.unreadable }.mapTo(mutableSetOf()) { it.name }
+    // The private maps a file new to the maps may be, gone from where their files were.
+    val doubts = mutableListOf<PrivateDoubt>()
+    // Deletions forgotten once everything else went through.
+    val gone = mutableListOf<SyncStep>()
+    // Deletions whose files changed since: forgotten once their files are maps here.
+    val changed = mutableListOf<SyncRecord>()
 
     for (record in deleted) {
-        // A map deleted while the maps were kept in another folder waits for that one: its file there still goes.
-        if (record.folder != folder) {
+        // A map deleted while the maps were kept in another folder waits for that one: its file there still goes. One whose file
+        // couldn't be told is looked for by its text, once the maps have their files.
+        if (record.folder != folder || record.untold) {
             continue
         }
 
@@ -226,8 +310,18 @@ internal fun planSync(
         if (file != null && record.unchangedElsewhere(file.hash ?: record.hash)) {
             claimed += file.name
             steps += SyncStep.DeleteFile(record)
+        } else if (file != null) {
+            // Changed since: it comes back as a map, a private one when the deleted map was, and its deletion goes only once
+            // that map is there, so a sync that fails or stops before still knows it was a private map's.
+            changed += record
         } else {
-            steps += SyncStep.Forget(record)
+            // Gone from the folder, renamed there, maybe changed too, or missed by a listing: until a later sync agrees it's gone,
+            // a file new to the maps may be it.
+            if (record.private == true) {
+                doubts += PrivateDoubt.Deleted(record)
+            }
+
+            missingDeletion(record, now, steps, gone)
         }
     }
 
@@ -272,6 +366,7 @@ internal fun planSync(
     }
 
     val unclaimed = files.filterTo(mutableListOf()) { it.name !in claimed }
+    // Every map's file gone, as from a folder emptied or swapped: the files there are another folder's, and none is a doubt's.
     val swapped = files.isEmpty() || (readableLinked.size > 1 && missing.size == readableLinked.size)
 
     for ((map, record) in missing) {
@@ -280,6 +375,11 @@ internal fun planSync(
         // A record another install of Orbit left, as a phone restored from a backup has, waits longer: its folder may still be filling.
         val foreign = install != null && record.install != null && record.install != install
         val confirmed = since != null && now - since >= if (foreign) FOREIGN_CONFIRMATION else MISSING_CONFIRMATION
+
+        // A private map's file gone, or renamed and changed: a file new to the maps may be it.
+        if (renamed == null && map.private) {
+            doubts += PrivateDoubt.Here(map.id)
+        }
 
         when {
             renamed != null -> {
@@ -312,12 +412,54 @@ internal fun planSync(
             unclaimed -= same
             steps += SyncStep.Link(map.id, same)
         } else {
+            // A private map whose details can't say which file is its: changed in the folder, it may be a file new to the maps.
+            if (map.untold && map.private) {
+                doubts += PrivateDoubt.Here(map.id)
+            }
+
             steps += SyncStep.Write(map.id, null)
         }
     }
 
-    unclaimed.forEach { steps += SyncStep.Add(it) }
-    return steps
+    // A deleted map whose file couldn't be told, deleted while the maps were kept here (or a deletion that can't say where):
+    // the one file with its very text is it, as it was, and goes. Two with it can't be told apart, and neither goes. Not
+    // found, it waits as a deletion whose file is gone does, in case a listing missed it, and a private one's may be a file
+    // new to the maps, changed.
+    for (record in deleted.filter { it.untold && (it.folder == folder || it.folder.isEmpty()) }) {
+        val same = if (swapped) emptyList() else unclaimed.filter { file -> file.hash?.let(record::unchangedElsewhere) == true }
+
+        if (record.private == true) {
+            doubts += PrivateDoubt.Deleted(record)
+        }
+
+        if (same.size == 1) {
+            unclaimed -= same.single()
+            steps += SyncStep.DeleteFile(record, same.single().name)
+        } else {
+            missingDeletion(record, now, steps, gone)
+        }
+    }
+
+    val doubted = if (swapped) emptyList() else doubts.toList()
+    unclaimed.forEach { file -> steps += SyncStep.Add(file, doubted, changed.filter { it.file == file.name }) }
+    // A changed file a map here took instead, as its file renamed: the deletion goes after the step that took it.
+    changed.filter { record -> unclaimed.none { it.name == record.file } }.forEach { steps += SyncStep.Forget(it) }
+    return steps + gone
+}
+
+/**
+ * A deleted map's file not in the folder: the first sync to find it so says
+ * when, and one at least [MISSING_CONFIRMATION] later forgets its deletion
+ * after the rest (`gone`).
+ */
+private fun missingDeletion(record: SyncRecord, now: Long, steps: MutableList<SyncStep>, gone: MutableList<SyncStep>) {
+    val since = record.missingSince
+
+    if (since == null) {
+        steps += SyncStep.MissingDeletion(record)
+    } else if (now - since >= MISSING_CONFIRMATION) {
+        gone += SyncStep.Gone(record, overdue = now - since >= DELETION_PATIENCE)
+    }
 }
 
 /**
@@ -413,8 +555,17 @@ data class FolderNotes(
      * while private maps are locked.
      */
     val private: List<String> = emptyList(),
+
+    /**
+     * Maps that came in from the folder private, as a sync couldn't tell
+     * them from the file of a private map gone from where it was, renamed or
+     * changed elsewhere ([PrivateDoubt]): their titles. Each is among the
+     * notes about private maps too.
+     */
+    val cameInPrivate: List<String> = emptyList(),
 ) {
-    val isEmpty: Boolean get() = keptBoth.isEmpty() && removed.isEmpty() && restored.isEmpty() && tooBig.isEmpty() && large.isEmpty() && newer.isEmpty()
+    val isEmpty: Boolean get() =
+        keptBoth.isEmpty() && removed.isEmpty() && restored.isEmpty() && tooBig.isEmpty() && large.isEmpty() && newer.isEmpty() && cameInPrivate.isEmpty()
 
     operator fun plus(other: FolderNotes) = FolderNotes(
         keptBoth = (keptBoth + other.keptBoth).distinct(),
@@ -424,6 +575,7 @@ data class FolderNotes(
         large = (large + other.large).distinct(),
         newer = (newer + other.newer).distinct(),
         private = (private + other.private).distinct(),
+        cameInPrivate = (cameInPrivate + other.cameInPrivate).distinct(),
     )
 
     /** These notes without the entries `read` has, as one shown and read leaves them: which of the rest are about private maps too. */
@@ -435,11 +587,40 @@ data class FolderNotes(
             tooBig = tooBig - read.tooBig.toSet(),
             large = large - read.large.toSet(),
             newer = newer - read.newer.toSet(),
+            cameInPrivate = cameInPrivate - read.cameInPrivate.toSet(),
         )
 
-        val entries = (left.keptBoth + left.removed + left.restored + left.tooBig + left.large + left.newer).toSet()
+        val entries = (left.keptBoth + left.removed + left.restored + left.tooBig + left.large + left.newer + left.cameInPrivate).toSet()
         return left.copy(private = private.filter { it in entries })
     }
+}
+
+/**
+ * Whether a folder's `later` text may be the map that was `earlier`, renamed
+ * or changed elsewhere since: the same center, named alike, or at least half
+ * the ideas of the smaller of the two named alike in both. A private map
+ * whose file a sync can't find takes such a file in as its own may be, and
+ * one that shares neither with it comes in as it is.
+ */
+internal fun mayBeTheSameMap(earlier: String, later: String): Boolean {
+    val before = MapText.ideas(earlier)
+    val after = MapText.ideas(later)
+
+    fun named(name: String): String = name.trim().lowercase()
+
+    fun center(ideas: List<TextIdea>): String? = ideas.firstOrNull { it.parent == null && !it.madeUp }?.name?.let(::named)?.ifEmpty { null }
+
+    if (center(before) != null && center(before) == center(after)) {
+        return true
+    }
+
+    // Names with something in them, not marks alone.
+    fun names(ideas: List<TextIdea>): Set<String> = ideas.filter { it.parent != null }.map { named(it.name) }.filterTo(HashSet()) { name -> name.any(Char::isLetterOrDigit) }
+
+    val first = names(before)
+    val second = names(after)
+    val shared = first.count { it in second }
+    return shared > 0 && shared * 2 >= minOf(first.size, second.size)
 }
 
 private val notesJson = Json { ignoreUnknownKeys = true }
@@ -479,9 +660,15 @@ class FolderSync(
     /** A clock that only goes forward, in milliseconds, for how long a file has stayed as it is. */
     private val elapsed: () -> Long = { System.nanoTime() / 1_000_000 },
 
+    /** Where the pictures, videos and sounds this device is putting into the folder are noted until they're there whole ([FolderMediaWrites]). */
+    mediaWrites: File = File(notesFile.parentFile, "folder-media-writes.json"),
+
     private val open: (String) -> SyncFolder,
 ) {
     private val status = MutableStateFlow(FolderSyncState())
+
+    /** The pictures, videos and sounds this device began putting into folders and hasn't seen there whole yet. */
+    private val writing = FolderMediaWrites(mediaWrites)
 
     /**
      * Files that hold only the start of their maps' texts, by folder and
@@ -752,6 +939,10 @@ class FolderSync(
         private val tooBig = mutableListOf<String>()
         private val large = mutableListOf<String>()
         private val newer = mutableListOf<String>()
+        private val cameInPrivate = mutableListOf<String>()
+
+        /** The texts of the private maps this sync doubts about, by doubt, read once before its steps: a map's then, a deleted one's in the trash. */
+        private val doubtedTexts = mutableMapOf<PrivateDoubt, String?>()
 
         /** The folder's markdown files as listed when the sync began, or as this sync wrote them, by name. */
         private val listed = mutableMapOf<String, FolderFile>()
@@ -802,6 +993,19 @@ class FolderSync(
 
         private var failed = 0
 
+        /** How many of the folder's files couldn't be read this time. */
+        private var unreadable = 0
+
+        /**
+         * How many of the folder's files were too big to read and are no
+         * map's here: any of them may be a deleted private map's file,
+         * renamed, so private maps' deletions whose files are gone wait for
+         * them as for one that couldn't be read, to tell it once it can be.
+         * Another's deletion has nothing to tell such a file by, and doesn't.
+         * The notes name them already: they're no problem.
+         */
+        private var largeUnknown = 0
+
         suspend fun sync(): Outcome {
             val name = folder.name
 
@@ -838,11 +1042,26 @@ class FolderSync(
             install = mine?.id
             // A file just as it was when it last matched needn't be read again.
             val known = (summaries.mapNotNull { it.metadata.sync } + deleted).filter { it.folder == address }.associateBy { it.file }
-            var unreadable = 0
+            val listedNames = listing.mapTo(HashSet()) { it.name }
 
-            // Too big to be a map: it stays only in the folder, and its map, if it has one, as it is.
-            fun tooLarge(file: FolderFile, record: SyncRecord?): RemoteFile {
-                note(large, file.name, record?.let { known -> summaries.any { it.metadata.sync == known && it.metadata.isPrivate } } == true)
+            // A private map whose file isn't in the folder, here or deleted here, or can't be told: any file new to the maps may
+            // be it, renamed (see [PrivateDoubt]).
+            val privateMissing = deleted.any { record ->
+                record.private == true && if (record.untold) record.folder == address || record.folder.isEmpty() else record.folder == address && record.file !in listedNames
+            } || summaries.any { map ->
+                map.metadata.isPrivate && (map.metadata.folderFileUnknown || map.metadata.sync?.let { it.folder == address && it.file !in listedNames } == true)
+            }
+
+            // Too big to be a map: it stays only in the folder, and its map, if it has one, as it is. Its name is a private map's,
+            // in the notes, when it's a private map's file, here or deleted here, or may be one's.
+            fun tooLarge(file: FolderFile): RemoteFile {
+                val its = summaries.filter { map -> map.metadata.sync?.let { it.folder == address && it.file == file.name } == true }
+
+                if (its.isEmpty()) {
+                    largeUnknown += 1
+                }
+
+                note(large, file.name, its.any { it.metadata.isPrivate } || privateFile(file.name) || (its.isEmpty() && privateMissing))
                 return RemoteFile(file, null, unreadable = true)
             }
 
@@ -853,7 +1072,7 @@ class FolderSync(
                 if (unchanged) {
                     RemoteFile(file, null)
                 } else if (file.size > MAP_TEXT_LIMIT) {
-                    tooLarge(file, record)
+                    tooLarge(file)
                 } else {
                     // One file that can't be read waits for the next sync; the others go on.
                     try {
@@ -863,7 +1082,7 @@ class FolderSync(
                         if (settled(file.name, arriving.text)) RemoteFile(file, arriving.text) else RemoteFile(file, null, unreadable = true)
                     } catch (large: TooLargeForAMap) {
                         // Listed smaller, or at a size the folder can't tell: only what a map holds was read of it.
-                        tooLarge(file, record)
+                        tooLarge(file)
                     } catch (failure: IOException) {
                         unreadable += 1
                         RemoteFile(file, null, unreadable = true)
@@ -882,9 +1101,18 @@ class FolderSync(
                 (file.hash ?: known[file.name]?.hash)?.let { compared[file.name] = it }
             }
 
-            val local = summaries.map { LocalMap(it.id, it.contentKey, it.metadata.sync, readable = !it.unreadable) }
+            val local = summaries.map {
+                LocalMap(it.id, it.contentKey, it.metadata.sync, readable = !it.unreadable, untold = it.metadata.folderFileUnknown, private = it.metadata.isPrivate)
+            }
 
             val steps = planSync(address, local, files, deleted, maps.onScreen(), System.currentTimeMillis(), install)
+
+            // The texts new files are told by, as the maps are before any step: a doubted map may follow its file into the trash
+            // in this very sync, ahead of the files it's a doubt about.
+            for (doubt in steps.filterIsInstance<SyncStep.Add>().flatMap { it.doubts }.distinct()) {
+                doubtedText(doubt)
+            }
+
             val removals = steps.filterIsInstance<SyncStep.Remove>().map { it.id }
             // Many maps following their files out at once is likelier files moved, or a sync app gone wrong, than deletions: they wait for a yes.
             held = if (removals.size > MOST_REMOVALS) removals.filter { it !in approved } else emptyList()
@@ -936,7 +1164,20 @@ class FolderSync(
         }
 
         /** What this sync did that the user should hear about, so far. */
-        fun notes() = FolderNotes(keptBoth.toList(), removed.toList(), restored.toList(), tooBig.toList(), large.toList(), newer.toList(), privateNotes.toList())
+        fun notes() = FolderNotes(keptBoth.toList(), removed.toList(), restored.toList(), tooBig.toList(), large.toList(), newer.toList(), privateNotes.toList(), cameInPrivate.toList())
+
+        /**
+         * The text of a private map this sync doubts about, to tell a file new
+         * to the maps by: a map's as it is here, a deleted map's as the trash
+         * keeps it. Null when it isn't known (a deletion that can't be read
+         * whole, or a map gone from the trash), when any file may be it.
+         */
+        private suspend fun doubtedText(doubt: PrivateDoubt): String? = doubtedTexts.getOrPut(doubt) {
+            when (doubt) {
+                is PrivateDoubt.Here -> runCatching { maps.read(doubt.id) }.getOrNull()
+                is PrivateDoubt.Deleted -> maps.deletedText(doubt.record)
+            }
+        }
 
         /**
          * Brings how study goes in step with the folder: the other devices'
@@ -986,9 +1227,20 @@ class FolderSync(
 
                 val own = texts[me].orEmpty()
                 val ownRecords = own.mapNotNull { (file, text) -> FolderStudy.decode(text)?.let { file to it } }.toMap()
+
                 // This device's own records a newer Orbit wrote and says this one would misread, as after going back to an older
                 // version: left as they are, never written over with what this one knows, nor deleted, so the newer one finds them.
-                val newer = own.filterValues { FolderStudy.read(it) == StudyRead.Incompatible }.keys
+                // So are those that hold JSON this version can't make out, someone's as a newer Orbit's is, until a later sync can;
+                // but not one that isn't JSON at all, empty or the start of one, as a write cut short leaves it, this version's or
+                // an earlier one's: that's written again whole.
+                val newer = own.filter { (_, text) ->
+                    when (FolderStudy.read(text)) {
+                        is StudyRead.Record -> false
+                        StudyRead.Incompatible -> true
+                        StudyRead.Garbled -> FolderStudy.fields(text) != null
+                    }
+                }.keys
+
                 val written = mutableSetOf<String>()
 
                 for (map in maps.maps.value.orEmpty()) {
@@ -1120,9 +1372,17 @@ class FolderSync(
                     }
 
                     val title = words.string(R.string.data_changed_elsewhere_title, MapText.outline(text, words).title)
+
                     // Renamed as Orbit renames a map, markdown or YAML. One Orbit can only show (a newer Orbit's, or one it can't read all of) is kept as it came,
-                    // and only its file's name says it's a copy.
-                    val renamed = editor.edit(text, title, null).takeIf { it.refused == null }?.markdown
+                    // and only its file's name says it's a copy; so is one the page can't rename (a WebView too old to draw maps, a page that didn't answer),
+                    // rather than every sync stopping there.
+                    val renamed = try {
+                        editor.edit(text, title, null).takeIf { it.refused == null }?.markdown
+                    } catch (failed: PageException) {
+                        Logs.warn("OrbitFolder", "The page couldn't rename the folder's version of a map", failed)
+                        null
+                    }
+
                     // The folder's version of a private map is private too, from the moment it's there.
                     val private = isPrivate(step.id)
                     // Its cover says it's the folder's version, as its title does.
@@ -1139,38 +1399,76 @@ class FolderSync(
                 is SyncStep.Remove -> {
                     val title = maps.summary(step.id)?.title
                     val private = isPrivate(step.id)
-                    // No record left, so deleting the map doesn't go on to delete a file. It waits in the trash, at least until its note is read.
-                    maps.setSyncRecord(step.id, null)
-                    maps.delete(step.id, byFolder = true)
+
+                    // Sent by the folder, it leaves no deletion, its file gone already, and waits in the trash at least until its note
+                    // is read. Its record stays until it's there: one that can't move now stays here, still following its file, which
+                    // a later sync finds gone again, rather than be written back to the folder as a map new to it.
+                    if (maps.delete(step.id, byFolder = true) == null) {
+                        if (maps.exists(step.id)) {
+                            throw IOException("${step.id} couldn't move to the trash")
+                        }
+
+                        return
+                    }
+
                     title?.let { note(removed, it, private) }
                 }
                 is SyncStep.Missing -> maps.setSyncRecord(step.id, step.record.copy(missingSince = System.currentTimeMillis()))
                 is SyncStep.Found -> maps.setSyncRecord(step.id, step.record.copy(missingSince = null))
                 is SyncStep.Add -> {
                     val text = step.file.text ?: folder.read(step.file.name)
+                    val known = privateFile(step.file.name)
+                    // One that may be a private map whose file this sync can't find, changed: private too, and the notes say why.
+                    val doubted = !known && step.doubts.any { doubt -> doubtedText(doubt)?.let { mayBeTheSameMap(it, text) } ?: true }
+
                     val id = maps.add(
                         text,
                         sync = record(step.file.file, digest(text)),
                         original = text,
                         originalName = step.file.name,
-                        isPrivate = privateFile(step.file.name),
+                        isPrivate = known || doubted,
                         cover = conflictCover(step.file.name),
                     )
+
+                    // The map is there, private when it was a private map's file: its deletion can go. Should that fail, or Orbit
+                    // stop first, a later sync finds the file this map's, and forgets it then.
+                    step.forgets.forEach { maps.forgetFolderDeletion(it) }
+
+                    if (doubted) {
+                        note(cameInPrivate, MapText.outline(text, words).title, private = true)
+                    }
+
                     takePictures(id, text)
                 }
                 is SyncStep.DeleteFile -> {
                     // Deleted only while it holds the very text compared: changed since, by another device say, it stays, and so
                     // does its deletion, for the next sync to compare it again (it then comes back as a map).
-                    if (!stillAsCompared(step.record.file, always = true)) {
-                        waiting += step.record.file
+                    if (!stillAsCompared(step.file, always = true)) {
+                        waiting += step.file
                         return
                     }
 
-                    folder.delete(step.record.file)
-                    names -= step.record.file
-                    maps.forgetFolderDeletion(step.record)
+                    folder.delete(step.file)
+                    names -= step.file
+
+                    // A private map's stays a while, its file gone, with no text to tell it by: a device that edited the map, a sync
+                    // app bringing back a changed file, or one restoring the map as it was, may write it again, and then it comes in
+                    // private, and is never deleted again.
+                    if (step.record.private == true) {
+                        maps.setFolderDeletionGone(step.record, step.record.gone(System.currentTimeMillis(), folder = address, file = step.file))
+                    } else {
+                        maps.forgetFolderDeletion(step.record)
+                    }
                 }
                 is SyncStep.Forget -> maps.forgetFolderDeletion(step.record)
+                is SyncStep.MissingDeletion -> maps.setFolderDeletionMissing(step.record, System.currentTimeMillis())
+                is SyncStep.Gone -> {
+                    // Only once nothing was left for a later sync: a file it couldn't read, or still arriving, may be the deleted map's, and
+                    // one too big to read a private map's, renamed. Unless that has gone on too long, as for a file that can never be read.
+                    if (step.overdue || (failed == 0 && unreadable == 0 && (largeUnknown == 0 || step.record.private != true) && waiting.isEmpty())) {
+                        maps.forgetFolderDeletion(step.record)
+                    }
+                }
             }
         }
 
@@ -1311,7 +1609,7 @@ class FolderSync(
          * now, has changed. Android's storage access can't write or delete a
          * file only while it's unchanged, so a change that lands between this
          * check and the write or deletion right after it is the one still
-         * lost (see `docs/architecture.md`).
+         * lost (see `docs/architecture/files-and-upgrades.md`).
          */
         private fun stillAsCompared(name: String, always: Boolean = false): Boolean {
             val before = listed[name] ?: return false
@@ -1337,15 +1635,20 @@ class FolderSync(
 
         /**
          * The pictures and videos the map points at that the folder doesn't
-         * have yet, or has only the start of, as a copy cut short leaves it.
-         * The folder keeps one `media/` for every map, so one there by the
-         * same name that holds another file (as when two maps from zips each
-         * have their "photo.jpg", of one size or not) is another map's: this
-         * map's gets a name of its own, in its media and in its text, and goes
-         * under it. A name and a size don't tell two pictures apart, so what
-         * they hold does, read once and remembered while neither file changes
-         * ([matching]). Returns the map's text as it's to be written, or null
-         * when it changed meanwhile, for the next sync to write.
+         * have yet, or has only the start of, as this device's copy cut short
+         * leaves it. The folder keeps one `media/` for every map, so one there
+         * by the same name that holds another file (as when two maps from zips
+         * each have their "photo.jpg", of one size or not, or two ideas each
+         * their "notes.txt", one of them longer) is another map's: this map's
+         * gets a name of its own, in its media and in its text, and goes under
+         * it. A name and a size don't tell two pictures apart, so what they
+         * hold does, read once and remembered while neither file changes
+         * ([matching]); and one that holds only the start of the other is
+         * another file too, unless this device was writing it there
+         * ([writing]), or it's the folder's that's longer where the folder
+         * can't tell a file's size. Returns the map's text as it's to be
+         * written, or null when it changed meanwhile, for the next sync to
+         * write.
          */
         private suspend fun givePictures(id: String, markdown: String): String? {
             var text = markdown
@@ -1364,19 +1667,31 @@ class FolderSync(
                     continue
                 }
 
-                when (copyThere(name, file)) {
-                    FolderCopy.Same -> remember(file, there)
-                    // Gone from the folder since it was listed, or a copy there cut short: this map's goes there whole.
+                val copy = when (val compared = copyThere(name, file)) {
+                    // Only this device's own write cut short holds the start of the map's, as it left it: anyone else's is another file.
+                    FolderCopy.CutShort -> if (writing.writing(address, name, file.length(), there)) FolderCopy.CutShort else FolderCopy.Other
+                    // A copy here holds only the start of the folder's: where the folder can't tell a file's size, it may be one
+                    // taken while the folder's was still arriving, and the folder's stays whole. Where it can, it was whole when
+                    // taken ([takePictures] reads only a file of its listed size), and the folder's is another file.
+                    FolderCopy.Whole -> if (there.size < 0) FolderCopy.Whole else FolderCopy.Other
+                    else -> compared
+                }
+
+                when (copy) {
+                    FolderCopy.Same -> {
+                        remember(file, there)
+                        writing.end(address, name)
+                    }
+                    // Gone from the folder since it was listed, or this device's copy there cut short: this map's goes there whole.
                     null, FolderCopy.CutShort -> text = give(id, name, file, text) ?: return null
-                    // A copy here that holds only the start of the folder's isn't another file: the folder's stays whole.
                     FolderCopy.Whole -> Unit
                     FolderCopy.Other -> {
-                        val renamed = freeName(id, name)
+                        val renamed = freeName(id, name, text)
                         text = maps.renameMedia(id, name, renamed, expected = text) ?: return null
-                        val copy = maps.picture(id, renamed, fileNamesIn(text))
+                        val renamedFile = maps.picture(id, renamed, fileNamesIn(text))
 
-                        if (copy != null) {
-                            text = give(id, renamed, copy, text) ?: return null
+                        if (renamedFile != null) {
+                            text = give(id, renamed, renamedFile, text) ?: return null
                         }
                     }
                 }
@@ -1395,9 +1710,44 @@ class FolderSync(
          * it can't follow goes from the folder rather than stay there as no
          * map's, and the next sync finds what the folder holds by the name.
          * Null when the map changed meanwhile, for the next sync to write.
+         * Until it's there whole, it's noted as being written ([writing]), so
+         * a copy Orbit stopping midway cuts short is written again rather
+         * than taken for another file; one that stops with Orbit running is
+         * noted as it was left, or not at all once nothing's left of it, so
+         * that nothing but that very file is ever taken for it.
          */
         private suspend fun give(id: String, name: String, file: File, text: String): String? {
-            val written = folder.writeMedia(name, file)
+            val before = writing.begin(address, name, file.length())
+
+            val written = try {
+                folder.writeMedia(name, file)
+            } catch (full: NoRoomForMedia) {
+                // Not started: what was there is as it was, a write of this device's cut short before included.
+                writing.undo(address, name, before)
+                throw full
+            } catch (stopped: MediaWriteStopped) {
+                // Stopped partway: only what this very write left by its name is its write cut short, not a file by that name the
+                // folder's app made it beside, as one that arrived meanwhile.
+                val left = stopped.left
+
+                if (left == null) {
+                    writing.end(address, name)
+                } else if (left.name == name) {
+                    writing.cut(address, name, left)
+                } else {
+                    writing.undo(address, name, before)
+                }
+
+                throw stopped
+            } catch (failure: Exception) {
+                // What it left, if anything, can't be told (the folder out of reach included): nothing there counts as this
+                // device's write that didn't before.
+                writing.undo(address, name, before)
+                throw failure
+            }
+
+            // Whole, under its name or the one the folder's app gave it.
+            writing.end(address, name)
             pictures[written.name] = written
 
             if (written.name == name) {
@@ -1447,14 +1797,21 @@ class FolderSync(
         /** A file here as a listing describes one, to tell when it changes. */
         private fun described(file: File) = FolderFile(file.name, file.lastModified(), file.length())
 
-        /** `name`, numbered (`photo-2.jpg`, `photo-3.jpg`…) to one neither the folder's media nor the map's has. */
-        private fun freeName(id: String, name: String): String {
+        /**
+         * `name`, numbered (`photo-2.jpg`, `photo-3.jpg`…) to one neither the
+         * folder's media nor the map's has, of any kind (an idea's file
+         * included, or one kept for earlier versions), and that the map's
+         * `text` doesn't point at, as at one still on its way: so it never
+         * takes another of the map's files' place.
+         */
+        private fun freeName(id: String, name: String, text: String): String {
             val stem = name.substringBeforeLast('.')
             val extension = name.substringAfterLast('.', "")
+            val named = (MediaNames.references(text) + fileNamesIn(text)).toSet()
 
             return generateSequence(2) { it + 1 }
                 .map { number -> if (extension.isEmpty()) "$stem-$number" else "$stem-$number.$extension" }
-                .first { it !in pictures && maps.picture(id, it) == null }
+                .first { it !in pictures && it !in named && !maps.hasMediaNamed(id, it) }
         }
 
         /** What the folder's `name` is to `file` here, by what each holds, read once; null when the folder doesn't have it anymore. */

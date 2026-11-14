@@ -4,6 +4,7 @@
     <!-- %1$s is the name of the device or person that sent the map. -->
     <string name="main_could_not_keep_sent_map">Orbit couldn\'t keep the map %1$s sent. Ask them to send it as a file instead.</string>
     <string name="main_could_not_open_that">Couldn\'t open that</string>
+    <string name="main_could_not_take_map_in">Couldn\'t take that map in</string>
     <string name="main_ok">OK</string>
 
     <!-- A zip of maps, brought in. -->
@@ -11,6 +12,8 @@
     <string name="main_maps_added">Maps added</string>
     <string name="main_no_maps_in_zip">There are no maps in that zip.</string>
     <string name="main_every_map_in_zip_already_here">Every map in that zip is here already.</string>
+    <!-- A zip of maps that stopped partway, with what came in before. -->
+    <string name="main_import_stopped">Not everything came in</string>
 
     <!-- A map from another app (OPML, FreeMind, XMind), brought in: what it had that Orbit keeps another way, or couldn\'t keep. -->
     <string name="main_import_notes_title">What changed on the way in</string>

@@ -1,0 +1,19 @@
+# The spare page
+
+- **The spare page works off screen.**
+  Thumbnails, style previews and exports are Orbit's `renderToSVGString`, turned into WebP or PNG on a canvas in the page.
+  A thumbnail is kept by the map's text and the media it's missing (`MapSummary.pictureKey`, told as media arrives, `MapStore.mediaArrived`), so one drawn before its pictures came is drawn again as they do, its card showing the last one meanwhile.
+  Ideas caught without opening their map are Orbit's `addNode` on a map no one sees, nested as pasting nests them (`web/paste.ts`), so the text comes back the way Orbit writes it.
+  Home's renames, tags and copies are made there too (`editMap`, `web/map-edits.ts`, through `data/MapEdits.kt`):
+  Orbit reads the map, markdown or YAML, makes the change as the map's screen would, and writes it back, only the changed lines in markdown; a map Orbit can only show (`readingOf`) is left as it is, and the app says why, as it does when the page can't make the change at all (`MapEditResult.PageFailed`: a WebView too old to draw maps, a page that stopped, didn't answer or answered what the app can't read).
+  A change the page fails is tried once more on a new page, unless no page can make changes for a while (`PageException.Kind.lasting`: a WebView too old to draw maps, a page that didn't load or didn't answer); a tag renamed in every map stops at such a failure, the maps after it keeping the tag for that reason, rather than each waiting on a page that can't, and otherwise only the map that failed twice keeps it.
+  The page's own reason for a change it refused is in Orbit's words, maybe not the app's language, so Home says the page couldn't make the change instead; the folder's version of a map kept beside it that the page can't rename is kept as it came.
+  Home's light reading of maps (`MapText.outline`) reads a YAML map's title, tags and ideas as Orbit does, and what a map plays as sounds (`soundNamesIn`, for what goes with it and what its web page carries) is read among a YAML map's keys as among a markdown map's attributes.
+  Text indented as an outline that makes a new map is read there too (`mapFromText`), so a shared list keeps its branches; a markdown file never goes there, and is kept as written (`Importer.newMap`).
+  Maps from other apps (OPML, FreeMind and Freeplane, XMind) are Orbit's `importMap` there (`web/other-apps.ts`):
+  `data/OtherApps.kt` tells them from Orbit's own files by name, type and content, and the importer adds each map with its pictures and says, in the app's words, what Orbit kept another way or couldn't keep.
+  An OPML or `.mm` file is kept in the map's history as it came in, and read the same way when it's shown or restored.
+  OPML export is Orbit's `exportOPML`.
+  PDFs and prints are the map's web page laid out for paper (Orbit's `renderPrintLayout`, in `web/print.ts`) in a web view of their own that no one sees, which Android's print framework turns into pages (`page/MapPrinter.kt`): the map's own pictures are inside the page, and those from the web, a YouTube video's poster too, load over HTTPS as the page's policy allows; the page says once it's laid out (`laid-out`), and printing gives its pictures their own time from then (`PrintPatience`), however long a big map took; then it says it's ready once each has loaded, failed or taken `PICTURE_WAIT`, with how many it goes without (`ready:2`, `picturesMissing`), which the map then says.
+  A picture left out of the page on purpose (kept on the phone, or past the page's room) keeps its `media/…` address on the page's own host, where nothing answers, and isn't waited for or counted.
+  It's told by that address, in the `media/` folder beside the page, not by origin: a page saved and opened from its file has none of its own in Firefox (`null`, as every data: URL's is), and would take the pictures inside it for ones left out.

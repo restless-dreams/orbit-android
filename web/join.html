@@ -102,6 +102,15 @@
     cursor: pointer;
   }
 
+  /* The way on, as a link: a room's page asked for from another site opens it again from here. */
+  .join__onward {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    text-decoration: none;
+  }
+
   .join__button:focus-visible {
     outline: 3px solid var(--audience-text);
     outline-offset: 2px;
@@ -151,6 +160,11 @@
     <div class="join__problem" role="alert"><!-- problem --></div>
   </form>
   <!-- /room -->
+  <!-- onward -->
+  <div class="join__form">
+    <a class="join__button join__onward" href=""><!-- onward label --></a>
+  </div>
+  <!-- /onward -->
 </div>
 <script>
   const code = document.querySelector('.join__form--code');
@@ -164,6 +178,23 @@
         location.href = '/' + event.target.value + '/';
       }
     });
+  }
+  // A room's page asked for from another site, as a link followed from a chat on the web: the same address again, from
+  // here, so the room takes it as anyone's who typed it. By itself only once in a tab, so a site sending a window it
+  // opened to code after code gets one try, not one every few seconds; after that, and without storage to tell, the
+  // button waits for a tap.
+  const onward = document.querySelector('.join__onward');
+  if (onward) {
+    let first = false;
+    try {
+      first = sessionStorage.getItem('orbit-onward') === null;
+      sessionStorage.setItem('orbit-onward', '1');
+    } catch {
+      first = false;
+    }
+    if (first) {
+      location.replace(onward.href);
+    }
   }
 </script>
 </body>

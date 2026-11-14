@@ -54,14 +54,13 @@ internal const val PAGE_PICTURES_LIMIT = 100L * 1024 * 1024
  * idea without it, and Export says how many stay on this device.
  */
 internal fun picturesFitting(markdown: String, mapFolder: File, limit: Long = PAGE_PICTURES_LIMIT): Set<String> {
-    val media = File(mapFolder, MEDIA_DIRECTORY)
-    // What the map shows, not the files its ideas hold, which a page lists without carrying.
-    val shown = MediaNames.places(withoutFiles(markdown)).map { it.groupValues[2] }.filter { !isVideoName(it) && !isSoundName(it) }.groupingBy { it }.eachCount()
+    // What the map shows, not the files its ideas hold, which a page lists without carrying, nor what it names only in code.
+    val shown = MediaNames.places(withoutFiles(MediaNames.withoutCode(markdown))).map { it.groupValues[2] }.filter { !isVideoName(it) && !isSoundName(it) }.groupingBy { it }.eachCount()
     var room = limit
     val fitting = LinkedHashSet<String>()
 
     for ((name, times) in shown) {
-        val file = File(media, name).takeIf { it.isFile && isMediaName(name) } ?: continue
+        val file = mapMediaFile(mapFolder, name)?.takeIf { isMediaName(name) } ?: continue
         val takes = file.length() * times
 
         if (takes <= room) {

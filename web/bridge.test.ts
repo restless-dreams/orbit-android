@@ -38,6 +38,13 @@ const postedOf = <Type extends Message['type']>(type: Type, from: number): Extra
   return posted.slice(from).filter((message): message is Extract<Message, { type: Type }> => message.type === type);
 };
 
+/** Waits until `ready` says so, a frame at a time, for as long as a flight takes and then some. */
+const until = async (ready: () => boolean): Promise<void> => {
+  for (let waited = 0; waited < 3000 && !ready(); waited += 16) {
+    await Bun.sleep(16);
+  }
+};
+
 const load = (markdown: string): void => {
   send({ type: 'load', markdown, theme: { dark: false, tokens: {} }, settings: { haptics: false, snap: false, longPressDelay: 400 }, mapId: 'plans' });
 };
@@ -122,6 +129,145 @@ describe("an idea's date", () => {
   });
 });
 
+describe("a live photo's motion", () => {
+  test('goes only onto the picture it was taken with, never onto one that replaced it meanwhile', () => {
+    load('# Trip\n## Lake\n\n![The lake](media/lake.jpg)\n');
+    const from = posted.length;
+
+    // The motion was copied in for the lake's picture, which the shore's took the place of meanwhile.
+    send({ type: 'update', id: 'lake', changes: { image: { src: 'media/shore.jpg' } } });
+    send({ type: 'update', id: 'lake', changes: { image: { motion: { src: 'media/lake-motion.mp4' } } }, onto: { image: 'media/lake.jpg' } });
+    expect(postedOf('saved', from).map((saved) => saved.markdown)).toEqual(['# Trip\n## Lake\n\n![](media/shore.jpg)\n']);
+
+    // Onto the picture it was taken with, it goes.
+    const after = posted.length;
+    send({ type: 'update', id: 'lake', changes: { image: { motion: { src: 'media/shore-motion.mp4' } } }, onto: { image: 'media/shore.jpg' } });
+    expect(postedOf('saved', after).at(-1)?.markdown).toContain('media/shore-motion.mp4');
+  });
+});
+
+describe('a change the app waits to hear about', () => {
+  /** What the page posted after the first `from` messages, as the app hears it: saves and job `job`'s answer, in order. */
+  const heard = (from: number, job: number): (string | unknown)[] => {
+    return posted.slice(from).flatMap((message) => {
+      if (message.type === 'saved') {
+        return [message.markdown];
+      }
+
+      return message.type === 'result' && message.job === job ? [message.error ?? message.value] : [];
+    });
+  };
+
+  test('is answered once the idea took it, after its save', () => {
+    load('# Trip\n## Lake\n');
+    const from = posted.length;
+    send({ type: 'update', id: 'lake', changes: { image: { src: 'media/sketch-a.svg', alt: 'A line' } }, job: 41 });
+
+    expect(heard(from, 41)).toEqual(['# Trip\n## Lake\n![A line](media/sketch-a.svg)\n', true]);
+  });
+
+  test("is answered false for an idea the map doesn't have now, renamed or removed meanwhile, and saves nothing", () => {
+    load('# Trip\n- Tokio\n- Kyoto\n');
+    send({ type: 'update', id: 'tokio', changes: { text: 'Tokyo' } });
+    const from = posted.length;
+    send({ type: 'update', id: 'tokio', changes: { image: { src: 'media/late.jpg' } }, job: 42 });
+    send({ type: 'remove', id: 'kyoto' });
+    const removed = posted.length;
+    send({ type: 'update', id: 'kyoto', changes: { image: { src: 'media/late.jpg' } }, job: 43 });
+
+    expect(heard(from, 42)).toEqual([false, '# Trip\n- Tokyo\n']);
+    expect(heard(removed, 43)).toEqual([false]);
+    expect(postedOf('declined', from)).toEqual([]);
+  });
+
+  test('is answered false when the file it was for is no longer the idea\'s', () => {
+    load('# Trip\n## Lake\n\n![](media/shore.jpg)\n');
+    const from = posted.length;
+    send({ type: 'update', id: 'lake', changes: { image: { motion: { src: 'media/lake-motion.mp4' } } }, onto: { image: 'media/lake.jpg' }, job: 44 });
+
+    expect(heard(from, 44)).toEqual([false]);
+  });
+
+  test('is answered with why Orbit declined it, rather than said as declined', () => {
+    load('# Trip\n## Lake\n');
+    const from = posted.length;
+    send({ type: 'update', id: 'lake', changes: { image: 42 }, job: 45 });
+
+    expect(heard(from, 45)).toEqual([expect.stringContaining('image')]);
+    expect(postedOf('declined', from)).toEqual([]);
+  });
+
+  test('adding files is answered too: once they are the idea\'s, and false for an idea gone meanwhile', () => {
+    load('# Trip\n## Tickets\n## Hotel\n');
+    const file = { src: 'media/file-a.pdf', name: 'A.pdf', type: 'application/pdf', size: 4 };
+    const from = posted.length;
+    send({ type: 'addFiles', id: 'tickets', files: [file], job: 47 });
+    // Again: the idea has it already, which is what was asked.
+    send({ type: 'addFiles', id: 'tickets', files: [file], job: 48 });
+    send({ type: 'remove', id: 'hotel' });
+    send({ type: 'addFiles', id: 'hotel', files: [file], job: 49 });
+
+    expect(heard(from, 47).slice(0, 2)).toEqual([expect.stringContaining('media/file-a.pdf'), true]);
+    expect(postedOf('result', from).map((result) => [result.job, result.value])).toEqual([[47, true], [48, true], [49, false]]);
+  });
+
+  test("is answered false on a map that can't be changed, never left to wait", () => {
+    load('# Trip\n## Lake\n');
+    send({ type: 'lock', reason: 'deleted' });
+    const from = posted.length;
+    send({ type: 'update', id: 'lake', changes: { image: { src: 'media/sketch-a.svg' } }, job: 46 });
+    send({ type: 'lock', reason: null });
+
+    expect(heard(from, 46)).toEqual([false]);
+  });
+});
+
+describe('ideas caught on the go', () => {
+  test("go into a map drawn out of sight that asks for its pictures where the map keeps them, not beside the page", async () => {
+    const asked: string[] = [];
+    const original = Element.prototype.setAttribute;
+
+    const setting = spyOn(Element.prototype, 'setAttribute').mockImplementation(function (this: Element, name: string, value: string) {
+      if (this.tagName.toLowerCase() === 'image' && name === 'href') {
+        asked.push(value);
+      }
+
+      original.call(this, name, value);
+    });
+
+    const from = posted.length;
+    const markdown = '# Trip\n## Lake\n\n![The lake](media/lake.jpg)\n## Shore\n\n![](media/shore.jpg)\n';
+
+    try {
+      send({ type: 'addIdeas', job: 81, markdown, text: 'Call the hotel', parentId: null, baseUrl: 'https://appassets.androidplatform.net/maps/trip/' });
+
+      for (let turn = 0; turn < 20 && postedOf('result', from).length === 0; turn += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    } finally {
+      setting.mockRestore();
+    }
+
+    expect(postedOf('result', from).find((result) => result.job === 81)?.value).toContain('Call the hotel');
+    // Each picture there is, from the map's own folder, and none beside the page.
+    expect([...new Set(asked)].sort()).toEqual(['https://appassets.androidplatform.net/maps/trip/media/lake.jpg', 'https://appassets.androidplatform.net/maps/trip/media/shore.jpg']);
+  });
+
+  test('that hold no idea Orbit reads add none, and give the map\'s text back as it was, for the app to say so', async () => {
+    const from = posted.length;
+    const markdown = '# Trip <!-- orbit id: trip -->\n\n- Lisbon\n';
+    send({ type: 'addIdeas', job: 82, markdown, text: '---\ntags: [home]\n---\n', parentId: null, baseUrl: null });
+
+    for (let turn = 0; turn < 20 && postedOf('result', from).length === 0; turn += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const answer = postedOf('result', from).find((result) => result.job === 82);
+    expect(answer?.error).toBeUndefined();
+    expect(answer?.value).toBe(markdown);
+  });
+});
+
 describe('a picture of a map the app calls off', () => {
   /** A thumbnail's job, as the app asks for one. */
   const thumbnail = (job: number): Command => ({
@@ -185,6 +331,107 @@ describe('a picture of a map the app calls off', () => {
   });
 });
 
+describe('a picture of a map', () => {
+  // Each picture, as the map's own text points at it, or another map's, from wherever the page is.
+  const TRIP = [
+    '# Trip',
+    '## Own',
+    '![](media/own.png)',
+    '## Next door',
+    '![](../other/media/next-door.png)',
+    '## Another map',
+    '![](../../maps/other/media/another.png)',
+    '## By its address',
+    `![](${location.origin}/maps/plans/media/shown.png)`,
+    '## From the web',
+    '![](https://example.com/web.png)',
+    '',
+  ].join('\n');
+
+  test("carries its own map's pictures and the web's, and never another map's, whatever the page shows", async () => {
+    // The page shows another map meanwhile, whose pictures it may load.
+    load('# Plans\n- One\n');
+    const fetched: string[] = [];
+
+    const fetching = spyOn(globalThis, 'fetch').mockImplementation(async (input: string | URL | Request) => {
+      fetched.push(input instanceof Request ? input.url : String(input));
+      return new Response(new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }));
+    });
+
+    const from = posted.length;
+    send({
+      type: 'snapshot',
+      job: 61,
+      format: 'svg',
+      markdown: TRIP,
+      width: 800,
+      height: 600,
+      scale: 1,
+      theme: { dark: false, tokens: {} },
+      transparent: false,
+      style: null,
+      view: 'all',
+      focus: null,
+      baseUrl: `${location.origin}/jobs/0123abcd/`,
+    });
+    await until(() => postedOf('result', from).some((result) => result.job === 61));
+    fetching.mockRestore();
+
+    const svg = postedOf('result', from).find((result) => result.job === 61)?.value;
+    expect(typeof svg).toBe('string');
+    expect(fetched.sort()).toEqual([`${location.origin}/jobs/0123abcd/media/own.png`, 'https://example.com/web.png']);
+    expect(String(svg)).not.toContain('/maps/');
+    expect(String(svg)).not.toContain('next-door');
+  });
+});
+
+describe('a drawing of a map, its pictures inside it', () => {
+  test('reads its pictures one at a time, each once however many planets show it', async () => {
+    let inFlight = 0;
+    let most = 0;
+    const asked: string[] = [];
+
+    const fetching = spyOn(globalThis, 'fetch').mockImplementation((async (input: RequestInfo | URL) => {
+      asked.push(String(input));
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return new Response(new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }));
+    }) as typeof fetch);
+
+    const from = posted.length;
+
+    send({
+      type: 'snapshot',
+      job: 61,
+      format: 'svg',
+      markdown: '# Trip\n## Tram\n![](media/tram.png)\n## Tram again\n![](media/tram.png)\n## Belem\n![](media/belem.png)\n## Sintra\n![](media/sintra.png)\n',
+      width: 800,
+      height: 600,
+      scale: 1,
+      theme: { dark: false, tokens: {} },
+      transparent: false,
+      style: null,
+      view: 'overview',
+      focus: null,
+      baseUrl: 'https://appassets.androidplatform.net/maps/trip/',
+    });
+
+    for (let turn = 0; turn < 100 && postedOf('result', from).length === 0; turn += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    fetching.mockRestore();
+    const svg = String(postedOf('result', from).find((result) => result.job === 61)?.value ?? '');
+
+    expect(most).toBe(1);
+    expect(asked.map((url) => url.replace(/^.*\//, '')).sort()).toEqual(['belem.png', 'sintra.png', 'tram.png']);
+    expect(svg).not.toContain('media/');
+    expect((svg.match(/href="data:image\/png;base64,/g) ?? []).length).toBe(4);
+  });
+});
+
 describe('an idea renamed', () => {
   test('by typing on the map says its new id in the save, as a change from the app does', () => {
     load('# Trip\n- Tokio\n- Kyoto\n');
@@ -202,6 +449,190 @@ describe('an idea renamed', () => {
     send({ type: 'update', id: 'kyoto', changes: { text: 'Kioto' } });
 
     expect(postedOf('saved', from).map((saved) => saved.renamed)).toEqual([{ from: 'tokio', to: 'tokyo' }, { from: 'kyoto', to: 'kioto' }]);
+  });
+});
+
+describe('text typed in the source editor', () => {
+  test('is the map as it is now, even over an earlier version on show, and takes changes again', () => {
+    load('# Now\n- Today\n');
+    send({ type: 'preview', markdown: '---\nschemaVersion: 999\n---\n# Then\n- Before\n', editable: false });
+    const from = posted.length;
+
+    send({ type: 'source', text: '# Now\n- Typed\n' });
+
+    expect(postedOf('state', from).at(-1)?.state.title).toBe('Now');
+    expect(postedOf('state', from).at(-1)?.state.readOnly).toBeNull();
+    send({ type: 'update', id: 'typed', changes: { note: 'Saved' } });
+    expect(postedOf('saved', from).map((saved) => saved.markdown)).toEqual(['# Now\n- Typed\n  Saved\n']);
+  });
+});
+
+describe('an idea being typed on the map as a change from elsewhere arrives', () => {
+  const TRIP = '# Trip\n- Tokio\n';
+
+  /** The map as the app draws it, at the app's `revision` of its text. */
+  const loadAt = (markdown: string, revision: number): void => {
+    send({ type: 'load', markdown, theme: { dark: false, tokens: {} }, settings: { haptics: false, snap: false, longPressDelay: 400 }, mapId: 'trip', revision });
+  };
+
+  /** Types `text` in the field open on the map, and leaves it open. */
+  const typeOnTheMap = (text: string): void => {
+    const field = document.querySelector('textarea');
+
+    if (!field) {
+      throw new Error('No field open on the map');
+    }
+
+    field.value = text;
+  };
+
+  /** The ideas the map on the page shows now, as the app last heard of them. */
+  const ideasSince = (from: number): string[] | undefined => {
+    return postedOf('state', from).at(-1)?.state.nodes.map((node) => node.text);
+  };
+
+  const typings = [
+    { idea: 'a new idea', open: { type: 'editNew', parentId: 'trip' } as Command, typed: 'Kyoto draft', saved: '# Trip\n- Tokio\n- Kyoto draft\n' },
+    { idea: 'an idea renamed', open: { type: 'edit', id: 'tokio' } as Command, typed: 'Tokyo draft', saved: '# Trip\n- Tokyo draft\n' },
+  ];
+
+  const changes = [
+    { change: 'a newer Orbit wrote', markdown: '---\nschemaVersion: 999\n---\n# Trip\n- Kyoto\n', lock: 'newer' },
+    { change: 'Orbit can\'t read all of', markdown: '---\ntheme: [night\n---\n# Trip\n- Kyoto\n', lock: 'unreadable' },
+  ];
+
+  for (const { idea, open, typed, saved } of typings) {
+    for (const { change, markdown, lock } of changes) {
+      test(`keeps ${idea}, saved on the map as it was, before drawing a change ${change}`, () => {
+        loadAt(TRIP, 1);
+        send(open);
+        typeOnTheMap(typed);
+        const from = posted.length;
+
+        send({ type: 'restore', markdown, revision: 2 });
+
+        // Saved at the revision it was typed on, which the app keeps in the map's history, never over the change.
+        const saves = postedOf('saved', from);
+        expect(saves.map((save) => ({ markdown: save.markdown, revision: save.revision, readOnly: save.state.readOnly }))).toEqual([{ markdown: saved, revision: 1, readOnly: null }]);
+        // Before the map can only be shown: the app takes no save from a map that can't be changed.
+        const order = posted.slice(from).map((message) => (message.type === 'state' ? `state ${message.state.readOnly}` : message.type));
+        expect(order.indexOf('saved')).toBeLessThan(order.indexOf(`state ${lock}`));
+        expect(order).toContain('editorClose');
+        // The change is what's drawn, and only shown.
+        expect(postedOf('state', from).at(-1)?.state.readOnly).toBe(lock as MapState['readOnly']);
+        expect(ideasSince(from)).toEqual(['Trip', 'Kyoto']);
+      });
+    }
+  }
+
+  test('keeps what was typed into an idea the change took away, saved on the map as it was', () => {
+    loadAt(TRIP, 1);
+    send({ type: 'edit', id: 'tokio' });
+    typeOnTheMap('Tokyo');
+    const from = posted.length;
+
+    send({ type: 'restore', markdown: '# Trip\n- Kyoto\n', revision: 2 });
+
+    expect(postedOf('saved', from).map((save) => ({ markdown: save.markdown, revision: save.revision }))).toEqual([{ markdown: '# Trip\n- Tokyo\n', revision: 1 }]);
+    expect(ideasSince(from)).toEqual(['Trip', 'Kyoto']);
+  });
+
+  test('keeps a new idea typed under an idea the change moved, saved on the map as it was', () => {
+    loadAt('# Trip\n- Tokio\n- Japan\n', 1);
+    send({ type: 'editNew', parentId: 'tokio' });
+    typeOnTheMap('Shibuya');
+    const from = posted.length;
+
+    send({ type: 'restore', markdown: '# Trip\n- Japan\n  - Tokio\n', revision: 2 });
+
+    expect(postedOf('saved', from).map((save) => ({ markdown: save.markdown, revision: save.revision }))).toEqual([{ markdown: '# Trip\n- Tokio\n  - Shibuya\n- Japan\n', revision: 1 }]);
+    expect(ideasSince(from)).toEqual(['Trip', 'Japan', 'Tokio']);
+  });
+
+  for (const { idea, open, typed, saved } of typings) {
+    for (const reason of ['deleted', 'storage'] as const) {
+      test(`keeps ${idea}, saved before the map is locked as ${reason}`, () => {
+        loadAt(TRIP, 1);
+        send(open);
+        typeOnTheMap(typed);
+        const from = posted.length;
+
+        send({ type: 'lock', reason });
+
+        // Saved on the map as it is, which the app keeps where it can; before the map can only be shown.
+        const saves = postedOf('saved', from);
+        expect(saves.map((save) => ({ markdown: save.markdown, revision: save.revision, readOnly: save.state.readOnly }))).toEqual([{ markdown: saved, revision: 1, readOnly: null }]);
+        const order = posted.slice(from).map((message) => (message.type === 'state' ? `state ${message.state.readOnly}` : message.type));
+        expect(order.indexOf('saved')).toBeLessThan(order.indexOf(`state ${reason}`));
+        expect(order).toContain('editorClose');
+        send({ type: 'lock', reason: null });
+      });
+    }
+  }
+
+  test('goes on being typed into a change that leaves its idea where it was, and is saved on that change', () => {
+    loadAt(TRIP, 1);
+    send({ type: 'edit', id: 'tokio' });
+    typeOnTheMap('Tokyo');
+    const from = posted.length;
+
+    send({ type: 'restore', markdown: '# Trip\n- Tokio\n- Kyoto\n', revision: 2 });
+
+    // The field stays open on the change, with what was typed in it.
+    expect(postedOf('saved', from)).toEqual([]);
+    expect(postedOf('editorClose', from)).toEqual([]);
+    expect(document.querySelector('textarea')?.value).toBe('Tokyo');
+
+    send({ type: 'stopEditing', save: true });
+
+    expect(postedOf('saved', from).map((save) => ({ markdown: save.markdown, revision: save.revision }))).toEqual([{ markdown: '# Trip\n- Tokyo\n- Kyoto\n', revision: 2 }]);
+  });
+});
+
+describe('pasting', () => {
+  test('pastes markdown written elsewhere whole, even with a heading-like line in its note\'s code', () => {
+    load('# Trip\n- Lisbon\n');
+    const from = posted.length;
+
+    send({ type: 'paste', job: 81, parentId: 'trip', text: '# Flights\nBook early.\n\n```\n# not a heading\n```\n\n## Tokyo\n' });
+
+    expect(postedOf('result', from).find((result) => result.job === 81)?.value).toEqual({ count: 2 });
+    const saved = postedOf('saved', from).at(-1)?.markdown ?? '';
+    expect(saved).toContain('Flights');
+    expect(saved).toContain('# not a heading');
+    expect(saved).toContain('Tokyo');
+  });
+
+  test('saves nothing when nothing was added: no change to keep, nor to undo', () => {
+    load('# Trip\n- Lisbon\n');
+    const from = posted.length;
+
+    // Markdown with no ideas in it, a drop that brought none, and the map's center duplicated, which has nowhere to go.
+    send({ type: 'paste', job: 82, parentId: 'trip', text: '---\ntags: [home]\n---\n' });
+    send({ type: 'addNodes', job: 83, parentId: 'trip', nodes: [] });
+    send({ type: 'duplicate', id: 'trip' });
+
+    expect(postedOf('result', from).map((result) => [result.job, result.value])).toEqual([[82, { count: 0 }], [83, { count: 0 }]]);
+    expect(postedOf('saved', from)).toEqual([]);
+
+    send({ type: 'addNodes', job: 84, parentId: 'trip', nodes: [{ text: 'Porto' }] });
+    expect(postedOf('saved', from).map((saved) => saved.added)).toEqual(['porto']);
+  });
+});
+
+describe('copying', () => {
+  test('copies a deep branch as an outline nested as deep as an outline goes, deeper ideas listed there', () => {
+    // A branch forty ideas deep, each under the one before.
+    load(['# Top', ...Array.from({ length: 40 }, (_, step) => `${'  '.repeat(step)}- Step ${step + 1}`), ''].join('\n'));
+    const from = posted.length;
+
+    send({ type: 'copy', job: 91, id: 'top' });
+
+    const copied = postedOf('result', from).find((result) => result.job === 91)?.value as { text: string };
+    const lines = copied.text.split('\n');
+    expect(lines).toHaveLength(41);
+    expect(lines.slice(1, 34)).toEqual(Array.from({ length: 33 }, (_, step) => `${'  '.repeat(step)}- Step ${step + 1}`));
+    expect(lines.slice(34)).toEqual(Array.from({ length: 7 }, (_, step) => `${'  '.repeat(32)}- Step ${step + 34}`));
   });
 });
 
@@ -249,13 +680,6 @@ describe('a map presented, or made into a path', () => {
 });
 
 describe('an idea brought up close, to sketch on', () => {
-  /** Waits until `ready` says so, a frame at a time, for as long as a flight takes and then some. */
-  const until = async (ready: () => boolean): Promise<void> => {
-    for (let waited = 0; waited < 3000 && !ready(); waited += 16) {
-      await Bun.sleep(16);
-    }
-  };
-
   test('says where it starts, where it rests in the room the app leaves, and when the map is back', async () => {
     load('# Plans\n- Savings\n- Errands\n- Chores\n');
     const from = posted.length;

@@ -3,6 +3,8 @@ package com.hyuchia.orbit.nearby
 import com.hyuchia.orbit.FileWords
 import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.data.OutgoingCopies
+import com.hyuchia.orbit.data.chosenAsTheyAreIn
+import com.hyuchia.orbit.data.writeAtomically
 import com.hyuchia.orbit.media.MediaKind
 import com.hyuchia.orbit.page.AppTheme
 import com.hyuchia.orbit.page.AudienceCommand
@@ -209,6 +211,24 @@ class BrowserPresentingTest {
     }
 
     @Test
+    fun theRoomGetsAHeicPictureAsTheJpegMadeOfItWhichBrowsersDraw() {
+        val media = File(mapFolder, "media").apply { mkdirs() }
+        File("src/test/resources/live/iphone-live.heic").copyTo(File(media, "tower.heic"))
+        val jpeg = File(mapFolder, "tower.jpg").apply { writeText("the tower, drawn") }
+        val room = BrowserPresenting(::asset, english, mapFolder, scope, JoiningOptions(askNames = false), preferredPort = 0, policy = anyone, listenOn = { null }, clock = { now }, drawn = { file -> jpeg.takeIf { file.extension == "heic" } })
+        rooms += room
+        room.start()
+        room.audience.send(AudienceCommand.Show("# Lisbon\n## Belém\n![The tower](media/tower.heic)\n", AppTheme(dark = false, tokens = emptyMap()), focus = "lisbon"))
+
+        val browser = Browser(room.port)
+        browser.get("/${room.code}/")
+        val tower = browser.get("/${room.code}/media/tower.heic")
+        assertEquals(200, tower.status)
+        assertEquals("image/jpeg", tower.header("content-type"))
+        assertEquals("the tower, drawn", tower.body)
+    }
+
+    @Test
     fun theRoomGetsVideosWithoutWhereTheyWereFilmedStillInTheirParts() {
         val place = "+38.7139-009.1394/"
         val media = File(mapFolder, "media").apply { mkdirs() }
@@ -261,6 +281,105 @@ class BrowserPresentingTest {
         room.audience.send(AudienceCommand.End)
         ended.countDown()
         assertEquals(404, asked.get(5, TimeUnit.SECONDS).status)
+    }
+
+    @Test
+    fun aHeicPictureStillBeingDrawnAsThePresentationEndsNeverGoesEvenOnceItsShownAgain() {
+        val media = File(mapFolder, "media").apply { mkdirs() }
+        File("src/test/resources/live/iphone-live.heic").copyTo(File(media, "tower.heic"))
+        val jpeg = File(mapFolder, "tower.jpg").apply { writeText("the tower, drawn") }
+        val map = AudienceCommand.Show("# Lisbon\n## Belém\n![The tower](media/tower.heic)\n", AppTheme(dark = false, tokens = emptyMap()), focus = "lisbon")
+
+        for (showsAgain in listOf(false, true)) {
+            val drawing = CountDownLatch(1)
+            val ended = CountDownLatch(1)
+
+            // Its JPEG takes a while to draw, and the presentation ends meanwhile: a private map locks.
+            val drawn = { _: File ->
+                drawing.countDown()
+                ended.await(5, TimeUnit.SECONDS)
+                jpeg
+            }
+
+            val room = BrowserPresenting(::asset, english, mapFolder, scope, JoiningOptions(askNames = false), preferredPort = 0, policy = anyone, listenOn = { null }, clock = { now }, drawn = drawn)
+            rooms += room
+            room.start()
+            room.audience.send(map)
+            val browser = Browser(room.port)
+            browser.get("/${room.code}/")
+            val asked = CompletableFuture.supplyAsync { browser.get("/${room.code}/media/tower.heic") }
+
+            assertTrue(drawing.await(5, TimeUnit.SECONDS))
+            room.audience.send(AudienceCommand.End)
+
+            // The presenter starts again before the drawing is done: what was asked for in the one that ended still doesn't go.
+            if (showsAgain) {
+                room.audience.send(map)
+            }
+
+            ended.countDown()
+            val answer = asked.get(5, TimeUnit.SECONDS)
+            assertEquals("shown again: $showsAgain", 404, answer.status)
+            assertFalse(answer.body.contains("the tower, drawn"))
+        }
+    }
+
+    @Test
+    fun aLinkInTheMapsFolderNeverLeadsTheRoomToAFileOutsideIt() {
+        // The review's probe: the map shows a picture whose file is a link to another map's, outside this one.
+        val media = File(mapFolder, "media").apply { mkdirs() }
+        val outside = Files.createTempDirectory("orbit-outside").toFile()
+        val private = File(outside, "other-map-private.jpg").apply { writeBytes(File("src/test/resources/live/plain.jpg").readBytes()) }
+        Files.createSymbolicLink(File(media, "beach.jpg").toPath(), private.toPath())
+        val copies = OutgoingCopies(Files.createTempDirectory("orbit-outgoing").toFile())
+
+        try {
+            val room = BrowserPresenting(::asset, english, mapFolder, scope, JoiningOptions(askNames = false), preferredPort = 0, policy = anyone, listenOn = { null }, clock = { now }, outgoing = copies::of)
+            rooms += room
+            room.start()
+            room.audience.send(AudienceCommand.Show("# Outside\n\n![outside](media/beach.jpg)\n", AppTheme(dark = false, tokens = emptyMap()), focus = "outside"))
+
+            val browser = Browser(room.port)
+            browser.get("/${room.code}/")
+            assertEquals(404, browser.get("/${room.code}/media/beach.jpg").status)
+        } finally {
+            outside.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun aFileChosenToShowAsItIsGoesAsACopyOfThatVeryFileAndTheCopyGoesAsThePresentationEnds() {
+        val media = File(mapFolder, "media").apply { mkdirs() }
+        // A picture of no kind Orbit knows, which can't go clean: the presenter chose to show it as it is.
+        val picture = File(media, "beach.jpg").apply { writeText("a picture as it is, with where it was taken") }
+        val answers = chosenAsTheyAreIn(mapFolder, "beach.jpg").lasting()
+        val folder = Files.createTempDirectory("orbit-outgoing").toFile()
+        val copies = OutgoingCopies(folder, deleting = { it() })
+        val room = BrowserPresenting(::asset, english, mapFolder, scope, JoiningOptions(askNames = false), preferredPort = 0, policy = anyone, listenOn = { null }, clock = { now }, outgoing = { file -> copies.of(file, answers) }, ended = copies::forgetAsTheyAre)
+        rooms += room
+        room.start()
+        val show = AudienceCommand.Show("# Lisbon\n![The beach](media/beach.jpg)\n", AppTheme(dark = false, tokens = emptyMap()), focus = "lisbon")
+        room.audience.send(show)
+
+        // Nothing is copied until a browser asks for it.
+        assertEquals(emptyList<File>(), folder.walk().filter { it.isFile }.toList())
+        val browser = Browser(room.port)
+        browser.get("/${room.code}/")
+        val first = browser.get("/${room.code}/media/beach.jpg")
+        assertEquals(200, first.status)
+        assertEquals("a picture as it is, with where it was taken", first.body)
+        assertEquals(1, folder.walk().filter { it.isFile }.count())
+
+        // Another picture put in its place under its name isn't the one chosen: it stays on the phone.
+        writeAtomically(picture, "another picture, with where it was taken")
+        val second = browser.get("/${room.code}/media/beach.jpg")
+        assertEquals(404, second.status)
+        assertFalse(second.body.contains("another picture"))
+
+        // The presentation ends: the copy goes with it.
+        room.audience.send(AudienceCommand.End)
+        assertEquals(emptyList<File>(), folder.walk().filter { it.isFile }.toList())
+        folder.deleteRecursively()
     }
 
     @Test

@@ -14,6 +14,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
@@ -29,14 +30,24 @@ class CastAudienceTest {
     private val words = PageWords.from("en") { "" }
     private val theme = AppTheme(dark = false, tokens = emptyMap())
 
-    /** The TV's end of the channel: everything sent to it, in order. */
+    /** The TV's end of the channel: everything sent to it, in order, but what Cast says didn't reach it. */
     private class Tv : TvChannel {
         val sent = CopyOnWriteArrayList<String>()
 
+        /** Whether what's sent now doesn't reach the TV, as on a Wi-Fi that drops it: Cast says so, with this status. */
+        @Volatile
+        var failing: Int? = null
+
         override val name: String = "Living room TV"
 
-        override fun send(message: String) {
-            sent += message
+        override fun send(message: String, failed: (Int) -> Unit) {
+            val status = failing
+
+            if (status == null) {
+                sent += message
+            } else {
+                failed(status)
+            }
         }
 
         override fun listen(listener: ((String) -> Unit)?) = Unit
@@ -155,6 +166,50 @@ class CastAudienceTest {
 
         assertTrue(eventually { tv.heard().size == 3 })
         assertEquals(listOf("hello", "language", "end"), tv.heard())
+    }
+
+    @Test
+    fun `a message that doesn't reach the TV is said, and sending the presentation again mends it`() = runBlocking<Unit> {
+        val tv = Tv()
+        val audience = withContext(main) { CastAudience(tv, scope, words) { it } }
+        withContext(main) { audience.send(AudienceCommand.Show("# Trip", theme)) }
+        assertTrue(eventually { tv.heard().size == 3 })
+        assertNull(audience.trouble.value)
+
+        // A step the Wi-Fi drops: Cast says it didn't go (a network error, 7), and the presenter hears it.
+        tv.failing = 7
+        withContext(main) { audience.send(AudienceCommand.Step("lisbon", 1, 3)) }
+        assertTrue(eventually { audience.trouble.value == ScreenTrouble.Missed })
+        assertEquals(listOf("hello", "language", "show # Trip"), tv.heard())
+
+        // Back on the network, the presentation goes to the TV again, the hello and language first.
+        tv.failing = null
+
+        withContext(main) {
+            audience.loadAgain()
+            audience.send(AudienceCommand.Show("# Trip", theme))
+            audience.send(AudienceCommand.Step("lisbon", 1, 3))
+        }
+
+        assertTrue(eventually { tv.heard().size == 7 })
+        assertEquals(listOf("hello", "language", "show # Trip", "hello", "language", "show # Trip", "step"), tv.heard())
+        assertNull(audience.trouble.value)
+    }
+
+    @Test
+    fun `once the presentation is over on the TV, what doesn't reach it is no trouble`() = runBlocking<Unit> {
+        val tv = Tv()
+        val audience = withContext(main) { CastAudience(tv, scope, words) { it } }
+        assertTrue(eventually { tv.heard().size == 2 })
+        // The TV went away: the session's last messages can't reach it.
+        tv.failing = 15
+
+        withContext(main) {
+            audience.close()
+            scope.cancel()
+        }
+
+        assertNull(audience.trouble.value)
     }
 
     @Test

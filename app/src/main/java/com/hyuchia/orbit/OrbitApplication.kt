@@ -12,6 +12,8 @@ import android.os.SystemClock
 import android.os.storage.StorageManager
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.media3.common.util.Log
 import androidx.media3.common.util.UnstableApi
@@ -29,6 +31,8 @@ import com.hyuchia.orbit.data.Importer
 import com.hyuchia.orbit.data.MapEdits
 import com.hyuchia.orbit.data.MapRepository
 import com.hyuchia.orbit.data.MapTextEditor
+import com.hyuchia.orbit.data.OUTGOING_COPIES
+import com.hyuchia.orbit.data.OutgoingCopies
 import com.hyuchia.orbit.data.SettingsRepository
 import com.hyuchia.orbit.data.ThisDevice
 import com.hyuchia.orbit.data.TrashedMap
@@ -49,14 +53,22 @@ import com.hyuchia.orbit.page.PagePool
 import com.hyuchia.orbit.privacy.PrivateCopies
 import com.hyuchia.orbit.privacy.PrivateLock
 import com.hyuchia.orbit.privacy.PrivateMaps
+import com.hyuchia.orbit.privacy.callOffPicturesAsPrivateMapsLock
 import com.hyuchia.orbit.reminders.AndroidReminderAlarms
 import com.hyuchia.orbit.reminders.AndroidReminderNotices
 import com.hyuchia.orbit.reminders.IdeaToShow
 import com.hyuchia.orbit.reminders.Reminders
 import com.hyuchia.orbit.settings.MapBackups
+import com.hyuchia.orbit.study.AnswersUnsaved
+import com.hyuchia.orbit.study.StudyWrites
+import com.hyuchia.orbit.ui.ShortcutMatching
 import com.hyuchia.orbit.ui.TimeWords
+import com.hyuchia.orbit.ui.matchShortcuts
+import com.hyuchia.orbit.ui.shortcutLabels
+import com.hyuchia.orbit.widget.WidgetRedrawing
 import com.hyuchia.orbit.widget.offerWidgetPreview
 import com.hyuchia.orbit.widget.updateMapWidgets
+import com.hyuchia.orbit.widget.widgetPreviewOffers
 import com.hyuchia.orbit.widget.widgetRedraws
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -64,8 +76,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -73,6 +86,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.IOException
@@ -90,6 +104,8 @@ class AppContainer(context: Context, /** Reports of crashes, kept on the phone. 
     /** The app's strings in the language it's in, for what it says away from a screen: in the maps' files, and in messages about them. */
     override val words: Words = ResourceWords(context.applicationContext)
 
+    val settings = SettingsRepository(context)
+
     val maps = MapRepository(
         mapsDirectory,
         File(context.filesDir, "trash"),
@@ -98,11 +114,12 @@ class AppContainer(context: Context, /** Reports of crashes, kept on the phone. 
         room = { file -> room(context, file) },
         installed = installedAt(context),
         clockTrusted = ::clockMatchesNetwork,
+        syncFolder = { settings.settings.first().syncFolder },
     )
-    val settings = SettingsRepository(context)
     val pages = PagePool(context, mapsDirectory)
     override val pictures = MapPictures(pages, context.cacheDir, OrbitBuild.bundled(context)?.commit.orEmpty())
-    override val importer = Importer(maps, pages, words)
+    // A locked private map is found by its identity alone as a zip of every map comes in: a zip of guessed text tells nothing of it.
+    override val importer = Importer(maps, pages, words, locked = { map -> privateMaps.hides(map) })
 
     override val videoMaker: VideoMaker = TransformerVideoMaker(context.applicationContext)
 
@@ -144,6 +161,9 @@ class AppContainer(context: Context, /** Reports of crashes, kept on the phone. 
     /** Maps deleted from their own screen, for the home screen to offer back with Undo once it shows. */
     override val deletedMaps = Channel<TrashedMap>(Channel.CONFLATED)
 
+    /** Study mode's answers on their way to the maps' details: one the storage can't take is tried again while Orbit runs. */
+    override val studyWrites = StudyWrites(applicationScope, maps::changeStudy) { if (maps.writable.value) AnswersUnsaved.Storage else AnswersUnsaved.Newer }
+
     /** New versions, for the copies no store updates: the APK from the website and GitHub. */
     val updates = Updates(context, settings)
 
@@ -152,11 +172,19 @@ class AppContainer(context: Context, /** Reports of crashes, kept on the phone. 
 
     override val privateLock: PrivateLock get() = privateMaps.lock
 
-    /** Files shared to Orbit for the map that's open, which its screen adds to its idea in focus. */
-    val sharedFiles = MutableSharedFlow<SharedFiles>(extraBufferCapacity = 4)
+    /** Files or text shared to Orbit for the map that's open, which its screen adds to its idea in focus once the map's ready. */
+    val sharedFiles = PendingShares()
+
+    /** What comes into Orbit, done in the app's scope rather than a screen's (see [Intake]). */
+    val intake = Intake(maps, importer, context.contentResolver, applicationScope, words, ImportRequests(File(context.filesDir, "requests")))
 
     /** Copies of private maps' files opened in other apps, deleted as private maps lock. */
-    val privateCopies = PrivateCopies(applicationScope, privateMaps.lock.newlyLocked, File(context.cacheDir, "exports"))
+    val privateCopies = PrivateCopies(
+        applicationScope,
+        privateMaps.lock.newlyLocked,
+        File(context.cacheDir, "exports"),
+        servedAsTheyAre = OutgoingCopies.asTheyAreIn(File(context.cacheDir, OUTGOING_COPIES)),
+    )
 
     /** Ideas' dates, reminding on this device as they come. */
     val reminders = Reminders(File(context.filesDir, "reminders.json"), AndroidReminderAlarms(context.applicationContext), AndroidReminderNotices(context.applicationContext, words))
@@ -174,13 +202,68 @@ class AppContainer(context: Context, /** Reports of crashes, kept on the phone. 
     override fun timeWords(): TimeWords = TimeWords.of(application)
 
     init {
+        // What was answered but not taken in, as Orbit stopped, is taken in now.
+        intake.resume()
+
         // A private map shown to computers stops being served as it locks.
         nearby.hidden = { id -> maps.summary(id)?.let { privateMaps.view.value.hides(it) } == true }
+
+        // Pictures of private maps being drawn as they lock are called off, on the main thread, as the pages' work is.
+        CoroutineScope(applicationScope.coroutineContext + Dispatchers.Main).callOffPicturesAsPrivateMapsLock(privateMaps.lock, maps::summary, pages::revokeJobs)
     }
 }
 
-/** Files shared to Orbit for map `mapId`, open as they came: they join its idea in focus. */
-data class SharedFiles(val mapId: String, val uris: List<Uri>)
+/**
+ * Files shared to Orbit for map `mapId`, open as they came, or `text`
+ * shared to an idea with no file: they join its idea in focus, the files
+ * among its files, the text as ideas under it.
+ */
+data class SharedFiles(val mapId: String, val uris: List<Uri>, val text: String? = null)
+
+/**
+ * Files and text shared to Orbit for maps that are open ([SharedFiles]),
+ * each waiting until its map's screen has the map ready to take it, however
+ * soon it came: before the screen began to listen, as Android brings Orbit
+ * back with a share, or while the map's page is still loading. Each is
+ * taken once, and goes with its map when it closes.
+ */
+class PendingShares {
+    private val pending = MutableStateFlow<List<SharedFiles>>(emptyList())
+    private val offered = MutableStateFlow(0L)
+
+    /** What waits, oldest first. */
+    val waiting: StateFlow<List<SharedFiles>> = pending.asStateFlow()
+
+    /**
+     * How many shares were ever offered, which changes with each, even one
+     * like a share taken a moment before: a screen that hears it takes what
+     * waits for its map, however the changes of [waiting] reached it.
+     */
+    val offers: StateFlow<Long> = offered.asStateFlow()
+
+    /** `shared` waits for its map. */
+    fun offer(shared: SharedFiles) {
+        pending.update { it + shared }
+        offered.update { it + 1 }
+    }
+
+    /** What waits for map `id`, oldest first, which waits no more. */
+    fun take(id: String): List<SharedFiles> {
+        var taken = emptyList<SharedFiles>()
+
+        pending.update { list ->
+            taken = list.filter { it.mapId == id }
+            list.filterNot { it.mapId == id }
+        }
+
+        return taken
+    }
+
+    /** What waits for maps that aren't among `open` any more goes. */
+    fun keepFor(open: Set<String>) {
+        pending.update { list -> list.filter { it.mapId in open } }
+    }
+}
 
 class OrbitApplication : Application(), SingletonImageLoader.Factory, WorkConfiguration.Provider {
     lateinit var container: AppContainer
@@ -189,6 +272,12 @@ class OrbitApplication : Application(), SingletonImageLoader.Factory, WorkConfig
     private var nightMode = Configuration.UI_MODE_NIGHT_UNDEFINED
     private var locales = LocaleList.getEmptyLocaleList()
     private var fontScale = 1f
+
+    /** The home screen's widgets, drawn again as the maps change, and as Orbit comes back after a drawing failed. */
+    private val widgetRedrawing = WidgetRedrawing(draw = { updateMapWidgets(this) })
+
+    /** The launcher's shortcuts to maps, matched to the maps as they change, and as Orbit comes back after the launcher refused. */
+    private val shortcutMatching = ShortcutMatching { labels -> matchShortcuts(this, labels) }
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
@@ -208,9 +297,20 @@ class OrbitApplication : Application(), SingletonImageLoader.Factory, WorkConfig
         locales = resources.configuration.locales
         fontScale = resources.configuration.fontScale
         keepWidgetsCurrent()
+        keepShortcutsCurrent()
         keepRemindersCurrent()
         container.folderSync.start(ProcessLifecycleOwner.get().lifecycle)
         container.privateMaps.start(ProcessLifecycleOwner.get().lifecycle)
+
+        // Back on screen, where Android takes an app's updates again: widgets and shortcuts left behind catch up.
+        ProcessLifecycleOwner.get().lifecycle.addObserver(
+            object : DefaultLifecycleObserver {
+                override fun onStart(owner: LifecycleOwner) {
+                    container.applicationScope.launch { widgetRedrawing.cameBack() }
+                    container.applicationScope.launch { shortcutMatching.cameBack() }
+                }
+            },
+        )
     }
 
     /**
@@ -260,7 +360,7 @@ class OrbitApplication : Application(), SingletonImageLoader.Factory, WorkConfig
             nightMode = night
             locales = newConfig.locales
             fontScale = newConfig.fontScale
-            container.applicationScope.launch { updateMapWidgets(this@OrbitApplication) }
+            container.applicationScope.launch { widgetRedrawing.redraw() }
         }
     }
 
@@ -286,16 +386,38 @@ class OrbitApplication : Application(), SingletonImageLoader.Factory, WorkConfig
      * Reads the maps' reminders again whenever a map's text changes, wherever
      * the change came from, and as reminders are turned on or off. Without the
      * maps read (Orbit started for an alarm, say), the reminders kept from the
-     * last reading ring.
+     * last reading ring. A map made private has its reminders that show say
+     * nothing of it at once, as its widgets do.
      */
     private fun keepRemindersCurrent() {
         container.applicationScope.launch {
+            // The private maps as the reminders were last read: one made private since is read at once.
+            var privateRead: Set<String>? = null
+
             combine(container.maps.maps.filterNotNull(), container.settings.settings.map { it.reminders }.distinctUntilChanged()) { maps, on -> maps to on }
                 .collectLatest { (maps, on) ->
+                    val private = maps.filter { it.metadata.isPrivate }.mapTo(HashSet()) { it.id }
+
                     // Once the maps are still: a change meanwhile starts this over.
-                    delay(REMINDERS_SETTLE)
+                    if (privateRead?.containsAll(private) != false) {
+                        delay(REMINDERS_SETTLE)
+                    }
+
                     container.reminders.follow(maps, { id -> runCatching { container.maps.read(id) }.getOrNull() }, on)
+                    privateRead = private
                 }
+        }
+    }
+
+    /**
+     * Keeps the launcher's shortcuts to maps in line with the maps, whatever
+     * changed them: renamed on Home, deleted or restored, by Orbit or in the
+     * folder maps are kept in, made private or given a cover ([matchShortcuts]);
+     * what the launcher refused goes again as Orbit comes back on screen.
+     */
+    private fun keepShortcutsCurrent() {
+        container.applicationScope.launch {
+            shortcutMatching.follow(container.maps.maps.filterNotNull().map { shortcutLabels(resources, it) })
         }
     }
 
@@ -303,17 +425,18 @@ class OrbitApplication : Application(), SingletonImageLoader.Factory, WorkConfig
      * Draws the maps on the home screen again once a change settles: an edit,
      * ideas caught, a map renamed or deleted; at once as a map becomes
      * private; and when the wallpaper's colors are turned on or off, which
-     * the pictures are drawn in. Once the maps are read, the launcher's list
-     * of widgets gets a preview of them.
+     * the pictures are drawn in. A drawing that fails is tried again, and
+     * once more as Orbit comes back on screen ([WidgetRedrawing]). Once the
+     * maps are read, and again as which are private changes, the launcher's
+     * list of widgets gets a preview of them ([widgetPreviewOffers]).
      */
     private fun keepWidgetsCurrent() {
         container.applicationScope.launch {
-            container.maps.maps.filterNotNull().first()
-            runCatching { offerWidgetPreview(this@OrbitApplication) }
+            widgetPreviewOffers(container.maps.maps).collectLatest { offerWidgetPreview(this@OrbitApplication) }
         }
 
         container.applicationScope.launch {
-            widgetRedraws(container.maps.maps, WIDGET_SETTLE).collect { updateMapWidgets(this@OrbitApplication) }
+            widgetRedrawing.follow(widgetRedraws(container.maps.maps, WIDGET_SETTLE))
         }
 
         container.applicationScope.launch {
@@ -321,7 +444,7 @@ class OrbitApplication : Application(), SingletonImageLoader.Factory, WorkConfig
                 .map { it.dynamicColor }
                 .distinctUntilChanged()
                 .drop(1)
-                .collect { updateMapWidgets(this@OrbitApplication) }
+                .collect { widgetRedrawing.redraw() }
         }
     }
 }

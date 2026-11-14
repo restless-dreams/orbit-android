@@ -233,7 +233,7 @@ private fun read(event: MotionEvent, session: SketchSession, view: View, predict
             val index = event.actionIndex
             val tool = toolOf(event, index)
             val big = tool == TouchTool.Finger && maxOf(event.getTouchMajor(index), event.getToolMajor(index)) > palm
-            session.touch(SketchTouch.Down(event.getPointerId(index), tool, sample(event, index, null), palm = big))
+            session.touch(SketchTouch.Down(event.getPointerId(index), tool, sample(event, index, null), palm = big, first = event.actionMasked == MotionEvent.ACTION_DOWN))
         }
         MotionEvent.ACTION_MOVE -> {
             val predicted = predictor.predict()

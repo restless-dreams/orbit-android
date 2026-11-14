@@ -105,7 +105,12 @@ class VoiceRecorder(private val context: Context, internal val file: File, priva
     private val audio = context.getSystemService(AudioManager::class.java)
     private var focus: AudioFocusRequest? = null
 
-    /** Starts a take, or goes on with a paused one. False when the microphone couldn't be had. */
+    /**
+     * Starts a take, or goes on with a paused one. False when the microphone
+     * couldn't be had, or the phone's sound: during a call, or while another
+     * app keeps it, nothing is recorded, and a take paused or done stays as
+     * it is, which [problem] says.
+     */
     fun record(): Boolean {
         problem = null
 
@@ -113,13 +118,19 @@ class VoiceRecorder(private val context: Context, internal val file: File, priva
             RecorderPhase.Paused -> {
                 val recorder = recorder ?: return false
 
+                if (!takeFocus()) {
+                    problem = R.string.audio_sound_is_taken
+                    return false
+                }
+
                 return try {
-                    takeFocus()
                     recorder.resume()
                     running()
                     true
-                } catch (failed: IllegalStateException) {
-                    fail(failed)
+                } catch (failed: RuntimeException) {
+                    // An IllegalStateException, or a plain RuntimeException ("resume failed.") for any other error of the phone's.
+                    Logs.warn("OrbitRecorder", "The take couldn't go on", failed)
+                    stopped()
                     false
                 }
             }
@@ -127,9 +138,14 @@ class VoiceRecorder(private val context: Context, internal val file: File, priva
             RecorderPhase.Ready, RecorderPhase.Done -> Unit
         }
 
+        if (!takeFocus()) {
+            problem = R.string.audio_sound_is_taken
+            return false
+        }
+
         // A take done and then started over: the last one goes, and so do
         // takes Orbit left behind when it closed while recording.
-        discard()
+        forget()
         file.parentFile?.mkdirs()
         file.parentFile?.listFiles { other -> other != file }?.forEach { it.delete() }
         val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(context) else @Suppress("DEPRECATION") MediaRecorder()
@@ -148,13 +164,10 @@ class VoiceRecorder(private val context: Context, internal val file: File, priva
 
             recorder.setOnErrorListener { _, what, extra ->
                 Logs.warn("OrbitRecorder", "The recorder stopped: $what, $extra")
-                problem = R.string.audio_recording_failed
-                release()
-                phase = if (file.isFile && file.length() > 0) RecorderPhase.Done else RecorderPhase.Ready
+                stopped()
             }
 
             recorder.prepare()
-            takeFocus()
             recorder.start()
             this.recorder = recorder
             levels.clear()
@@ -184,8 +197,10 @@ class VoiceRecorder(private val context: Context, internal val file: File, priva
 
         try {
             recorder.pause()
-        } catch (failed: IllegalStateException) {
-            fail(failed)
+        } catch (failed: RuntimeException) {
+            // An IllegalStateException, or a plain RuntimeException ("pause failed.") for any other error of the phone's.
+            Logs.warn("OrbitRecorder", "The take couldn't pause", failed)
+            stopped()
             return
         }
 
@@ -249,6 +264,12 @@ class VoiceRecorder(private val context: Context, internal val file: File, priva
     /** Throws the take away. */
     fun discard() {
         release()
+        forget()
+    }
+
+    /** The take's file and what's kept of it go; the microphone and the phone's sound are as they were. */
+    private fun forget() {
+        clock?.cancel()
         file.delete()
         levels.clear()
         elapsed = 0L
@@ -290,8 +311,12 @@ class VoiceRecorder(private val context: Context, internal val file: File, priva
         }
     }
 
-    /** The phone's sound, for the take: music and other sounds pause, and a call pauses the take. */
-    private fun takeFocus() {
+    /**
+     * The phone's sound, for the take: music and other sounds pause, and a
+     * call pauses the take. False when the phone keeps it for a call, or
+     * another app that won't let it go.
+     */
+    private fun takeFocus(): Boolean {
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             .setOnAudioFocusChangeListener { change ->
@@ -301,8 +326,13 @@ class VoiceRecorder(private val context: Context, internal val file: File, priva
             }
             .build()
 
-        focus = request
-        audio?.requestAudioFocus(request)
+        val granted = audio?.requestAudioFocus(request)?.let { it == AudioManager.AUDIOFOCUS_REQUEST_GRANTED } ?: true
+
+        if (granted) {
+            focus = request
+        }
+
+        return granted
     }
 
     private fun giveFocus() {
@@ -310,6 +340,32 @@ class VoiceRecorder(private val context: Context, internal val file: File, priva
         focus = null
     }
 
+    /**
+     * The recorder stopped partway through a take, on an error of its own
+     * or as it paused or went on: what it recorded so far stays, done, to
+     * listen to and save, or to record over, and [problem] says it stopped.
+     * Only a take too short to hear goes, as [finish] has it: its file holds
+     * a header from the start, so it's never empty.
+     */
+    private fun stopped() {
+        problem = R.string.audio_recording_failed
+
+        if (phase == RecorderPhase.Recording) {
+            before += SystemClock.elapsedRealtime() - since
+        }
+
+        elapsed = before
+        // Stopping it ends the take's file, as Finish does, and lets the microphone and the phone's sound go.
+        release()
+
+        if (elapsed >= SHORTEST_TAKE_MILLISECONDS && file.isFile && file.length() > 0) {
+            phase = RecorderPhase.Done
+        } else {
+            forget()
+        }
+    }
+
+    /** A take couldn't start: nothing of it stays, and [problem] says so. */
     private fun fail(failed: Exception) {
         Logs.warn("OrbitRecorder", "Couldn't record", failed)
         problem = R.string.audio_recording_failed

@@ -142,6 +142,23 @@ describe('a second screen', () => {
     seeking.mockRestore();
   });
 
+  test('a video moved before it knows its length opens again from there, rather than go back to where it opened', () => {
+    const seeking = spyOn(OrbitSVGRenderer.prototype, 'seekMedia');
+    send({ type: 'media', id: 'tram-28', kind: 'video', playing: true, at: 40 });
+    expect(opening).toHaveBeenLastCalledWith('tram-28', { kind: 'video', autoplay: true, startAt: 40 });
+
+    // Started over at once, before the video has said anything of itself.
+    send({ type: 'seek', at: 0 });
+    expect(opening).toHaveBeenLastCalledWith('tram-28', { kind: 'video', autoplay: true, startAt: undefined });
+    expect(seeking).not.toHaveBeenCalled();
+
+    // Once it knows its length, a move moves it where it is.
+    video(playing(), { time: 0 }, 'loadedmetadata');
+    send({ type: 'seek', at: 20 });
+    expect(seeking).toHaveBeenCalledWith(20);
+    seeking.mockRestore();
+  });
+
   test('goes back to the map as the presenter steps on, and says nothing more of that video', async () => {
     const element = playing();
     const before = reports().length;

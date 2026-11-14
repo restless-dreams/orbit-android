@@ -39,5 +39,17 @@ class FolderNotesTest {
         // A private map the sync noted before it went to the trash, say, is in the notes' own list.
         assertTrue(FolderNotes(restored = listOf("Health"), private = listOf("Health")).namesPrivateMaps(listOf("Health"), privateTitles, ::quoted))
         assertTrue(FolderNotes(large = listOf("Health.md"), private = listOf("Health.md")).namesPrivateMaps(listOf("Health.md"), privateTitles, ::quoted))
+        // A map that came in private, as the sync couldn't tell it from a private map's file, is one.
+        assertTrue(FolderNotes(cameInPrivate = listOf("Diary"), private = listOf("Diary")).namesPrivateMaps(listOf("Diary"), privateTitles, ::quoted))
+    }
+
+    @Test
+    fun `maps that came in private are noted, read away, and left out while private maps hide`() {
+        val notes = FolderNotes(cameInPrivate = listOf("Diary"), private = listOf("Diary"))
+        assertFalse(notes.isEmpty)
+        assertEquals(FolderNotes(cameInPrivate = listOf("Diary", "Plans"), private = listOf("Diary", "Plans")), notes + FolderNotes(cameInPrivate = listOf("Plans"), private = listOf("Plans")))
+        assertTrue((notes - FolderNotes(cameInPrivate = listOf("Diary"))).isEmpty)
+        assertEquals(emptyList<String>(), notes.shown(concealing = true, hiddenMap = { it == "Diary" }, hiddenFile = { false }).cameInPrivate)
+        assertEquals(listOf("Diary"), notes.shown(concealing = false, hiddenMap = { it == "Diary" }, hiddenFile = { false }).cameInPrivate)
     }
 }

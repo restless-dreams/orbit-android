@@ -34,3 +34,26 @@ export const mergedMedia = (current: unknown, change: Record<string, unknown>): 
 
   return withoutNulls({ ...own, ...change });
 };
+
+/** The file a node's picture, video, sound or page is: its `src`, or undefined when it has none. */
+const sourceOf = (value: unknown): string | undefined => {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (value !== null && typeof value === 'object' && typeof (value as Record<string, unknown>).src === 'string') {
+    return (value as Record<string, unknown>).src as string;
+  }
+
+  return undefined;
+};
+
+/**
+ * Whether `node` still has the files a change from the app was made for:
+ * for each key of `onto` (`image`, `video`, `audio` or `embed`), the file
+ * it names (its `src`), or none for null. A live photo's motion copied in
+ * for a picture that was replaced meanwhile isn't given to the new one.
+ */
+export const stillOnto = (node: object | null, onto: Record<string, string | null>): boolean => {
+  return Object.entries(onto).every(([key, src]) => sourceOf((node as Record<string, unknown> | null)?.[key]) === (src ?? undefined));
+};

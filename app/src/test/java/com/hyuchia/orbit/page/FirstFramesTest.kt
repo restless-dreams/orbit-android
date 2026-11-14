@@ -49,6 +49,16 @@ class FirstFramesTest {
     }
 
     @Test
+    fun `without animations, only a HEIC or HEIF picture is made again, as for the audience's screens`() {
+        val renditions = FirstFrames(File(folder, "frames"), drawn = { file -> "jpeg of ${file.name}".toByteArray() }) { error("Not for the audience's screens") }
+        val heic = File("src/test/resources/live/iphone-live.heic").copyTo(File(media, "picture-1.heic"))
+
+        assertArrayEquals("jpeg of picture-1.heic".toByteArray(), renditions.of(heic, animations = false)!!.readBytes())
+        assertNull(renditions.of(picture("orbit.gif"), animations = false))
+        assertNull(renditions.standIn(picture("orbit.webp"), animations = false))
+    }
+
+    @Test
     fun `an animated GIF or WebP goes as its first frame, made once`() {
         val gif = picture("orbit.gif")
         val webp = picture("orbit.webp")

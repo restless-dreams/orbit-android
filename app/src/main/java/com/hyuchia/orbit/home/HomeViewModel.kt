@@ -1,5 +1,6 @@
 package com.hyuchia.orbit.home
 
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hyuchia.orbit.AppContainer
@@ -17,13 +18,17 @@ import com.hyuchia.orbit.privacy.conceals
 import com.hyuchia.orbit.ui.foldCase
 import com.hyuchia.orbit.ui.searchWords
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChangedBy
@@ -59,6 +64,17 @@ internal fun MapSummary.hasTag(tag: String): Boolean = outline.tags.any { MapTag
 internal fun shownTag(tags: List<TagCount>, picked: String?): String? =
     picked?.let { tag -> tags.firstOrNull { MapTags.key(it.name) == MapTags.key(tag) }?.name }
 
+/** The tags Home offers: those of the maps `privacy` shows, a locked private map's left out, as its tags give it away. */
+internal fun openTags(maps: List<MapSummary>, privacy: PrivateView): List<TagCount> = tagCounts(maps.filterNot(privacy::hides))
+
+/**
+ * The tag a new map starts with, as private maps show this very moment
+ * (`privacy`): the one whose maps Home shows (`picked`), as the maps
+ * that show spell it. One only locked private maps have gives a new map
+ * nothing, as Home shows every map then.
+ */
+internal fun newMapTag(maps: List<MapSummary>, picked: String?, privacy: PrivateView): String? = shownTag(openTags(maps, privacy), picked)
+
 /**
  * The tag whose maps Home shows once `from` was renamed `to` in every map,
  * or taken out of them (`to` null), while `shown` was: the maps shown follow
@@ -72,7 +88,8 @@ internal fun shownAfterRename(shown: String?, from: String, to: String?, stayed:
  * What Home says of the maps it shows that kept a tag renamed or taken out
  * in every map, `kept`, each with why: one is named, unless it's private,
  * and several are counted. The maps can only be read here (`readOnly`, as a
- * newer Orbit keeps them) says so alone. Null when every map changed.
+ * newer Orbit keeps them) says so alone, and a page that couldn't make the
+ * change says why it couldn't. Null when every map changed.
  */
 internal fun keptTagMessage(kept: List<Pair<MapSummary, MapEditResult>>, words: Words, readOnly: Boolean): String? {
     if (kept.isEmpty()) {
@@ -82,16 +99,30 @@ internal fun keptTagMessage(kept: List<Pair<MapSummary, MapEditResult>>, words: 
     val why = kept.map { it.second }
     val named = kept.singleOrNull()?.first?.takeUnless { it.metadata.isPrivate }?.title
     val count = kept.size
+    val page = why.firstNotNullOfOrNull { it as? MapEditResult.PageFailed }?.let { sentence(it.reason) }
 
     return when {
         why.all { it == MapEditResult.Newer || it == MapEditResult.Unreadable } ->
             named?.let { words.string(R.string.home_tag_stays_on_map_only_shown, it) } ?: words.plural(R.plurals.home_tag_left_on_maps, count, count)
         readOnly && MapEditResult.Refused in why -> words.string(R.string.data_newer_version_keeps_maps)
+        page != null -> named?.let { words.string(R.string.home_tag_stays_on_map_page_failed, it, page) } ?: words.plural(R.plurals.home_tag_stays_on_maps_page_failed, count, count, page)
         MapEditResult.NotWritten in why ->
             named?.let { words.string(R.string.home_tag_stays_on_map_not_saved, it) } ?: words.plural(R.plurals.home_tag_stays_on_maps_not_saved, count, count)
         else -> named?.let { words.string(R.string.home_tag_stays_on_map_not_changed, it) } ?: words.plural(R.plurals.home_tag_stays_on_maps_not_changed, count, count)
     }
 }
+
+/**
+ * What Home says when the page couldn't make a change from a map's card: what didn't happen (`notMade`, as
+ * [R.string.home_map_not_renamed]), then why, as the page said it: a WebView too old to draw maps, say.
+ */
+internal fun notMadeMessage(@StringRes notMade: Int, failed: MapEditResult.PageFailed, words: Words): String = words.string(notMade, sentence(failed.reason))
+
+/**
+ * Why a page couldn't make a change, as the sentence ending Home's message, which puts its own full stop after it:
+ * the page's reasons end with one or not ("The page didn't answer"; "… Update it from your app store.").
+ */
+private fun sentence(reason: String): String = reason.trim().trimEnd('.')
 
 data class HomeState(
     val loading: Boolean = true,
@@ -139,6 +170,14 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     /** Why something asked of the maps didn't happen, to say on screen: a map that couldn't be added, say. */
     val problems: Flow<String> = problemMessages.receiveAsFlow()
 
+    private val unkeptTags = MutableSharedFlow<String>(extraBufferCapacity = 8)
+
+    /**
+     * The maps whose new tags weren't kept, by id, as [problems] says why: a map's tags sheet shows its tags as they
+     * are again. Heard only while a sheet listens: one that opens later shows the file's tags anyway.
+     */
+    val tagsNotKept: Flow<String> = unkeptTags.asSharedFlow()
+
     val state: StateFlow<HomeState> = homeStates(maps.maps, search, container.settings.settings, container.shownTag, container.privateMaps.view)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeState())
 
@@ -165,11 +204,13 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     /**
-     * The tags a new map starts with: the one whose maps Home shows. Read
-     * from the app rather than [state], which only follows the maps while a
-     * screen shows them: the screen that starts maps doesn't.
+     * The tags a new map starts with: the one whose maps Home shows, unless
+     * only private maps locked now have it ([newMapTag]). Read from the app,
+     * as the map is made, rather than [state], which only follows the maps
+     * while a screen shows them (the screen that starts maps doesn't), and
+     * the lock a moment late.
      */
-    private fun newMapTags(): List<String> = listOfNotNull(shownTag(tagCounts(maps.maps.value.orEmpty()), container.shownTag.value))
+    private fun newMapTags(): List<String> = listOfNotNull(newMapTag(maps.maps.value.orEmpty(), container.shownTag.value, container.privateMaps.view.value))
 
     /** Adds a map with `add`, then hands `then` its id; when it can't be added (a newer Orbit keeps the maps, a full phone), [problems] says why. */
     private suspend fun added(add: suspend () -> String, then: (String) -> Unit) {
@@ -184,7 +225,15 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun setTags(id: String, tags: List<String>) {
-        viewModelScope.launch { said(container.edits.setTags(id, tags)) }
+        viewModelScope.launch {
+            val result = container.edits.setTags(id, tags)
+
+            if (result != MapEditResult.Written && result != MapEditResult.Missing) {
+                unkeptTags.emit(id)
+            }
+
+            said(result, R.string.home_map_tags_not_changed)
+        }
     }
 
     /** Renames a tag in every map; the maps shown stay the same, unless some kept it (see [shownAfterRename]). */
@@ -212,16 +261,19 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
                 return@launch
             }
 
-            said(copy.result)
+            said(copy.result, R.string.home_map_not_copied)
         }
     }
 
     fun rename(id: String, title: String) {
-        viewModelScope.launch { said(container.edits.rename(id, title)) }
+        viewModelScope.launch { said(container.edits.rename(id, title), R.string.home_map_not_renamed) }
     }
 
-    /** Says why a change from Home left a map as it was, when it did: [problems] says it. */
-    private suspend fun said(result: MapEditResult) {
+    /**
+     * Says why a change from Home left a map as it was, when it did: [problems] says it. A page that couldn't make
+     * it says why after what didn't happen (`notMade`, which takes the reason).
+     */
+    private suspend fun said(result: MapEditResult, @StringRes notMade: Int) {
         val words = container.words
 
         val why = when (result) {
@@ -230,6 +282,7 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
             MapEditResult.KeptChanging -> words.string(R.string.home_map_kept_changing)
             MapEditResult.Refused -> maps.whyNotChanged()
             MapEditResult.NotWritten -> maps.whyNotWritten()
+            is MapEditResult.PageFailed -> notMadeMessage(notMade, result, words)
             MapEditResult.Written, MapEditResult.Missing -> null
         }
 
@@ -263,21 +316,18 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
         container.privateMaps.lock.lock()
     }
 
-    /** Moves a map to the trash, for [restore] to bring back. */
+    /** Moves a map to the trash, for [restore] to bring back; null when it couldn't, and the map is as it was. */
     suspend fun delete(id: String): TrashedMap? {
         container.pictures.forget(id)
         return maps.delete(id)
     }
 
-    fun restore(item: TrashedMap) {
-        viewModelScope.launch {
-            try {
-                maps.restore(item)
-            } catch (failed: IOException) {
-                problemMessages.send(maps.whyNotWritten())
-            }
-        }
-    }
+    /**
+     * Brings a deleted map back from the trash, here, so it's back even
+     * when Home goes meanwhile; the answer says whether it is, or stayed in
+     * the trash as it was.
+     */
+    fun restore(item: TrashedMap): Deferred<Boolean> = viewModelScope.async { maps.restore(item) != null }
 
     fun sort(order: SortOrder) {
         viewModelScope.launch { container.settings.update { it.copy(sortOrder = order) } }
@@ -348,8 +398,7 @@ internal fun homeState(
     }
 
     val list = if (settings.hideLockedPrivateMaps && hiding) maps.filterNot(privacy::hides) else maps
-    val open = list.filterNot(privacy::hides)
-    val tags = tagCounts(open)
+    val tags = openTags(list, privacy)
     val shown = shownTag(tags, tag)
 
     val ordered = when (settings.sortOrder) {

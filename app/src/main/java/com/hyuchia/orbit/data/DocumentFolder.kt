@@ -24,7 +24,14 @@ import java.io.OutputStream
  * reach each one by name. A folder the app can't learn the name of is
  * called "Folder" in `words`.
  */
-class DocumentFolder(private val resolver: ContentResolver, private val tree: Uri, private val words: Words) : SyncFolder {
+class DocumentFolder(
+    private val resolver: ContentResolver,
+    private val tree: Uri,
+    private val words: Words,
+
+    /** How many bytes the storage a document is on has free, or 0 when it can't say ([roomOf]); a test says its own. */
+    private val room: (Uri) -> Long = { uri -> roomOf(resolver, uri) },
+) : SyncFolder {
     private val root = DocumentsContract.getTreeDocumentId(tree)
     private val documents = mutableMapOf<String, String>()
 
@@ -144,20 +151,39 @@ class DocumentFolder(private val resolver: ContentResolver, private val tree: Ur
         }
 
         // A copy the folder didn't take whole goes, unless it was there before: the next sync tries again.
-        val written = removedOnFailure(uri, made = existing == null) {
-            // A new one, where the folder is on this device, isn't started without room for it and some to spare.
-            if (existing == null && roomFor(uri).let { it > 0 && it < from.length() + ROOM_LEFT_FREE }) {
-                throw NoRoomForMedia(name)
+        val written = try {
+            removedOnFailure(uri, made = existing == null) {
+                // Where the folder is on this device, one isn't started without room for it, past the one it takes the place of,
+                // and some to spare: written over, the one there is left as it was.
+                val adding = from.length() - (existing?.file?.size ?: 0).coerceAtLeast(0)
+
+                if (room(uri).let { it > 0 && it < adding + ROOM_LEFT_FREE }) {
+                    throw NoRoomForMedia(name)
+                }
+
+                from.inputStream().use { input -> writeOver(uri, from.length()) { input.copyTo(it) } }
+                val written = describe(uri) ?: throw FileNotFoundException(name)
+
+                if (written.file.size >= 0 && written.file.size != from.length()) {
+                    throw IOException("$name didn't keep what was written")
+                }
+
+                written
+            }
+        } catch (full: NoRoomForMedia) {
+            throw full
+        } catch (refused: SecurityException) {
+            throw refused
+        } catch (failure: Exception) {
+            // What this write left, by its own document, which the folder's app may have named otherwise: nothing once it's gone.
+            // Where that can't be told, the failure goes as it came.
+            val left = try {
+                describe(uri)
+            } catch (unknown: Exception) {
+                throw failure
             }
 
-            from.inputStream().use { input -> writeOver(uri, from.length()) { input.copyTo(it) } }
-            val written = describe(uri) ?: throw FileNotFoundException(name)
-
-            if (written.file.size >= 0 && written.file.size != from.length()) {
-                throw IOException("$name didn't keep what was written")
-            }
-
-            written
+            throw MediaWriteStopped(left?.file, failure)
         }
 
         mediaDocuments()[written.name] = written
@@ -300,23 +326,6 @@ class DocumentFolder(private val resolver: ContentResolver, private val tree: Ur
     }
 
     /**
-     * How many bytes the storage a document is on has free, when it's a file
-     * on this device, as one a folder on the phone's storage is; 0 when it
-     * can't say, as for a cloud's document, which says so as it's written.
-     */
-    private fun roomFor(uri: Uri): Long = try {
-        resolver.openFileDescriptor(uri, "r")?.use { document ->
-            if (OsConstants.S_ISREG(Os.fstat(document.fileDescriptor).st_mode)) {
-                Os.fstatvfs(document.fileDescriptor).let { it.f_bavail * it.f_frsize }
-            } else {
-                0L
-            }
-        } ?: 0L
-    } catch (unknown: Exception) {
-        0L
-    }
-
-    /**
      * Writes over a document, emptying it first: "wt" says so, though a few
      * apps only take "w", which may keep the end of a longer document after
      * what's written. That end is cut off where the `length` written ends;
@@ -427,3 +436,20 @@ private val COLUMNS = arrayOf(
     Document.COLUMN_LAST_MODIFIED,
     Document.COLUMN_SIZE,
 )
+
+/**
+ * How many bytes the storage a document is on has free, when it's a file
+ * on this device, as one a folder on the phone's storage is; 0 when it
+ * can't say, as for a cloud's document, which says so as it's written.
+ */
+private fun roomOf(resolver: ContentResolver, uri: Uri): Long = try {
+    resolver.openFileDescriptor(uri, "r")?.use { document ->
+        if (OsConstants.S_ISREG(Os.fstat(document.fileDescriptor).st_mode)) {
+            Os.fstatvfs(document.fileDescriptor).let { it.f_bavail * it.f_frsize }
+        } else {
+            0L
+        }
+    } ?: 0L
+} catch (unknown: Exception) {
+    0L
+}

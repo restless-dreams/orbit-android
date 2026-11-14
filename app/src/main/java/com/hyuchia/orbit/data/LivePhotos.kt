@@ -858,14 +858,13 @@ internal class PageMotion(val name: String, val outgoing: OutgoingFile)
  * while they fit in `limit`. One too big for what's left stays out, and a
  * smaller one after it may still go; so does one Orbit can't read through,
  * unless it's one of `asTheyAre`, which the person sharing chose to share
- * as they are. The rest stay on this device, and their pictures show still.
+ * as they are, as it was then ([AsTheyAreFiles]). The rest stay on this device, and their pictures show still.
  */
-internal fun motionsFitting(markdown: String, mapFolder: File, limit: Long = PAGE_MOTIONS_LIMIT, asTheyAre: Set<String> = emptySet()): List<PageMotion> {
+internal fun motionsFitting(markdown: String, mapFolder: File, limit: Long = PAGE_MOTIONS_LIMIT, asTheyAre: AsTheyAreFiles = AsTheyAreFiles.NONE): List<PageMotion> {
     var room = limit
-    val media = File(mapFolder, MEDIA_DIRECTORY)
 
-    return MediaNames.references(markdown).filter(MediaNames::isMotion).mapNotNull { name ->
-        val file = File(media, name).takeIf { it.isFile && it.length() <= room } ?: return@mapNotNull null
+    return MediaNames.references(MediaNames.withoutCode(markdown)).filter(MediaNames::isMotion).mapNotNull { name ->
+        val file = mapMediaFile(mapFolder, name)?.takeIf { it.length() <= room } ?: return@mapNotNull null
         val outgoing = OutgoingMedia.of(file, asTheyAre)?.takeIf { it.size <= room } ?: return@mapNotNull null
         room -= outgoing.size
         PageMotion(name, outgoing)

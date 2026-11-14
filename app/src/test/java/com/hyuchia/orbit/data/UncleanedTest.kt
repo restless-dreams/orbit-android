@@ -45,5 +45,11 @@ class UncleanedTest {
         assertEquals(setOf("picture-1.jpg", "video-tram.mp4", "picture-3-motion.mp4"), files.inRoom.names)
         assertEquals(setOf("video-tram.mp4"), files.only(setOf("video-tram.mp4", "elsewhere.jpg")).names)
         assertTrue(Uncleaned().isEmpty)
+
+        // Each keeps what each of its files was as Orbit found it can't clean it: what the person answers for.
+        val stamped = files.copy(stamps = files.names.associateWith { FileStamp("/maps/trip/media/$it", 10, 1, 1, "1:$it") })
+        assertEquals(setOf("picture-1.jpg"), stamped.inPictures.stamps.keys)
+        assertEquals(stamped.stamps.filterKeys { it in stamped.inRoom.names }, stamped.inRoom.stamps.filterKeys { it in stamped.inRoom.names })
+        assertEquals(setOf("video-tram.mp4"), stamped.only(setOf("video-tram.mp4")).stamps.keys)
     }
 }

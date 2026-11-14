@@ -17,7 +17,6 @@ import com.hyuchia.orbit.journeys.Phone.device
 import com.hyuchia.orbit.journeys.Phone.onThePage
 import com.hyuchia.orbit.journeys.Phone.shell
 import com.hyuchia.orbit.journeys.Phone.shows
-import org.junit.After
 import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Rule
@@ -32,7 +31,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PrivateMapJourney {
     @get:Rule
-    val captures = CapturesFailures()
+    val captures = CapturesFailures { shell("locksettings clear --old $PIN") }
 
     @Before
     fun startFresh() {
@@ -41,11 +40,6 @@ class PrivateMapJourney {
         clear()
         start()
         home()
-    }
-
-    @After
-    fun noScreenLock() {
-        shell("locksettings clear --old $PIN")
     }
 
     @Test

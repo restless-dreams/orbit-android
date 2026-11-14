@@ -9,6 +9,8 @@ import java.nio.channels.FileChannel
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
+import java.nio.file.FileAlreadyExistsException
+import java.nio.file.Files
 import java.nio.file.StandardOpenOption
 import java.util.UUID
 
@@ -20,7 +22,20 @@ import java.util.UUID
  * in place. A big file, such as a video, streams through without being held
  * in memory.
  */
-internal fun writeAtomically(file: File, write: (OutputStream) -> Unit) {
+internal fun writeAtomically(file: File, write: (OutputStream) -> Unit) = writeWhole(file, replace = true, write)
+
+/**
+ * Writes a new file as [writeAtomically] does, but not over another: it
+ * takes its name only when no file has it as it's put in place, and throws
+ * a [FileAlreadyExistsException] otherwise, leaving the one there as it is.
+ * That's a look just before the rename, not one step with it, so it's for
+ * a file under a name held for it ([IncomingMedia.Names]), which no copy of
+ * Orbit's own takes meanwhile: it keeps what something else put there.
+ */
+internal fun writeNew(file: File, write: (OutputStream) -> Unit) = writeWhole(file, replace = false, write)
+
+/** Writes `file` whole, as [writeAtomically] says, over a file that has its name when `replace`, else only when none does ([writeNew]). */
+private fun writeWhole(file: File, replace: Boolean, write: (OutputStream) -> Unit) {
     val directory = file.absoluteFile.parentFile ?: throw IOException("No folder for $file")
     directory.mkdirs()
     // A name of its own for each write, so two writers of one file never fill the same one.
@@ -33,14 +48,28 @@ internal fun writeAtomically(file: File, write: (OutputStream) -> Unit) {
             output.fd.sync()
         }
 
-        if (!partial.renameTo(file)) {
-            throw IOException("Couldn't put ${file.name} in place")
-        }
-
+        place(partial, file, replace)
         // The rename reaches the disk too, so a crash right after can't bring the old file back.
         syncDirectory(directory)
     } finally {
         partial.delete()
+    }
+}
+
+/**
+ * Gives `partial` `file`'s name: in one step over a file that has it when
+ * `replace`; otherwise only when none has it just before the rename
+ * ([java.nio.file.Files.move] without replacing), throwing a
+ * [FileAlreadyExistsException] when one does.
+ */
+private fun place(partial: File, file: File, replace: Boolean) {
+    if (!replace) {
+        Files.move(partial.toPath(), file.toPath())
+        return
+    }
+
+    if (!partial.renameTo(file)) {
+        throw IOException("Couldn't put ${file.name} in place")
     }
 }
 
@@ -61,14 +90,14 @@ internal fun partialFile(file: File): File {
     return File(directory, ".${file.name}.${UUID.randomUUID().toString().take(8)}.partial")
 }
 
-/** Puts `partial`, made whole, in `file`'s place as [writeAtomically] does: on the disk first, then renamed in one step, the rename synced too. */
-internal fun putInPlace(partial: File, file: File) {
+/**
+ * Puts `partial`, made whole, in `file`'s place as [writeAtomically] does:
+ * on the disk first, then renamed in one step, the rename synced too. Not
+ * over a file that has its name unless `replace`, as [writeNew] says.
+ */
+internal fun putInPlace(partial: File, file: File, replace: Boolean = true) {
     FileOutputStream(partial, true).use { it.fd.sync() }
-
-    if (!partial.renameTo(file)) {
-        throw IOException("Couldn't put ${file.name} in place")
-    }
-
+    place(partial, file, replace)
     syncDirectory(file.absoluteFile.parentFile ?: return)
 }
 
@@ -78,6 +107,8 @@ internal fun isPartial(file: File): Boolean = file.name.startsWith(".") && file.
 internal fun writeAtomically(file: File, bytes: ByteArray) = writeAtomically(file) { it.write(bytes) }
 
 internal fun writeAtomically(file: File, text: String) = writeAtomically(file, text.toByteArray(Charsets.UTF_8))
+
+internal fun writeNew(file: File, bytes: ByteArray) = writeNew(file) { it.write(bytes) }
 
 /**
  * Text from a file someone else wrote: UTF-8 when it is, else UTF-16 when it

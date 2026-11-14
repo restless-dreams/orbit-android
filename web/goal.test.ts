@@ -145,6 +145,14 @@ describe('changing goals', () => {
     expect(Object.is(addAmount(1, -1), 0)).toBe(true);
   });
 
+  test('large numbers add exactly too', () => {
+    // Counted in tenths, 999999999999999 would be past the whole numbers JavaScript holds exactly, and come out wrong.
+    expect(addAmount(999999999999999, 0.5)).toBe(999999999999999.5);
+    expect(addAmount(999999999999999.5, -0.25)).toBe(999999999999999.25);
+    expect(addAmount(123456789012.345, 0.001)).toBe(123456789012.346);
+    expect(addAmount(999999999999998, 1)).toBe(999999999999999);
+  });
+
   test('steps down stop at the low end of the goal; steps up may pass the target', () => {
     expect(stepGoal(readGoal(goalNode({ target: 5, current: 1 })), -1)).toBe(0);
     expect(stepGoal(readGoal(goalNode({ target: 5, current: 0 })), -1)).toBe(0);
@@ -154,6 +162,13 @@ describe('changing goals', () => {
     // A number written below the goal by hand isn't lowered further, and steps up from where it is.
     expect(stepGoal(readGoal(goalNode({ target: 5, current: -2 })), -1)).toBe(-2);
     expect(stepGoal(readGoal(goalNode({ target: 5, current: -2 })), 1)).toBe(-1);
+  });
+
+  test('a step up stops short of a number no reader of the map takes', () => {
+    const big = readGoal(goalNode({ target: 999999999999999, current: 999999999999999 }));
+    expect(stepGoal(big, 1)).toBe(999999999999999);
+    expect(stepGoal(big, 0.5)).toBe(999999999999999.5);
+    expect(stepGoal(readGoal(goalNode({ target: 5, current: 999999999999998 })), 1)).toBe(999999999999999);
   });
 
   test('custom attributes merge, each keeping its place', () => {

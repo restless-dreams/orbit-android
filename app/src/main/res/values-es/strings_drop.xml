@@ -66,6 +66,7 @@
     <string name="drop_text_file_too_long">Ese archivo es demasiado largo para agregarlo como ideas. Suéltalo en tus mapas para hacer un mapa con él.</string>
     <string name="drop_not_into_itself">Una idea no puede ir dentro de sí misma</string>
     <string name="drop_not_added_now">Lo que soltaste no se agregó: el mapa no puede cambiar en este momento</string>
+    <string name="drop_idea_gone">Lo que soltaste no se agregó: su idea ya no está</string>
 
     <!-- What a picture, video or sound from another app is called on the map, when its file has no name. -->
     <string name="drop_picture">Imagen</string>

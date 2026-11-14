@@ -3,6 +3,8 @@ package com.hyuchia.orbit.privacy
 import android.os.Build
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -11,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.lifecycle.lifecycleScope
+import com.hyuchia.orbit.OrbitApplication
 import com.hyuchia.orbit.container
 import kotlinx.coroutines.launch
 
@@ -76,4 +79,19 @@ fun privateWindowPolicy(): SecureFlagPolicy {
     val showing by remember(privateMaps) { privateMaps.showing }.collectAsState(privateMaps.showingNow)
 
     return if (showing && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) SecureFlagPolicy.SecureOn else SecureFlagPolicy.Inherit
+}
+
+/**
+ * A sheet's properties, under [privateWindowPolicy]: on Android 12 and
+ * earlier it's marked secure while something private is on screen, from the
+ * moment that is, not only if it was as the sheet opened. Quick capture's
+ * sheet comes up before its list names private maps, and a map's sheet can
+ * stay open as the map is made private.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun privateSheetProperties(): ModalBottomSheetProperties {
+    // Outside Orbit's own app, as a sheet a test draws by itself, there are no private maps to keep out: it takes its screen's mark.
+    val policy = if (LocalContext.current.applicationContext is OrbitApplication) privateWindowPolicy() else SecureFlagPolicy.Inherit
+    return ModalBottomSheetProperties(securePolicy = policy)
 }

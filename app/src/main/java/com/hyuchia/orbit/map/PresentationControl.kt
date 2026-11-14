@@ -3,6 +3,7 @@ package com.hyuchia.orbit.map
 import com.hyuchia.orbit.media.MediaKind
 import com.hyuchia.orbit.page.AudienceCommand
 import com.hyuchia.orbit.page.MapMessage
+import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.Media
 import com.hyuchia.orbit.present.Audience
 import com.hyuchia.orbit.present.after
@@ -12,9 +13,25 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 /** How long each idea stays up when a presentation is played by itself without a pace chosen in Settings, in seconds. */
 const val PLAY_SECONDS = 8
+
+/**
+ * The idea now at the place idea `id` had among `before` (under the same
+ * parent, followed the same way if its id went too, and at the same position
+ * among its siblings) with an id `before` didn't have: `id` under a new name,
+ * as an idea renamed on another device arrives, which says nothing of the
+ * rename. Null when there's none: an idea removed, the one after it moving
+ * into its place, isn't one, as that one's id was there before.
+ */
+internal fun renamedInPlace(id: String, before: List<MapNode>, after: List<MapNode>): String? {
+    val was = before.firstOrNull { it.id == id } ?: return null
+    val known = before.mapTo(HashSet()) { it.id }
+    val parent = was.parentId?.let { parentId -> if (after.any { it.id == parentId }) parentId else renamedInPlace(parentId, before, after) ?: return null }
+    return after.firstOrNull { it.parentId == parent && it.index == was.index && it.id !in known }?.id
+}
 
 /**
  * A presentation as it goes: it steps through its ideas on the presenter's
@@ -26,6 +43,10 @@ const val PLAY_SECONDS = 8
  * Nothing steps by itself while a picture or video shows, to the audience
  * or full screen on this one: the idea's time starts over once the map is
  * back. The presentation lives in `ui`; times are milliseconds on `clock`.
+ *
+ * The map's text can change while it's presented, as a change from
+ * elsewhere arrives: the presentation follows it ([mapChanged]), and every
+ * audience gets the map as it is now.
  */
 class PresentationControl(
     private val scope: CoroutineScope,
@@ -57,6 +78,12 @@ class PresentationControl(
 
     val audiences: List<Audience> get() = listOfNotNull(screen, browsers)
 
+    /** The map's text each audience was last shown: one that hasn't seen the map as it is now gets it ([mapChanged]). */
+    private val shownTexts = mutableMapOf<Audience, String>()
+
+    /** The map's text the presentation last followed, here and to every audience. */
+    private var presentedText: String? = null
+
     private val presentation: Presentation? get() = ui.value.presentation
 
     private fun update(change: (Presentation) -> Presentation) {
@@ -66,12 +93,14 @@ class PresentationControl(
     /** The presentation began, playing by itself every `seconds` when that's more than 0: the audiences see the map. */
     fun begin(seconds: Int) {
         this.seconds = seconds
+        presentedText = presentation?.let(map)?.markdown
         audiences.forEach(::catchUp)
         retime()
     }
 
     /** The second screen or TV the audience watches on, or null for none. */
     fun setScreen(audience: Audience?) {
+        screen?.let(shownTexts::remove)
         screen = audience
         audience?.listen(::reported)
         audienceChanged(audience)
@@ -79,6 +108,7 @@ class PresentationControl(
 
     /** Browsers following the presentation, or null for none. */
     fun setBrowsers(audience: Audience?) {
+        browsers?.let(shownTexts::remove)
         browsers = audience
         audienceChanged(audience)
     }
@@ -98,8 +128,75 @@ class PresentationControl(
         val presentation = presentation ?: return
         val show = map(presentation) ?: return
         audience.send(show)
+        shownTexts[audience] = show.markdown
         audience.send(AudienceCommand.Step(presentation.current, presentation.index, presentation.order.size))
         presentation.media?.let { audience.send(it.command(clock())) }
+    }
+
+    /**
+     * Loads the presentation again on the second screen or TV after something
+     * went wrong there ([Audience.trouble]): it's caught up as a screen that
+     * just arrived, at the idea on screen. One that's well is left as it is.
+     */
+    fun loadScreenAgain() {
+        val troubled = screen?.takeIf { it.trouble.value != null } ?: return
+        troubled.loadAgain()
+        catchUp(troubled)
+    }
+
+    /** An idea got a new id from new text: the presentation's steps, and what shows over the map, keep to it. */
+    fun renamed(from: String, to: String) {
+        update { presentation ->
+            presentation.copy(
+                order = presentation.order.map { if (it == from) to else it },
+                media = presentation.media?.let { shown -> if (shown.id == from) shown.copy(id = to) else shown },
+            )
+        }
+    }
+
+    /**
+     * The map as its page has it now, while it's presented, after its text
+     * may have changed: a save that crossed the presentation's start, a
+     * change from elsewhere, or the map drawn again from its file. The
+     * presentation goes on along `order`, its path on the map as it is now:
+     * from the idea on screen (its new id followed already, [renamed]), or,
+     * when that one's gone, from the step in its place. The phone's map flies
+     * there, as it does when new text left it elsewhere, as on the idea's
+     * parent once its id changed. The picture or video over the map stays
+     * while the idea still has it. Every audience that hasn't seen the map as
+     * it is now gets it there.
+     */
+    fun mapChanged(order: List<String>) {
+        val before = presentation ?: return
+
+        if (order.isEmpty()) {
+            return
+        }
+
+        val index = order.indices.filter { order[it] == before.current }.minByOrNull { abs(it - before.index) } ?: before.index.coerceAtMost(order.lastIndex)
+        val current = order[index]
+        val node = ui.value.nodes[current]
+        val media = before.media?.takeIf { shown -> shown.id == current && (if (shown.isVideo) node?.video else node?.image) != null }
+        update { it.copy(order = order, index = index, media = media) }
+        val show = presentation?.let(map)
+        val newText = show != null && show.markdown != presentedText
+        presentedText = show?.markdown ?: presentedText
+
+        if (current != before.current || (newText && ui.value.map?.path?.lastOrNull() != current)) {
+            focus(current)
+        }
+
+        audiences.forEach { audience ->
+            if (show != null && shownTexts[audience] != show.markdown) {
+                catchUp(audience)
+            } else if (media == null && before.media != null) {
+                audience.send(AudienceCommand.CloseMedia)
+            }
+        }
+
+        if (media != before.media) {
+            retime()
+        }
     }
 
     fun setCaptions(on: Boolean) {
@@ -117,7 +214,9 @@ class PresentationControl(
         val presentation = presentation ?: return
         val index = (presentation.index + by).coerceIn(0, presentation.order.lastIndex)
 
+        // Past the path's first idea or its last, there's nowhere to go: a picture or video over the map still goes.
         if (index == presentation.index) {
+            closeMedia()
             return
         }
 
@@ -176,9 +275,13 @@ class PresentationControl(
         }
     }
 
-    /** Plays the video shown, or pauses it, where it is. */
+    /** Plays the video shown, or pauses it, where it is: played at its end, it starts over, on every screen alike. */
     fun playMedia(playing: Boolean) {
-        if (presentation?.media?.isVideo == true) {
+        val media = presentation?.media?.takeIf { it.isVideo } ?: return
+
+        if (playing && media.atEnd(clock())) {
+            startMediaOver()
+        } else {
             change(AudienceCommand.Playback(playing))
         }
     }
@@ -234,6 +337,8 @@ class PresentationControl(
     fun stop() {
         timer?.cancel()
         tell(AudienceCommand.End)
+        shownTexts.clear()
+        presentedText = null
     }
 
     private fun tell(command: AudienceCommand) {

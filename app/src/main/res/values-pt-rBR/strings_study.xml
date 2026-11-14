@@ -105,4 +105,11 @@
     <!-- Os atalhos de teclado ao estudar -->
     <string name="study_shortcuts">Ao estudar</string>
     <string name="study_shortcut_show">Mostrar o que vem abaixo do cartão</string>
+
+    <!-- Sobre uma sessão de estudo, e sobre o mapa depois dela, enquanto as respostas que o armazenamento não aceitou esperam para ser salvas -->
+    <string name="study_answers_unsaved_title">Suas últimas respostas ainda não foram salvas</string>
+    <string name="study_answers_unsaved_body">O armazenamento deste dispositivo está cheio, então elas só ficam guardadas enquanto o Orbit estiver aberto. Libere espaço, e o Orbit vai salvá-las assim que puder.</string>
+    <string name="study_answers_unsaved_newer_title">Estas respostas não podem ser salvas</string>
+    <string name="study_answers_unsaved_newer">Uma versão mais recente do Orbit guarda seus mapas, então esta não pode salvar suas respostas, e elas se perdem quando o Orbit fecha. Depois que você atualizar o Orbit, as respostas que der serão salvas.</string>
+    <string name="study_answers_saved">Suas respostas foram salvas.</string>
 </resources>

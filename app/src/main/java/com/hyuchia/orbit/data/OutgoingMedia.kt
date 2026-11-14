@@ -4,30 +4,68 @@ import com.hyuchia.orbit.media.PictureInFile
 import com.hyuchia.orbit.media.PicturePieces
 import com.hyuchia.orbit.media.SharedPictures
 import java.io.ByteArrayOutputStream
+import java.io.Closeable
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.IOException
 import java.io.OutputStream
 import java.io.RandomAccessFile
+import java.security.DigestOutputStream
 import java.security.MessageDigest
 import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.concurrent.thread
 
 /**
  * A map's own file as it leaves the phone for someone else: in a zip shared
  * or sent to another device, in a web page or a drawing, or to the browsers
- * a presentation is shown in. See [OutgoingMedia].
+ * a presentation is shown in. See [OutgoingMedia]. One read from its file
+ * is the file it was planned for, as its stamp says ([FileStamp]): it's
+ * read only once it's open and its descriptor says it's that file still,
+ * and it's said once more after its last byte, so what's written of a file
+ * that changed meanwhile is thrown away ([FileChanged]).
  */
 internal sealed interface OutgoingFile {
     /** How many bytes it comes to. */
     val size: Long
 
-    fun writeTo(output: OutputStream)
+    /** The file as it was planned, or null for what isn't read from it as it's written. */
+    val stamp: FileStamp?
 
-    /** The file itself, as the person sharing chose to share one Orbit couldn't clean ([Uncleaned]). */
-    class AsIs(val file: File) : OutgoingFile {
-        override val size: Long get() = file.length()
+    /** Opens it to be written: [FileChanged] when its file isn't the one it was planned for, before anything is written. */
+    fun open(): Source
 
-        override fun writeTo(output: OutputStream) {
-            file.inputStream().use { it.copyTo(output) }
+    /** Writes it whole, as [open] and [Source.writeTo] do. */
+    fun writeTo(output: OutputStream) = open().use { it.writeTo(output) }
+
+    /** An outgoing file open to be written. */
+    interface Source : Closeable {
+        /** Writes it, then says [FileChanged] when its file changed as it was read: what was written is to be thrown away. */
+        fun writeTo(output: OutputStream)
+    }
+
+    /**
+     * The file itself, as the person sharing chose to share one Orbit
+     * couldn't clean, as it was then ([AsTheyAreFiles]): as many bytes as it
+     * had, and no more, whatever is written into it meanwhile.
+     */
+    class AsIs(val file: File, override val stamp: FileStamp) : OutgoingFile {
+        override val size: Long get() = stamp.size
+
+        override fun open(): Source = CheckedSource(file, stamp) { input, output ->
+            val buffer = ByteArray(COPY_CHUNK)
+            var left = stamp.size
+
+            while (left > 0) {
+                val count = input.read(buffer, 0, minOf(left, buffer.size.toLong()).toInt())
+
+                if (count < 0) {
+                    throw FileChanged(file.name)
+                }
+
+                output.write(buffer, 0, count)
+                left -= count
+            }
         }
     }
 
@@ -35,8 +73,14 @@ internal sealed interface OutgoingFile {
     class Cleaned(val bytes: ByteArray) : OutgoingFile {
         override val size: Long get() = bytes.size.toLong()
 
-        override fun writeTo(output: OutputStream) {
-            output.write(bytes)
+        override val stamp: FileStamp? get() = null
+
+        override fun open(): Source = object : Source {
+            override fun writeTo(output: OutputStream) {
+                output.write(bytes)
+            }
+
+            override fun close() = Unit
         }
     }
 
@@ -46,12 +90,10 @@ internal sealed interface OutgoingFile {
      * place of what goes ([SharedPictures.plan]), read as they're written, so
      * a big picture is never whole in memory.
      */
-    class Pieced(val file: File, val pieces: PicturePieces) : OutgoingFile {
+    class Pieced(val file: File, val pieces: PicturePieces, override val stamp: FileStamp) : OutgoingFile {
         override val size: Long get() = pieces.size
 
-        override fun writeTo(output: OutputStream) {
-            RandomAccessFile(file, "r").use { input -> pieces.writeTo(output, input) }
-        }
+        override fun open(): Source = CheckedSource(file, stamp) { input, output -> pieces.writeTo(output, input) }
     }
 
     /**
@@ -60,13 +102,41 @@ internal sealed interface OutgoingFile {
      * frame and offset stays as it is, and what's after the last of them (a
      * phone's own trailer, a sound's tags) left out at `end`.
      */
-    class Patched(val file: File, val patches: List<Patch>, val end: Long) : OutgoingFile {
+    class Patched(val file: File, val patches: List<Patch>, val end: Long, override val stamp: FileStamp) : OutgoingFile {
         override val size: Long get() = end
 
-        override fun writeTo(output: OutputStream) {
-            RandomAccessFile(file, "r").use { input -> writePatched(FileBytes(input), patches, end, output) }
+        override fun open(): Source = CheckedSource(file, stamp) { input, output -> writePatched(FileBytes(input), patches, end, output) }
+    }
+}
+
+/**
+ * `file` open to be written by `write`, once its descriptor says it's the
+ * file `stamp` was taken of: [FileChanged] when it isn't, or went, and again
+ * when it isn't after the last byte.
+ */
+private class CheckedSource(private val file: File, private val stamp: FileStamp, private val write: (RandomAccessFile, OutputStream) -> Unit) : OutgoingFile.Source {
+    private val input = try {
+        RandomAccessFile(file, "r")
+    } catch (gone: FileNotFoundException) {
+        throw FileChanged(file.name)
+    }
+
+    init {
+        if (!stamp.isOpenAt(input.fd)) {
+            input.close()
+            throw FileChanged(file.name)
         }
     }
+
+    override fun writeTo(output: OutputStream) {
+        write(input, output)
+
+        if (!stamp.isOpenAt(input.fd)) {
+            throw FileChanged(file.name)
+        }
+    }
+
+    override fun close() = input.close()
 }
 
 /** Bytes to write over a file's own from `at`: `with`, or `length` zeros when it's null. */
@@ -111,10 +181,12 @@ internal class Patches : ArrayList<Patch>() {
  *   what draws them.
  * - **HEIF and AVIF pictures** keep their picture, and an animation's
  *   frames: their EXIF and XMP items are written over with zeros where they
- *   are, an image sequence's movie is cleaned as a video's is (below), and
- *   the boxes beside the picture, the video a motion photo keeps in it, a
- *   phone's own trailer and other apps' among them, become free space, and
- *   are left out when they come after it, as they do.
+ *   are, their items' names, their handler's name, and the properties that
+ *   describe them or say when they were made, changed or taken say
+ *   nothing, an image sequence's movie is cleaned as a video's is (below),
+ *   and the boxes beside the picture, the video a motion photo keeps in it,
+ *   a phone's own trailer and other apps' among them, become free space,
+ *   and are left out when they come after it, as they do.
  * - **BMP pictures** keep their headers, colors, pixels and color profile;
  *   the bytes the format leaves to apps, and anything between or after
  *   those, say nothing ([Bitmaps]).
@@ -145,7 +217,8 @@ internal class Patches : ArrayList<Patch>() {
  * - **WAV sounds** keep the chunks that make the sound, its format, samples,
  *   cue points, loops and instrument, and every other chunk (a Broadcast
  *   Wave's originator and date, LIST's tags, iXML, XMP, ID3) becomes JUNK
- *   with nothing in it ([WaveChunks]).
+ *   with nothing in it, and so does the byte of padding after a chunk of
+ *   an odd size ([WaveChunks]).
  *
  * What an encoder writes into a sound's or a video's stream itself, as its
  * name in an MP3's first frame, stays with the frames that need it, and a
@@ -164,52 +237,93 @@ internal class Patches : ArrayList<Patch>() {
  */
 internal object OutgoingMedia {
     /**
-     * How `file` goes, as it is when it's one of `asTheyAre`, the files the
-     * person sharing chose to share as they are ([Uncleaned]); null when it
-     * doesn't go.
+     * How `file` goes as it is now, with what the person sharing answered
+     * about the files Orbit can't clean (`asTheyAre`): clean when Orbit can
+     * clean it; as it is when it's the very file they chose to share so, as
+     * it was when they were asked ([AsTheyAreFiles]); null when it doesn't
+     * go, as one they left out. One no one was asked about as it is now, as
+     * one that changed since, stops a way out that can ask again
+     * ([FileChanged]), and stays on this device otherwise.
      */
-    fun of(file: File, asTheyAre: Set<String>): OutgoingFile? = of(file) ?: OutgoingFile.AsIs(file).takeIf { file.name in asTheyAre }
+    fun of(file: File, asTheyAre: AsTheyAreFiles): OutgoingFile? {
+        val judged = judge(file) ?: return null
+        judged.clean?.let { return it }
+
+        return when {
+            judged.stamp in asTheyAre.chosen -> OutgoingFile.AsIs(file, judged.stamp)
+            judged.stamp in asTheyAre.asked || !asTheyAre.stops -> null
+            else -> throw FileChanged(file.name)
+        }
+    }
+
+    /** How `file` goes clean, or null when it doesn't: Orbit can't clean it, or it can't be read ([judge]). */
+    fun of(file: File): OutgoingFile? = judge(file)?.clean
+
+    /** The stamp of `file` as it is now when Orbit can't clean it, for the person sharing to be asked about it; null when it can, or can't be read ([judge]). */
+    fun uncleanable(file: File): FileStamp? = judge(file)?.takeIf { it.clean == null }?.stamp
+
+    /** A file as it is now ([FileStamp]), and how it goes clean, or null when Orbit can't clean it ([judge]). */
+    class Judged(val stamp: FileStamp, val clean: OutgoingFile?)
 
     /**
-     * How `file` goes, or null when it doesn't: it can't be read, or read
-     * through. Working that out reads a sound frame by frame, so how a file
-     * goes is kept for as long as it's the same file, by its path, size and
-     * time ([plans]): the export panel and the send sheet, opened again and
-     * again, read none of them twice. An SVG drawing, cleaned in memory, is
-     * worked out each time.
+     * How `file` goes as it is now, or null when it can't be read, or kept
+     * changing as it was. It's read through its descriptor, while that says
+     * it's the file its stamp was taken of, so how it goes is said of that
+     * very file. Working that out reads a sound frame by frame, so it's kept
+     * for as long as it's the same file ([FileStamp]): the export panel and
+     * the send sheet, opened again and again, read none of them twice. A
+     * file written again under its name is another, even at the same size
+     * and time, as a sync app may leave it, so it's worked out again: what
+     * was kept for the one before could keep what this one says. An SVG
+     * drawing, cleaned in memory, is worked out each time, and so is a file
+     * Orbit can't clean.
      */
-    fun of(file: File): OutgoingFile? {
-        val key = PlanKey(file.path, file.length(), file.lastModified())
-        synchronized(plans) { plans[key] }?.let { return it }
-        val outgoing = plan(file)
+    fun judge(file: File): Judged? {
+        repeat(JUDGING_TRIES) {
+            val stamp = FileStamp.of(file) ?: return null
+            synchronized(plans) { plans[stamp] }?.let { return Judged(stamp, it) }
 
-        if (outgoing != null && outgoing !is OutgoingFile.Cleaned) {
-            synchronized(plans) { plans[key] = outgoing }
+            val input = try {
+                RandomAccessFile(file, "r")
+            } catch (gone: FileNotFoundException) {
+                return null
+            }
+
+            // Read from the file its stamp says, and still that one once it's read: else it's looked at again.
+            val planned = input.use { if (stamp.isOpenAt(input.fd)) Planned(plan(file, stamp, input)).takeIf { stamp.isOpenAt(input.fd) } else null } ?: return@repeat
+            val outgoing = planned.outgoing
+
+            if (outgoing != null && outgoing !is OutgoingFile.Cleaned) {
+                synchronized(plans) { plans[stamp] = outgoing }
+            }
+
+            return Judged(stamp, outgoing)
         }
 
-        return outgoing
+        return null
     }
 
-    /** A file as it was when how it goes was worked out: one written again, under its name, is another. */
-    private data class PlanKey(val path: String, val size: Long, val modified: Long)
+    /** How a file goes, or null when it can't go clean, worked out from it. */
+    private class Planned(val outgoing: OutgoingFile?)
 
     /** How the files last asked about go, the latest few hundred, by what they were then. */
-    private val plans = object : LinkedHashMap<PlanKey, OutgoingFile>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<PlanKey, OutgoingFile>?): Boolean = size > PLANS_KEPT
+    private val plans = object : LinkedHashMap<FileStamp, OutgoingFile>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<FileStamp, OutgoingFile>?): Boolean = size > PLANS_KEPT
     }
 
-    /** How `file` goes, worked out from what it holds: see [of]. */
-    private fun plan(file: File): OutgoingFile? {
+    /** How `file` goes, the one `stamp` says, worked out from what `input` holds of it: see [judge]. */
+    private fun plan(file: File, stamp: FileStamp, input: RandomAccessFile): OutgoingFile? {
         val start = try {
-            file.inputStream().use { input -> input.readAtMost(START_BYTES) }
+            input.seek(0)
+            ByteArray(minOf(START_BYTES.toLong(), input.length()).toInt()).also(input::readFully)
         } catch (unreadable: IOException) {
             return null
         }
 
         return when (val kind = kindOf(start)) {
             null -> null
-            Kind.Picture -> picture(file, start)
-            else -> RandomAccessFile(file, "r").use { input -> plan(kind, FileBytes(input)) }?.let { (patches, end) -> OutgoingFile.Patched(file, patches, end) }
+            Kind.Picture -> picture(file, stamp, start, input)
+            else -> plan(kind, FileBytes(input))?.let { (patches, end) -> OutgoingFile.Patched(file, patches, end, stamp) }
         }
     }
 
@@ -219,22 +333,21 @@ internal object OutgoingMedia {
      * they're written, and an SVG drawing cleaned in memory; null when it
      * can't be read through.
      */
-    private fun picture(file: File, start: ByteArray): OutgoingFile? {
+    private fun picture(file: File, stamp: FileStamp, start: ByteArray, input: RandomAccessFile): OutgoingFile? = try {
         if (SharedPictures.kindOf(start) == SharedPictures.Kind.Svg) {
             // Read whole to be cleaned: one bigger than any drawing a map has goes only as it is, when the person chooses.
-            if (file.length() > SVG_CLEANED_MOST) {
-                return null
+            if (input.length() > SVG_CLEANED_MOST) {
+                null
+            } else {
+                input.seek(0)
+                SharedPictures.withoutMetadata(ByteArray(input.length().toInt()).also(input::readFully))?.let { OutgoingFile.Cleaned(it) }
             }
-
-            return SharedPictures.withoutMetadata(file.readBytes())?.let { OutgoingFile.Cleaned(it) }
+        } else {
+            SharedPictures.plan(PictureInFile(input))?.let { OutgoingFile.Pieced(file, it, stamp) }
         }
-
-        return try {
-            RandomAccessFile(file, "r").use { input -> SharedPictures.plan(PictureInFile(input)) }?.let { OutgoingFile.Pieced(file, it) }
-        } catch (unreadable: IOException) {
-            // It went, or changed, as it was read.
-            null
-        }
+    } catch (unreadable: IOException) {
+        // It went, or changed, as it was read.
+        null
     }
 
     /** A picture's bytes as they go inside a page or a drawing, or null when they can't. */
@@ -249,17 +362,70 @@ internal object OutgoingMedia {
     /**
      * An SVG drawing of a map, whose pictures are inside it as data
      * addresses, with each picture as [picture] makes it: one that can't be
-     * read through is left out, its address emptied, unless the person
-     * sharing chose to share such pictures as they are (`asTheyAre`).
+     * read through is left out, its address emptied, unless it's all that
+     * one of the files the person sharing chose to share as they are holds,
+     * as it was when they chose (`asTheyAre`). The drawing doesn't name its
+     * pictures, so each is known by what it holds: one chosen goes, and one
+     * left out, or no one was asked about, as a picture from the web, stays
+     * out, whatever else was chosen. A chosen file that changed since stops
+     * a way out that can ask again ([FileChanged]).
      */
-    fun drawing(svg: String, asTheyAre: Boolean = false): String = DATA_PICTURE.replace(svg) { match ->
-        val bytes = runCatching { Base64.getDecoder().decode(match.groupValues[2]) }.getOrNull()
-        val cleaned = bytes?.let(::picture)
+    fun drawing(svg: String, asTheyAre: AsTheyAreFiles = AsTheyAreFiles.NONE): String {
+        val chosen = ChosenPictures(asTheyAre)
 
-        when {
-            cleaned != null -> "data:${match.groupValues[1]};base64,${Base64.getEncoder().encodeToString(cleaned)}"
-            asTheyAre && bytes != null -> match.value
-            else -> "data:,"
+        return DATA_PICTURE.replace(svg) { match ->
+            val bytes = runCatching { Base64.getDecoder().decode(match.groupValues[2]) }.getOrNull()
+            val cleaned = bytes?.let(::picture)
+
+            when {
+                cleaned != null -> "data:${match.groupValues[1]};base64,${Base64.getEncoder().encodeToString(cleaned)}"
+                bytes != null && chosen.holds(bytes) -> match.value
+                else -> "data:,"
+            }
+        }
+    }
+
+    /**
+     * The files chosen to go as they are, each as it was when it was chosen,
+     * told by what it holds: read only for a picture as big, and once, while
+     * its descriptor says it's that file still.
+     */
+    private class ChosenPictures(private val asTheyAre: AsTheyAreFiles) {
+        private val digests = HashMap<FileStamp, ByteArray?>()
+
+        init {
+            // Where the way out can ask, a picture chosen as it was is asked about again as it is now, as [of] goes by: only when Orbit
+            // can't clean it now and no one was asked about it as it is now. One that went, or goes clean now, isn't; nor is any other
+            // file, which a drawing doesn't carry.
+            if (asTheyAre.stops) {
+                asTheyAre.chosen.map { File(it.path) }.distinct().filter { mediaType(it.name).startsWith("image/") && it.isFile }.forEach { of(it, asTheyAre) }
+            }
+        }
+
+        /** Whether `bytes` are all that one of the files holds. */
+        fun holds(bytes: ByteArray): Boolean {
+            val wanted by lazy { MessageDigest.getInstance("SHA-256").digest(bytes) }
+
+            return asTheyAre.chosen.any { stamp ->
+                stamp.size == bytes.size.toLong() && digests.getOrPut(stamp) { digestOf(stamp) }?.contentEquals(wanted) == true
+            }
+        }
+
+        /** Where what's only digested is written: nowhere. */
+        private object Nowhere : OutputStream() {
+            override fun write(byte: Int) = Unit
+
+            override fun write(bytes: ByteArray, offset: Int, length: Int) = Unit
+        }
+
+        /** What the file `stamp` was holds, or null when it isn't that file any more: one chosen before it changed holds nothing. */
+        private fun digestOf(stamp: FileStamp): ByteArray? = try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            OutgoingFile.AsIs(File(stamp.path), stamp).writeTo(DigestOutputStream(Nowhere, digest))
+            digest.digest()
+        } catch (unreadable: IOException) {
+            // FileChanged among them.
+            null
         }
     }
 
@@ -318,8 +484,11 @@ internal object OutgoingMedia {
     /** Enough of a file to tell its kind: a JPEG's or PNG's signature, an MP4's first box, or where an SVG's element starts. */
     private const val START_BYTES = 512
 
-    /** How many files' plans [of] keeps: a map's, and a few more. */
+    /** How many files' plans [judge] keeps: a map's, and a few more. */
     private const val PLANS_KEPT = 512
+
+    /** How many times a file that changed as it was read is looked at again before it's taken for one that can't be read. */
+    private const val JUDGING_TRIES = 3
 
     /** The most an SVG drawing may be to be cleaned, which reads it whole: drawings are kilobytes, a big one a few megabytes. */
     private const val SVG_CLEANED_MOST = 32L * 1024 * 1024
@@ -328,43 +497,141 @@ internal object OutgoingMedia {
     private val DATA_PICTURE = Regex("""data:(image/[A-Za-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)""")
 }
 
+/** The cache's folder for copies of a map's files served as they leave the phone ([OutgoingCopies]). */
+internal const val OUTGOING_COPIES = "outgoing"
+
 /**
  * Copies of a map's files as they leave the phone ([OutgoingMedia]), kept in
  * `folder` for as long as they're served, so a video a browser plays in
- * parts is cleaned once rather than for each part. A copy is made again
- * when its file changes, and copies a day old go.
+ * parts is cleaned once rather than for each part, and made once, however
+ * many browsers ask for it at once: the others wait for it. A copy is made
+ * again when its file changes, and copies a day old go. One the person
+ * chose to share as it is is a copy too, made of the very file they chose,
+ * as it was then, the first time it's asked for: what's served never
+ * changes under a browser, and a file put in its place since is never
+ * served for it. Each is in a folder of its own, for `madeAsItIs` to keep a
+ * private map's with [com.hyuchia.orbit.privacy.PrivateCopies]; they go as
+ * the way out they were made for ends ([forgetAsTheyAre]), one still being
+ * made then included, and those left as Orbit stopped go as it starts
+ * again ([asTheyAreIn]). Each copy is begun only where there's room for it
+ * and some to spare (`room`, [requireRoom]), and copies are deleted by
+ * `deleting`, off the thread that asks.
  */
-internal class OutgoingCopies(private val folder: File, private val now: () -> Long = System::currentTimeMillis) {
+internal class OutgoingCopies(
+    private val folder: File,
+    private val now: () -> Long = System::currentTimeMillis,
+    private val room: (folder: File, size: Long) -> Unit = ::requireRoom,
+    private val madeAsItIs: (copy: File) -> Unit = {},
+    private val deleting: (() -> Unit) -> Unit = { work -> thread(name = "OutgoingCopies") { work() } },
+) {
+    /** Where the copies of files chosen to go as they are wait, a folder for each time they were forgotten. */
+    private val asTheyAre = asTheyAreIn(folder)
+
+    /**
+     * Which time the copies of files as they are were last forgotten, as
+     * the folder they wait in is named: a copy begun before goes too. It
+     * starts from the clock, so no folder left by another is this one's.
+     */
+    private var forgotten = System.nanoTime()
+
+    /** Held while [forgotten] or [closed] is read or moved on. */
+    private val forgetting = Any()
+
+    /** Whether the way out these copies were made for stopped for good: no copy of a file as it is is made any more ([close]). */
+    private var closed = false
+
+    /** What each copy being made is made under, by its path: one at a time, and others asking for it wait. */
+    private val making = ConcurrentHashMap<String, Any>()
+
     init {
-        folder.listFiles().orEmpty().filter { now() - it.lastModified() > KEPT }.forEach { it.delete() }
+        // Those left by a way out that ended, as Orbit stopped or another room was made: none of them this one's.
+        val left = asTheyAre.listFiles().orEmpty().toList()
+
+        deleting {
+            folder.listFiles().orEmpty().filter { it.isFile && now() - it.lastModified() > KEPT }.forEach { it.delete() }
+            left.forEach { it.deleteRecursively() }
+        }
     }
 
     /**
-     * The file to serve for `file`: itself when it goes as it is, as one of
-     * `asTheyAre` does when it can't go clean, a clean copy otherwise, or
-     * null when it doesn't go.
+     * The file to serve for `file`: a clean copy, or a copy of it as it was
+     * chosen to go as it is ([AsTheyAreFiles]), or null when it doesn't go:
+     * it can't go clean and wasn't chosen as it is now, or there's no room
+     * for its copy, or it kept changing as its copy was made, or the copies
+     * of files as they are were forgotten before or as it was made, or the
+     * way out they were for stopped ([close]).
      */
-    fun of(file: File, asTheyAre: Set<String> = emptySet()): File? {
-        val outgoing = OutgoingMedia.of(file, asTheyAre) ?: return null
+    fun of(file: File, chosen: AsTheyAreFiles = AsTheyAreFiles.NONE): File? {
+        repeat(COPYING_TRIES) {
+            val outgoing = OutgoingMedia.of(file, chosen.lasting()) ?: return null
+            val asItIs = outgoing is OutgoingFile.AsIs
+            val since = synchronized(forgetting) { forgotten.takeUnless { asItIs && closed } } ?: return null
+            // A copy for the file as it is now: one written again under its name gets a copy of its own, even at the same size and time.
+            val stamp = outgoing.stamp ?: FileStamp.of(file)
+            val key = MessageDigest.getInstance("SHA-1").digest("${file.canonicalPath}\n${stamp ?: System.nanoTime()}".toByteArray())
+                .joinToString("") { "%02x".format(it) }
+            val copy = if (asItIs) File(File(File(asTheyAre, since.toString()), key), file.name) else File(folder, "$key.${file.extension.lowercase()}")
 
-        if (outgoing is OutgoingFile.AsIs) {
-            return file
+            synchronized(making.getOrPut(copy.path) { Any() }) {
+                // Forgotten while it waited for another to make it, as the presentation ended: none is made again, only to go.
+                if (asItIs && synchronized(forgetting) { forgotten != since }) {
+                    return null
+                }
+
+                if (stamp == null || !copy.isFile) {
+                    try {
+                        val into = copy.parentFile ?: folder
+                        into.mkdirs()
+                        room(into, outgoing.size)
+                        writeAtomically(copy) { outgoing.writeTo(it) }
+                    } catch (changed: FileChanged) {
+                        // It changed as it was copied: what was written of it is gone, and it's looked at again as it is now.
+                        return@repeat
+                    }
+
+                    if (asItIs) {
+                        madeAsItIs(copy)
+                    }
+                }
+            }
+
+            // Forgotten as it was made, as the presentation it was for ended: it goes too.
+            synchronized(forgetting) {
+                if (asItIs && forgotten != since) {
+                    copy.parentFile?.let { made -> deleting { made.deleteRecursively() } }
+                    return null
+                }
+            }
+
+            return copy
         }
 
-        val key = MessageDigest.getInstance("SHA-1").digest("${file.canonicalPath}\n${file.length()}\n${file.lastModified()}".toByteArray())
-            .joinToString("") { "%02x".format(it) }
-        val copy = File(folder, "$key.${file.extension.lowercase()}")
-
-        if (!copy.isFile) {
-            folder.mkdirs()
-            writeAtomically(copy) { outgoing.writeTo(it) }
-        }
-
-        return copy
+        return null
     }
 
-    private companion object {
-        const val KEPT = 24 * 60 * 60 * 1000L
+    /** Lets the copies of files chosen to go as they are go, one still being made among them: the way out they were made for ended. */
+    fun forgetAsTheyAre() {
+        val current = synchronized(forgetting) { (++forgotten).toString() }
+        deleting { asTheyAre.listFiles().orEmpty().filter { it.name != current }.forEach { it.deleteRecursively() } }
+    }
+
+    /** Lets them go as [forgetAsTheyAre] does, and makes none again: the way out they were made for stopped for good. */
+    fun close() {
+        synchronized(forgetting) { closed = true }
+        forgetAsTheyAre()
+    }
+
+    companion object {
+        private const val KEPT = 24 * 60 * 60 * 1000L
+
+        /** The folder of copies of files chosen to go as they are, in the copies' own. */
+        private const val AS_THEY_ARE = "as-they-are"
+
+        /** How many times a file that changed as it was copied is copied again before it stays out. */
+        private const val COPYING_TRIES = 2
+
+        /** Where the copies of files chosen to go as they are wait, in `folder`, the copies' own: none outlives Orbit, which deletes them as it starts. */
+        fun asTheyAreIn(folder: File): File = File(folder, AS_THEY_ARE)
     }
 }
 
@@ -435,13 +702,27 @@ private object MetadataPatches {
             pictureMetadata(bytes, top)
         } else {
             // A movie whose media data isn't whole, as one cut short in it, can't be played: its index points at frames that aren't there.
-            movieMetadata(bytes, top)?.takeIf { top.any { it.type == "mdat" } }?.let { it to end }
+            movieMetadata(bytes, top)?.takeIf { top.any { it.type == "mdat" } && framesBefore(bytes, top, end) }?.let { it to end }
         }
     } catch (unreadable: IOException) {
         null
     } catch (malformed: RuntimeException) {
         // A file made to trip the reader is one it can't read through, as a broken one is.
         null
+    }
+
+    /**
+     * Whether the frames a movie's index points at are all in what goes,
+     * before `end`: its tracks' chunks, and its fragments' samples, start
+     * before it. One cut short in media data after a whole box of it, which
+     * `top` stops before, points past where it ends.
+     */
+    private fun framesBefore(bytes: Bytes, top: List<IsoBox>, end: Long): Boolean = top.all { box ->
+        when (box.type) {
+            "moov" -> IsoBoxes.chunksBefore(bytes, box, end)
+            "moof" -> IsoBoxes.fragmentBefore(bytes, box, end)
+            else -> true
+        }
     }
 
     /**
@@ -597,15 +878,19 @@ private object MetadataPatches {
     private val FREE_SPACE = setOf("free", "skip")
 
     /**
-     * A HEIF or AVIF picture's patches, and where it ends. Its EXIF and XMP
-     * items are written over with zeros, and an image sequence's movie, as
-     * an animated AVIF's, is cleaned as any movie is. Every other box beside
-     * the picture becomes free space, and is left out when it comes after
-     * the picture, as it does: the video a motion photo keeps (`mpvd`),
-     * Samsung's own trailer (`sefd`), XMP, content credentials and a
-     * camera's own (`uuid`), what free space held, and any box of a kind a
+     * A HEIF or AVIF picture's patches, and where it ends. Its EXIF, XMP and
+     * other metadata items ([METADATA_ITEMS]) are written over with zeros,
+     * its items' names say nothing ([unnamed]), nor does its handler's name,
+     * nor its properties that say who described it how, and when it was
+     * made, changed and taken ([propertiesSaid]), and an image sequence's
+     * movie, as an animated AVIF's, is cleaned as any movie is. Every other
+     * box beside the picture becomes free space, and is left out when it
+     * comes after the picture, as it does: the video a motion photo keeps
+     * (`mpvd`), Samsung's own trailer (`sefd`), XMP, content credentials and
+     * a camera's own (`uuid`), what free space held, and any box of a kind a
      * picture isn't made of, unless one of its items is in it. Null when its
-     * items, or its movie, can't be read.
+     * items, its properties or its movie can't be read, or aren't all
+     * there, as in a picture cut short in its media data, or in itself.
      */
     private fun pictureMetadata(bytes: Bytes, top: List<IsoBox>): Pair<List<Patch>, Long>? {
         val meta = top.firstOrNull { it.type == "meta" } ?: return null
@@ -613,8 +898,16 @@ private object MetadataPatches {
         val items = IsoBoxes.items(bytes, parts) ?: return null
         val patches = Patches()
 
+        for (name in IsoBoxes.itemNames(bytes, parts) ?: return null) {
+            patches += unnamed(name)
+        }
+
+        // Its handler's name, which says what wrote it ("libavif"), as a track's does.
+        parts.firstOrNull { it.type == "hdlr" }?.let { patches += handlerUnnamed(it) }
+        patches += propertiesSaid(bytes, parts) ?: return null
+
         for (item in items) {
-            if (item.type != "Exif" && !(item.type == "mime" && item.contentType.lowercase().startsWith("application/rdf+xml"))) {
+            if (item.type !in METADATA_ITEMS) {
                 continue
             }
 
@@ -624,20 +917,113 @@ private object MetadataPatches {
         }
 
         // A box any of its items is in stays, whatever its kind.
-        val places = items.flatMap { it.ranges.orEmpty() }
-        val kept = top.filter { box -> box.type in PICTURE_BOXES || places.any { (at, length) -> at < box.end && at + length > box.start } }
+        val places = ItemPlaces(items.flatMap { it.ranges.orEmpty() })
+        val kept = top.filter { box -> box.type in PICTURE_BOXES || places.anyIn(box.start, box.end) }
+        val keeps = kept.toHashSet()
 
         for (box in top) {
             when {
-                box !in kept -> patches += freed(box)
+                box !in keeps -> patches += freed(box)
                 box.type == "moov" -> patches += inMovie(bytes, box) ?: return null
                 box.type == "moof" -> patches += metadataIn(bytes, box, "traf") ?: return null
             }
         }
 
         // What follows the last box it keeps is free space now, and stays out.
-        return patches to (kept.maxOfOrNull { it.end } ?: return null)
+        val end = kept.maxOfOrNull { it.end } ?: return null
+
+        // An item, or a frame of its movie, past that, as in media data cut short that `top` stops before, isn't there to be shown;
+        // nor is one whose places can't be told, as one that goes on past the end of the file, cut short in it.
+        if (items.any { item -> item.ranges?.any { (at, length) -> at + length > end } ?: true } || !framesBefore(bytes, top, end)) {
+            return null
+        }
+
+        return patches to end
     }
+
+    /**
+     * What a picture's item properties say beyond what it shows, written
+     * over where they are, as long as they were: a description's language,
+     * name, description and tags (`udes`) empty, and when it was made and
+     * changed (`crtt`, `mdft`) and taken, by the TAI clock (`itai`), zero.
+     * Null when its properties can't be read.
+     */
+    private fun propertiesSaid(bytes: Bytes, parts: List<IsoBox>): List<Patch>? {
+        val properties = parts.firstOrNull { it.type == "iprp" }?.let { IsoBoxes.children(bytes, it) ?: return null }?.firstOrNull { it.type == "ipco" } ?: return emptyList()
+        val patches = Patches()
+
+        // Each after its version and flags: the description's four texts, each ended by a zero, say nothing as zeros.
+        for (property in IsoBoxes.children(bytes, properties) ?: return null) {
+            when (property.type) {
+                "udes" -> patches += Patch(property.body + 4, property.end - property.body - 4)
+                in DATED_PROPERTIES -> patches += Patch(property.body + 4, minOf(8L, property.end - property.body - 4))
+            }
+        }
+
+        return patches
+    }
+
+    /** The properties of a picture that say when: it was made, changed, and taken by the TAI clock, each in 64 bits. */
+    private val DATED_PROPERTIES = setOf("crtt", "mdft", "itai")
+
+    /**
+     * An item's entry without its name, as long as it was: its name empty,
+     * what followed it moved up to where it started, and zeros after that.
+     */
+    private fun unnamed(name: ItemName): List<Patch> {
+        val moved = byteArrayOf(0) + name.after
+        val length = name.end - name.at
+        return listOf(Patch(name.at, minOf(moved.size.toLong(), length), moved), Patch(name.at + moved.size, length - moved.size))
+    }
+
+    /**
+     * Where a picture's items are, each as its start and length, sorted once,
+     * so whether any is in a box is found at once, for each of tens of
+     * thousands of boxes and places.
+     */
+    private class ItemPlaces(places: List<Pair<Long, Long>>) {
+        private val starts = places.map { it.first }.sorted().toLongArray()
+
+        /** For the places sorted by where they start, the furthest any of the first so many reaches. */
+        private val reaches: LongArray
+
+        init {
+            val sorted = places.sortedBy { it.first }
+            reaches = LongArray(sorted.size)
+            var furthest = Long.MIN_VALUE
+
+            sorted.forEachIndexed { index, (at, length) ->
+                furthest = maxOf(furthest, at + length)
+                reaches[index] = furthest
+            }
+        }
+
+        /** Whether any place starts before `end` and reaches past `start`. */
+        fun anyIn(start: Long, end: Long): Boolean {
+            // How many places start before `end`: those are the ones that could be in the box.
+            var low = 0
+            var high = starts.size
+
+            while (low < high) {
+                val middle = (low + high) ushr 1
+
+                if (starts[middle] < end) {
+                    low = middle + 1
+                } else {
+                    high = middle
+                }
+            }
+
+            return low > 0 && reaches[low - 1] > start
+        }
+    }
+
+    /**
+     * The kinds of a HEIF or AVIF picture's items that only say things
+     * about it: EXIF, anything with a content type, as XMP is, whatever its
+     * name and type say, and a URI's. None draws the picture.
+     */
+    private val METADATA_ITEMS = setOf("Exif", "mime", "uri ")
 
     /**
      * The boxes a HEIF or AVIF picture is made of: its type, its items and

@@ -41,14 +41,21 @@ fun rememberUnseenCrash(): MutableState<CrashReport?> {
 /**
  * Says Orbit closed unexpectedly last time, once: its report can be shared
  * (with any app: it never leaves the phone otherwise) or deleted, or the
- * card put away. `onDone` hears when it's dealt with.
+ * card put away. `onDone` hears when it's dealt with, and `say` what to
+ * tell when it can't be, as a report that won't delete.
  */
 @Composable
-fun CrashCard(report: CrashReport, onDone: () -> Unit, modifier: Modifier = Modifier) {
+fun CrashCard(
+    report: CrashReport,
+    onDone: () -> Unit,
+    say: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    crashes: CrashLog = LocalContext.current.container.crashes,
+) {
     val context = LocalContext.current
-    val crashes: CrashLog = context.container.crashes
     val scope = rememberCoroutineScope()
     val shareTitle = stringResource(R.string.home_share_the_crash_report)
+    val notDeleted = stringResource(R.string.home_crash_report_not_deleted)
 
     fun close(action: (CrashReport) -> Unit) {
         onDone()
@@ -82,6 +89,18 @@ fun CrashCard(report: CrashReport, onDone: () -> Unit, modifier: Modifier = Modi
                 }
             },
         )
-        NoticeTextButton(stringResource(R.string.common_delete), onClick = { close(crashes::delete) })
+        NoticeTextButton(
+            stringResource(R.string.common_delete),
+            onClick = {
+                scope.launch {
+                    // The card goes once the report has: one that won't delete stays, and so does the card, to try again.
+                    if (withContext(Dispatchers.IO) { runCatching { crashes.delete(report) }.getOrDefault(false) }) {
+                        onDone()
+                    } else {
+                        say(notDeleted)
+                    }
+                }
+            },
+        )
     }
 }

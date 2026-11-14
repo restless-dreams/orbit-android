@@ -37,10 +37,11 @@ data class ShownMedia(
         return duration?.let { minOf(position, it) } ?: position
     }
 
-    /** Whether it's at its end at `now`. */
+    /** Whether it's at its end at `now`: it played there, or was paused right there. */
     fun atEnd(now: Long): Boolean {
-        val length = duration
-        return ended || (playing && length != null && at + (now - since).coerceAtLeast(0L) / 1_000.0 >= length)
+        val length = duration ?: return ended
+        val played = if (playing) (now - since).coerceAtLeast(0L) / 1_000.0 else 0.0
+        return ended || at + played >= length
     }
 
     /** Whether it plays at `now`: started, and not at its end yet. */

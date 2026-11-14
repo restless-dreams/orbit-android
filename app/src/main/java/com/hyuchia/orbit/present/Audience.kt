@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Display
 import android.view.WindowManager
+import androidx.annotation.StringRes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -16,12 +17,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import com.hyuchia.orbit.Logs
+import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
+import com.hyuchia.orbit.data.AsTheyAreFiles
 import com.hyuchia.orbit.page.AudienceCommand
 import com.hyuchia.orbit.page.MapMessage
 import com.hyuchia.orbit.page.OrbitPage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 
 /**
@@ -63,25 +67,62 @@ interface Audience {
      */
     val notice: StateFlow<ScreenNotice?> get() = noNotice
 
+    /**
+     * What went wrong on the screen, which loading the presentation there
+     * again mends ([loadAgain]): a second screen's page stopped or didn't
+     * load, or a TV missed something it was sent. Null while all's well, and
+     * always for browsers, whose pages find the phone again by themselves.
+     */
+    val trouble: StateFlow<ScreenTrouble?> get() = noTrouble
+
+    /** Gets the screen ready to show the presentation afresh, after [trouble]: the presentation then catches it up. */
+    fun loadAgain() = Unit
+
     /** The presentation is over, or the screen went away. */
     fun close()
 }
 
 private val noNotice: StateFlow<ScreenNotice?> = MutableStateFlow(null)
 
+private val noTrouble: StateFlow<ScreenTrouble?> = MutableStateFlow(null)
+
+/** What went wrong on a screen an audience watches, for the presenter, and what mends it ([Audience.loadAgain]). */
+enum class ScreenTrouble(@StringRes val message: Int, @StringRes val action: Int) {
+    /** Android stopped the second screen's page, as it does to free memory: the screen shows nothing. */
+    Stopped(R.string.present_screen_stopped, R.string.map_load_it_again),
+
+    /** The second screen's page didn't load. */
+    DidNotLoad(R.string.present_screen_did_not_load, R.string.map_load_it_again),
+
+    /** Something sent to the TV didn't reach it, so it may not show what the presenter does. */
+    Missed(R.string.present_tv_missed, R.string.present_send_it_again),
+}
+
 /**
  * A second screen attached to the phone, by cable or wirelessly: Android
  * shows a [Presentation] on it, holding a page with the audience's view.
  * Nothing on it can be touched, so its videos play with sound at once, and
- * it says how each one is going.
+ * it says how each one is going. When its page stops, as Android frees
+ * memory, or doesn't load, the presenter hears it ([trouble]), and loading
+ * it again puts a new page in its place, which `makePage` makes in the
+ * screen's context.
  */
-class ScreenAudience(context: Context, display: Display) : Audience {
+class ScreenAudience(
+    context: Context,
+    display: Display,
+    private val makePage: (Context) -> OrbitPage = context.container.pages::audiencePage,
+) : Audience {
     private val screen = Presentation(context, display)
-    private val page: OrbitPage = context.container.pages.audiencePage(screen.context)
+    private var page: OrbitPage = makePage(screen.context)
+    private val troubled = MutableStateFlow<ScreenTrouble?>(null)
+    private var mediaListener: ((MapMessage.MediaState) -> Unit)? = null
 
     override val name: String = display.name
 
+    override val trouble: StateFlow<ScreenTrouble?> = troubled.asStateFlow()
+
     init {
+        hear(page)
         screen.setContentView(page.webView)
 
         try {
@@ -94,16 +135,34 @@ class ScreenAudience(context: Context, display: Display) : Audience {
     override fun send(command: AudienceCommand) = page.send(command)
 
     override fun listen(listener: (MapMessage.MediaState) -> Unit) {
-        page.listener = { message ->
-            if (message is MapMessage.MediaState) {
-                listener(message)
-            }
-        }
+        mediaListener = listener
+    }
+
+    /** A new page in place of the one that stopped or didn't load: it waits for the presentation to catch it up. */
+    override fun loadAgain() {
+        val gone = page
+        page = makePage(screen.context)
+        hear(page)
+        screen.setContentView(page.webView)
+        gone.destroy()
+        troubled.value = null
     }
 
     override fun close() {
         screen.dismiss()
         page.destroy()
+    }
+
+    /** Hears what `page` says: how its video goes, for the presentation, and that it stopped or didn't load, for the presenter. */
+    private fun hear(page: OrbitPage) {
+        page.listener = { message ->
+            when (message) {
+                is MapMessage.MediaState -> mediaListener?.invoke(message)
+                MapMessage.Stopped -> troubled.value = ScreenTrouble.Stopped
+                MapMessage.DidNotLoad -> troubled.value = ScreenTrouble.DidNotLoad
+                else -> Unit
+            }
+        }
     }
 
     private companion object {
@@ -148,10 +207,10 @@ fun rememberSecondScreen(): Int? {
  * The audience for a presentation of the map in `mapFolder`: a TV the phone
  * is casting to, else a second screen, else none. Made and closed as screens
  * come and go. A TV gets the map's pictures that can't go clean only when
- * they're among `asTheyAre`, as the presenter chose.
+ * they're among `asTheyAre`, as the presenter chose, as they were then.
  */
 @Composable
-fun rememberAudience(mapFolder: File, asTheyAre: () -> Set<String>, onAudience: (Audience?) -> Unit): Audience? {
+fun rememberAudience(mapFolder: File, asTheyAre: () -> AsTheyAreFiles, onAudience: (Audience?) -> Unit): Audience? {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val secondScreen = rememberSecondScreen()

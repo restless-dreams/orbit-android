@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.displayCutout
@@ -26,9 +28,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -79,6 +83,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -97,6 +102,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalResources
@@ -112,16 +118,24 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.coerceAtMost
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hyuchia.orbit.AppContainer
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
+import com.hyuchia.orbit.data.AsTheyAreFiles
+import com.hyuchia.orbit.data.FileChanged
 import com.hyuchia.orbit.data.FolderNotes
 import com.hyuchia.orbit.data.ImportResult
+import com.hyuchia.orbit.data.LockedCover
 import com.hyuchia.orbit.data.MapFileTypes
 import com.hyuchia.orbit.data.MapSummary
 import com.hyuchia.orbit.data.MapText
@@ -146,6 +160,7 @@ import com.hyuchia.orbit.privacy.rememberUnlocking
 import com.hyuchia.orbit.settings.noteEntries
 import com.hyuchia.orbit.study.rememberStudyDay
 import com.hyuchia.orbit.theme.LocalAppSettings
+import com.hyuchia.orbit.ui.AsTheyAreChoice
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.KeyboardShortcuts
 import com.hyuchia.orbit.ui.Keys
@@ -159,16 +174,47 @@ import com.hyuchia.orbit.ui.TitleDialog
 import com.hyuchia.orbit.ui.exportName
 import com.hyuchia.orbit.ui.isShort
 import com.hyuchia.orbit.ui.orbitViewModel
+import com.hyuchia.orbit.ui.rememberAsTheyAre
 import com.hyuchia.orbit.ui.shareMapExport
 import com.hyuchia.orbit.ui.withdrawShortcut
 import com.hyuchia.orbit.widget.canPinMapWidget
 import com.hyuchia.orbit.widget.pinMapWidget
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
 
+/** The widest Home's search is in the slim bar of a phone on its side. */
 private val BarSearchWidth = 360.dp
+
+/** The search's room around its words: its icon before them, and its padding after. */
+private val AroundSearchWords = 72.dp
+
+/** What the slim bar keeps beside its search: the title and the count of maps, at the start, and its two buttons and their padding. */
+private val BarTitleRoom = 112.dp
+private val BarButtonsRoom = 120.dp
+
+/**
+ * How wide the search is in the slim bar of a window `width` wide, beside
+ * its title and buttons, at most [BarSearchWidth]: null where that would
+ * leave its words, `words` wide, no room to show whole, the search then
+ * above the maps, as on a phone held upright. The title grows with the font.
+ */
+internal fun barSearchWidth(width: Dp, fontScale: Float, words: Dp): Dp? {
+    val room = width - BarButtonsRoom - BarTitleRoom * fontScale.coerceAtLeast(1f)
+    return room.coerceAtMost(BarSearchWidth).takeIf { it >= words + AroundSearchWords }
+}
+
+/**
+ * The window's sides Home's search keeps clear of: the system bars' and the
+ * cutout's. The keyboard takes none of the sides, and its insets change with
+ * each frame as it comes up, so reading them too would compose Home's whole
+ * body again with each frame when its search is tapped.
+ */
+@Composable
+internal fun homeSides(): PaddingValues = WindowInsets.systemBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal).asPaddingValues()
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -198,38 +244,92 @@ fun HomeScreen(
     val hiding by rememberUpdatedState(settings.hideLockedPrivateMaps)
 
     /**
+     * How a message about a deleted map names it, as private maps are as it shows: by its title, unless it's private and
+     * they're locked, then by its cover, if it has one, or by none (a null name); with whether that names a private map,
+     * so the message goes as they lock. Null while they hide it: nothing's said of it then.
+     */
+    fun nameOf(id: String, title: String, isPrivate: Boolean, cover: LockedCover?): Pair<String?, Boolean>? {
+        val privacy = container.privateMaps.view.value
+        val hidden = isPrivate && privacy.hides(id)
+
+        if (hidden && privacy.conceals(hiding)) {
+            return null
+        }
+
+        val named = when {
+            !hidden -> title
+            cover != null -> resources.coverTitle(cover)
+            else -> null
+        }
+
+        return named to (isPrivate && !hidden)
+    }
+
+    /**
+     * Says a map couldn't be deleted (`deleting`) or brought back from the trash, so it's where it was, named as
+     * [offerBack] names it, for long enough to read; while a newer version keeps the maps, that's why. Named while
+     * they're unlocked, the message goes as they lock, even while it waits for the one before it to go.
+     */
+    suspend fun sayNot(deleting: Boolean, id: String, title: String, isPrivate: Boolean, cover: LockedCover?) {
+        snackbars.currentSnackbarData?.dismiss()
+
+        if (!container.maps.writable.value) {
+            snackbars.showSnackbar(MapMessage(resources.getString(R.string.data_newer_version_keeps_maps), namesPrivateMap = false, duration = SnackbarDuration.Long))
+            return
+        }
+
+        val (named, namesPrivateMap) = nameOf(id, title, isPrivate, cover) ?: return
+
+        val message = when {
+            deleting && named != null -> resources.getString(R.string.home_map_not_deleted, named)
+            deleting -> resources.getString(R.string.home_private_map_not_deleted)
+            named != null -> resources.getString(R.string.home_map_not_restored, named)
+            else -> resources.getString(R.string.home_private_map_not_restored)
+        }
+
+        suspend fun show(): SnackbarResult = snackbars.showSnackbar(MapMessage(message, namesPrivateMap, duration = SnackbarDuration.Long))
+
+        if (namesPrivateMap) {
+            container.privateMaps.lock.unlessLocked(::show)
+        } else {
+            show()
+        }
+    }
+
+    /** Says the map couldn't go to the trash, and is still here as it was ([sayNot]); nothing when it's gone another way meanwhile. */
+    suspend fun sayNotDeleted(map: MapSummary) {
+        if (container.maps.exists(map.id)) {
+            sayNot(deleting = true, map.id, map.title, map.metadata.isPrivate, map.metadata.cover)
+        }
+    }
+
+    /** Says the map couldn't come back from the trash, and is still there as it was ([sayNot]); nothing when it's left another way meanwhile, as restored beside the list. */
+    suspend fun sayNotRestored(item: TrashedMap) {
+        if (container.maps.trash.value.any { it.folder == item.folder }) {
+            sayNot(deleting = false, item.id, item.title, item.isPrivate, item.cover)
+        }
+    }
+
+    /**
      * Offers a deleted map back with Undo, named as private maps are as the message shows, not as they were when it was
      * deleted, which takes a moment: a private one by its title only while it's unlocked, by its cover, if it has one,
      * while it's locked, and not at all while they hide (it waits in the trash). Named while they're unlocked, the
      * message goes as they lock, even while it waits for the one before it to go. Otherwise it names none of them, so it
-     * stays as they lock, with its Undo, even when Home hears they locked only after it showed.
+     * stays as they lock, with its Undo, even when Home hears they locked only after it showed. An Undo that can't bring
+     * it back says so ([sayNotRestored]).
      */
     suspend fun offerBack(item: TrashedMap) {
         snackbars.currentSnackbarData?.dismiss()
-        val privacy = container.privateMaps.view.value
-        val hidden = item.isPrivate && privacy.hides(item.id)
-
-        if (hidden && privacy.conceals(hiding)) {
-            return
-        }
-
-        val named = when {
-            !hidden -> item.title
-            item.cover != null -> resources.coverTitle(item.cover)
-            else -> null
-        }
-
+        val (named, namesPrivateMap) = nameOf(item.id, item.title, item.isPrivate, item.cover) ?: return
         val message = named?.let { resources.getString(R.string.home_deleted_map, it) } ?: resources.getString(R.string.private_deleted_map)
-
-        val namesPrivateMap = item.isPrivate && !hidden
         val undo = resources.getString(R.string.common_undo)
 
         suspend fun show(): SnackbarResult = snackbars.showSnackbar(MapMessage(message, namesPrivateMap, actionLabel = undo, duration = SnackbarDuration.Long))
 
         val result = if (namesPrivateMap) container.privateMaps.lock.unlessLocked(::show) else show()
 
-        if (result == SnackbarResult.ActionPerformed) {
-            model.restore(item)
+        if (result == SnackbarResult.ActionPerformed && !model.restore(item).await()) {
+            sayNotRestored(item)
         }
     }
 
@@ -244,20 +344,26 @@ fun HomeScreen(
     var renaming by remember { mutableStateOf<MapSummary?>(null) }
     var tagging by remember { mutableStateOf<MapSummary?>(null) }
     var managingTags by rememberSaveable { mutableStateOf(false) }
-    // While Edit tags is open over Home, what Home says shows in it: a tag renamed in every map says there which maps kept it.
+    // While Edit tags or a map's tags are open over Home, what Home says shows in them: a tag renamed in every map says there
+    // which maps kept it, and a map's tags that couldn't change say why.
     val tagMessages = remember { SnackbarHostState() }
     // A map with pictures, videos or audio, and what goes with it, while its sheet asks how to share it.
     var sharing by remember { mutableStateOf<SharingMap?>(null) }
+    // What the person answers about a map's files that can't go clean, for one share: kept past its sheet, which closes as the share
+    // starts, so a file that changes before it goes is asked about again, here, and only that one.
+    var sharingChoice by remember { mutableStateOf(AsTheyAreChoice()) }
+    val sharingAsTheyAre = rememberAsTheyAre(sharingChoice)
     // A private map whose cover is being chosen.
     var covering by remember { mutableStateOf<MapSummary?>(null) }
     var fabOpen by rememberSaveable { mutableStateOf(false) }
 
-    // A map that couldn't be made or duplicated says why, and a tag that stayed on maps says which.
+    // A map that couldn't be made, renamed, tagged or duplicated says why, and a tag that stayed on maps says which.
     LaunchedEffect(model) {
         model.problems.collect { problem ->
-            val host = if (managingTags) tagMessages else snackbars
+            val host = if (managingTags || tagging != null) tagMessages else snackbars
             host.currentSnackbarData?.dismiss()
-            host.showSnackbar(problem)
+            // Why something didn't happen takes a sentence or two: long enough to read them.
+            host.showSnackbar(problem, duration = SnackbarDuration.Long)
         }
     }
 
@@ -298,9 +404,21 @@ fun HomeScreen(
         }
     }
 
-    suspend fun share(map: MapSummary, withFiles: Boolean, asTheyAre: Set<String> = emptySet()) {
+    /**
+     * Shares `map`, with its files or not, and those of them chosen to go as
+     * they are (`asTheyAre`). One of those that changed since the person
+     * answered about it is asked about again, once, as it is now.
+     */
+    suspend fun share(map: MapSummary, withFiles: Boolean, asTheyAre: AsTheyAreFiles = AsTheyAreFiles.NONE, again: Boolean = false) {
         try {
             shareMap(context, container, map, withFiles, asTheyAre)
+        } catch (changed: FileChanged) {
+            if (again) {
+                snackbars.currentSnackbarData?.dismiss()
+                snackbars.showSnackbar(resources.getString(R.string.home_could_not_share_map))
+            } else {
+                sharingAsTheyAre.askAgain(container.maps.uncleaned(map.id)) { now -> scope.launch { share(map, withFiles, now, again = true) } }
+            }
         } catch (failed: IOException) {
             Logs.warn("OrbitHome", "Couldn't make a file of a map to share", failed)
             snackbars.currentSnackbarData?.dismiss()
@@ -344,6 +462,7 @@ fun HomeScreen(
                 if (media.isEmpty) {
                     share(map, withFiles = false)
                 } else {
+                    sharingChoice = AsTheyAreChoice()
                     sharing = SharingMap(map, media, clean, uncleaned, yaml)
                 }
             }
@@ -351,7 +470,7 @@ fun HomeScreen(
         onSend = { onSend(map) },
         onDelete = {
             scope.launch {
-                val deleted = model.delete(map.id) ?: return@launch
+                val deleted = model.delete(map.id) ?: return@launch sayNotDeleted(map)
                 withdrawShortcut(context, map.id)
                 offerBack(deleted)
             }
@@ -377,6 +496,10 @@ fun HomeScreen(
     val allMaps by container.maps.maps.collectAsStateWithLifecycle()
     // While private maps hide, the folder's cards don't mention them at all.
     val concealing = privacy.conceals(settings.hideLockedPrivateMaps)
+    // The tags Home offers, asked of the lock itself, as the cards are (see HomeCard): a tag only private maps have goes the
+    // moment they lock, rather than once Home's state follows.
+    val homeTags = remember(allMaps, privacy) { openTags(allMaps.orEmpty(), privacy) }
+    val homeTag = shownTag(homeTags, state.tag)
 
     fun quoted(title: String): String = resources.getString(R.string.settings_quoted_map_title, title)
 
@@ -434,8 +557,28 @@ fun HomeScreen(
     val drops = rememberHomeDrops(onImported)
 
     BoxWithConstraints(Modifier.fillMaxSize().homeDropTarget(drops)) {
-    // A phone on its side: the home's title and search share one slim bar, so the maps get the room.
+    // A phone on its side: the home's title and search share one slim bar, so the maps get the room, where the
+    // window is wide enough for the search beside the title; one beside another app's keeps it above the maps.
     val short = isShort(maxHeight)
+    val sides = homeSides()
+    val density = LocalDensity.current
+    // The search's words as wide as its field shows them, in the app's language and font size.
+    val searchWords = rememberTextMeasurer().measure(stringResource(R.string.common_search_your_maps), MaterialTheme.typography.bodyLarge, maxLines = 1).size.width
+    val barSearch = barSearchWidth(maxWidth - sides.calculateLeftPadding(LayoutDirection.Ltr) - sides.calculateRightPadding(LayoutDirection.Ltr), density.fontScale, with(density) { searchWords.toDp() })
+    val searchInBar = short && barSearch != null
+
+    // Turned upright, a phone puts the search back above the maps: a list at its top stays there to show it, rather
+    // than keeping the card that was first, with the search just above it, out of view.
+    val searchWasInBar = remember { booleanArrayOf(searchInBar) }
+
+    SideEffect {
+        if (searchWasInBar[0] && !searchInBar && grid.firstVisibleItemIndex == 0 && grid.firstVisibleItemScrollOffset == 0) {
+            grid.requestScrollToItem(0)
+        }
+
+        searchWasInBar[0] = searchInBar
+    }
+
     KeyboardShortcuts(
         listOf(
             ShortcutGroup(
@@ -452,7 +595,7 @@ fun HomeScreen(
                     Shortcut(stringResource(R.string.common_search_your_maps), listOf(Keys(KeyEvent.KEYCODE_F, ctrl = true)), anywhere = true) {
                         scope.launch {
                             // Above the maps on a tall screen: scrolled back into view first.
-                            if (!short) {
+                            if (!searchInBar) {
                                 grid.scrollToItem(0)
                                 withFrameNanos {}
                             }
@@ -512,10 +655,12 @@ fun HomeScreen(
             ) {
                 if (short) {
                     TopAppBar(
-                        title = { Text(stringResource(R.string.app_name)) },
-                        subtitle = { Text(count) },
+                        title = { Text(stringResource(R.string.app_name), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        subtitle = { Text(count, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         actions = {
-                            SearchField(query, model::search, searchFocus, Modifier.width(BarSearchWidth))
+                            if (barSearch != null) {
+                                SearchField(query, model::search, searchFocus, Modifier.width(barSearch))
+                            }
 
                             PrivateMapsButton(state.canLock, state.canShowPrivate, onLock = model::lockPrivateMaps, onShow = ::unlock)
 
@@ -569,15 +714,15 @@ fun HomeScreen(
                 .fillMaxSize()
                 .then(behindTheMenu),
         ) {
-            if (!short) {
+            if (!searchInBar) {
                 item(key = "search", span = { GridItemSpan(maxLineSpan) }) {
                     SearchField(query, model::search, searchFocus, Modifier.fillMaxWidth())
                 }
             }
 
-            if (state.tags.isNotEmpty()) {
+            if (homeTags.isNotEmpty()) {
                 item(key = "tags", span = { GridItemSpan(maxLineSpan) }) {
-                    TagFilter(state.tags, state.tag, onShow = model::showTag, onEdit = { managingTags = true })
+                    TagFilter(homeTags, homeTag, onShow = model::showTag, onEdit = { managingTags = true })
                 }
             }
 
@@ -586,7 +731,7 @@ fun HomeScreen(
             }
 
             crash?.let { report ->
-                item(key = "crash", span = { GridItemSpan(maxLineSpan) }) { CrashCard(report, onDone = { crash = null }, Modifier.animateItem()) }
+                item(key = "crash", span = { GridItemSpan(maxLineSpan) }) { CrashCard(report, onDone = { crash = null }, say = ::say, Modifier.animateItem()) }
             }
 
             release?.let { new ->
@@ -679,7 +824,9 @@ fun HomeScreen(
                 }
             }
 
-            val results = state.results
+            // Asked of the lock itself, as the cards are (see HomeCard): a private map found before the maps locked is gone the
+            // moment they do, rather than once Home's state follows.
+            val results = state.results?.filterNot { privacy.hides(it.map) }
 
             // Where the maps are, once: until a folder keeps them in step, or the person says they've read it. It
             // comes after the pinned maps, so a first Home leads with the welcome map, and the + rests clear of it.
@@ -772,6 +919,7 @@ fun HomeScreen(
             shared.media,
             shared.clean,
             shared.uncleaned,
+            sharingAsTheyAre,
             yaml = shared.yaml,
             onShare = { withFiles, asTheyAre ->
                 sharing = null
@@ -782,18 +930,31 @@ fun HomeScreen(
     }
 
     tagging?.let { map ->
-        MapTagsSheet(map, known = state.tags.map { it.name }, onChange = { tags -> model.setTags(map.id, tags) }, onDismiss = { tagging = null })
+        // Its tags as its file has them now, for the sheet to show again when a change wasn't kept.
+        val now = allMaps?.firstOrNull { it.id == map.id } ?: map
+
+        MapTagsSheet(
+            now,
+            known = homeTags.map { it.name },
+            onChange = { tags -> model.setTags(map.id, tags) },
+            onDismiss = {
+                tagging = null
+                tagMessages.currentSnackbarData?.dismiss()
+            },
+            messages = tagMessages,
+            notKept = model.tagsNotKept,
+        )
     }
 
     // Removing the last tag leaves nothing to edit.
-    LaunchedEffect(state.tags.isEmpty()) {
-        if (state.tags.isEmpty() && !state.loading) {
+    LaunchedEffect(homeTags.isEmpty()) {
+        if (homeTags.isEmpty() && !state.loading) {
             managingTags = false
         }
     }
 
     if (managingTags) {
-        ManageTagsSheet(state.tags, tagMessages, onRename = model::renameTag, onRemove = model::removeTag, onDismiss = { managingTags = false })
+        ManageTagsSheet(homeTags, tagMessages, onRename = model::renameTag, onRemove = model::removeTag, onDismiss = { managingTags = false })
     }
 
     renaming?.let { map ->
@@ -826,11 +987,33 @@ internal fun RenameMapDialog(map: MapSummary, onRename: (String) -> Unit, onDism
     }
 }
 
-/** Tags `map` from its card, with the tags of the maps shown (`known`): a private map's ask keyboards not to learn from them. */
+/**
+ * Tags `map` from its card, with the tags of the maps shown (`known`): a private map's ask keyboards not to learn from
+ * them. What Home says meanwhile (`messages`) shows over the sheet, and a change to this map's tags that wasn't kept
+ * (its id, among the maps' in `notKept`) leaves the map's tags shown as they are.
+ */
 @Composable
-internal fun MapTagsSheet(map: MapSummary, known: List<String>, onChange: (List<String>) -> Unit, onDismiss: () -> Unit) {
+internal fun MapTagsSheet(
+    map: MapSummary,
+    known: List<String>,
+    onChange: (List<String>) -> Unit,
+    onDismiss: () -> Unit,
+    messages: SnackbarHostState? = null,
+    notKept: Flow<String> = emptyFlow(),
+) {
+    // Only this map's tags not kept show its tags again as they are: another map's problem meanwhile leaves them.
+    var kept by remember(map.id) { mutableIntStateOf(0) }
+
+    LaunchedEffect(map.id, notKept) {
+        notKept.collect { id ->
+            if (id == map.id) {
+                kept += 1
+            }
+        }
+    }
+
     KeyboardsDontLearn(enabled = map.metadata.isPrivate) {
-        TagsSheet(title = map.title, tags = map.outline.tags, known = known, onChange = onChange, onDismiss = onDismiss)
+        TagsSheet(title = map.title, tags = map.outline.tags, known = known, onChange = onChange, onDismiss = onDismiss, messages = messages, kept = kept)
     }
 }
 
@@ -868,16 +1051,19 @@ private fun SearchField(query: String, onQuery: (String) -> Unit, focusRequester
     TextField(
         value = query,
         onValueChange = onQuery,
-        placeholder = { Text(description) },
+        placeholder = { Text(description, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-        trailingIcon = {
-            if (query.isNotEmpty()) {
+        // Only while there's something to clear, so an empty search gives its words the room.
+        trailingIcon = if (query.isNotEmpty()) {
+            {
                 val clear = stringResource(R.string.home_clear_the_search)
 
                 Hint(clear) {
                     IconButton(onClick = { onQuery("") }) { Icon(Icons.Outlined.Close, contentDescription = clear) }
                 }
             }
+        } else {
+            null
         },
         singleLine = true,
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -1090,11 +1276,12 @@ private class SharingMap(val map: MapSummary, val media: MediaSummary, val clean
 /**
  * Shares a map as a zip with its own pictures, videos and audio (see
  * [MapRepository.writeZip]), with those that can't go clean in `asTheyAre`
- * as they are, or as its text alone ([TextFile]). A private map that locked
- * while its zip was written, which takes seconds with its videos, opens
- * nothing ([shareMapExport]).
+ * as they are ([AsTheyAreFiles]), or as its text alone ([TextFile]):
+ * [FileChanged] when one of them changed since the person answered. A
+ * private map that locked while its zip was written, which takes seconds
+ * with its videos, opens nothing ([shareMapExport]).
  */
-suspend fun shareMap(context: Context, container: AppContainer, map: MapSummary, withFiles: Boolean, asTheyAre: Set<String> = emptySet()) {
+suspend fun shareMap(context: Context, container: AppContainer, map: MapSummary, withFiles: Boolean, asTheyAre: AsTheyAreFiles = AsTheyAreFiles.NONE) {
     if (withFiles) {
         shareMapExport(context, map.id, exportName(context, map.title, "zip"), "application/zip", map.title) { output -> container.maps.writeZip(map.id, output, asTheyAre, room = this) }
     } else {

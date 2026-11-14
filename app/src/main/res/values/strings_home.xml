@@ -8,6 +8,14 @@
     </plurals>
     <!-- A map was moved to the trash; Undo brings it back. %1$s is its title. -->
     <string name="home_deleted_map">Deleted “%1$s”</string>
+    <!-- A map Orbit couldn't move to the trash (storage that fails, say), from its card or its own screen: it's still among the maps, as it was. %1$s is its title, or a locked private map's cover. -->
+    <string name="home_map_not_deleted">Orbit couldn’t delete “%1$s”. It’s still in your maps.</string>
+    <!-- The same, for a locked private map without a cover, which isn't named. -->
+    <string name="home_private_map_not_deleted">Orbit couldn’t delete a private map. It’s still in your maps.</string>
+    <!-- Undo after deleting a map, when Orbit couldn't bring it back: it's still in the trash, as it was. %1$s is its title, or a locked private map's cover. -->
+    <string name="home_map_not_restored">Orbit couldn’t restore “%1$s”. It’s still in the trash.</string>
+    <!-- The same, for a locked private map without a cover, which isn't named. -->
+    <string name="home_private_map_not_restored">Orbit couldn’t restore a private map. It’s still in the trash.</string>
     <string name="home_add_widget_from_list">Add Orbit’s widget from your home screen’s list of widgets</string>
     <!-- Sharing a map from its card, when no file of it could be made to share. -->
     <string name="home_could_not_share_map">Orbit couldn’t make a file of that map to share. Is this device’s storage full?</string>
@@ -15,6 +23,10 @@
     <string name="home_map_from_newer_orbit">A newer version of Orbit made this map, so this one leaves it as it is. Update Orbit to change it.</string>
     <string name="home_map_unreadable">Orbit couldn’t read all of this map, so it leaves it as it is. Open it to fix its text.</string>
     <string name="home_map_kept_changing">The map kept changing, so Orbit left it as it was. Try again.</string>
+    <!-- A map renamed, tagged or copied from its card when the page that makes the change couldn't: %1$s says why, as the page does ("The page didn’t answer", or that the device's WebView is too old to draw maps). -->
+    <string name="home_map_not_renamed">Orbit couldn’t rename the map. %1$s.</string>
+    <string name="home_map_tags_not_changed">Orbit couldn’t change the map’s tags. %1$s.</string>
+    <string name="home_map_not_copied">Orbit couldn’t duplicate the map. %1$s.</string>
     <!-- A tag renamed or taken out in every map stays on maps Orbit can only show. -->
     <plurals name="home_tag_left_on_maps">
         <item quantity="one">The tag stays on %1$d map that Orbit can only show: a newer version made it, or it can’t read all of it.</item>
@@ -36,6 +48,13 @@
         <item quantity="one">The tag stays on %1$d map: Orbit couldn’t change it. Try again.</item>
         <item quantity="other">The tag stays on %1$d maps: Orbit couldn’t change them. Try again.</item>
     </plurals>
+    <!-- A tag renamed or taken out in every map stays on a map because the page that makes the change couldn't: %1$s is its title, %2$s why, as the page says it. -->
+    <string name="home_tag_stays_on_map_page_failed">The tag stays on “%1$s”. %2$s.</string>
+    <!-- The same, for several maps: %1$d counts them. -->
+    <plurals name="home_tag_stays_on_maps_page_failed">
+        <item quantity="one">The tag stays on %1$d map. %2$s.</item>
+        <item quantity="other">The tag stays on %1$d maps. %2$s.</item>
+    </plurals>
     <string name="home_pinned_maps">Pinned</string>
     <string name="home_everything_else">Everything else</string>
     <string name="home_clear_the_search">Clear the search</string>
@@ -43,7 +62,7 @@
     <string name="home_no_maps_match">No maps match “%1$s”</string>
     <!-- The same, as screen readers say it while the search field says what was typed. -->
     <string name="home_no_maps_match_said">No maps match</string>
-    <string name="home_search_looks_in">Search looks in titles, ideas and notes.</string>
+    <string name="home_search_looks_in">Search looks in titles, ideas, notes and tags.</string>
     <!-- Above a search's results, and said as they change. -->
     <plurals name="home_maps_match">
         <item quantity="one">%1$d map matches</item>
@@ -150,6 +169,7 @@
     <string name="home_dismiss">Dismiss</string>
     <string name="home_share_report">Share report</string>
     <string name="home_share_the_crash_report">Share the crash report</string>
+    <string name="home_crash_report_not_deleted">Orbit couldn’t delete the crash report. It’s still on this device.</string>
 
     <!-- The card about a new version, in the APK from the website and GitHub, which no store updates. %1$s is the version, as 0.1.2. -->
     <string name="home_update_title">Orbit %1$s is out</string>

@@ -34,7 +34,7 @@
     <!--
         A backup comes back onto any version of Orbit, an older one too (an F-Droid build a
         release behind, say): each opens what a newer one left without harm, keeping what it
-        doesn't know and only showing what it can't change (docs/architecture.md).
+        doesn't know and only showing what it can't change (docs/architecture/files-and-upgrades.md).
     -->
     <application
         android:name=".OrbitApplication"

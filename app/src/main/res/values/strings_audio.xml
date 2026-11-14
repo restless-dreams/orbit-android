@@ -61,12 +61,16 @@
     <string name="audio_needs_the_microphone">Orbit needs the microphone to record a voice memo. You can allow it in Settings.</string>
     <string name="audio_no_microphone">This device has no microphone Orbit can record with.</string>
     <string name="audio_recording_failed">The recording stopped. Another app may be using the microphone.</string>
+    <!-- When the phone's sound is a call's, or another app's that won't let it go, as a voice memo starts or goes on. -->
+    <string name="audio_sound_is_taken">Orbit can\'t record during a call, or while another app keeps the sound. Try again once it\'s over.</string>
     <string name="audio_longest_memo">That\'s as long as a voice memo can be, so it stopped there.</string>
     <string name="audio_map_room_reached">That\'s all the room this map has left, so the memo stopped there.</string>
     <!-- %1$s is what the map's pictures, videos and sounds come to, such as 950 MB or 1 GB. -->
     <string name="audio_map_full">This map\'s pictures, videos and sounds come to %1$s, all a map can carry when it\'s shared or backed up. Take one off to make room for a voice memo.</string>
     <!-- After a voice memo joins its idea, with Undo: %1$s is the idea. -->
     <string name="audio_memo_saved">Saved the voice memo in %1$s</string>
+    <!-- A voice memo kept as its idea was deleted meanwhile. -->
+    <string name="audio_memo_idea_gone">The voice memo wasn’t kept: its idea is gone</string>
     <!-- Under the recorder's clock once a take is finished: listen to it, then keep it or record again. -->
     <string name="audio_ready_to_save">Ready to save</string>
 

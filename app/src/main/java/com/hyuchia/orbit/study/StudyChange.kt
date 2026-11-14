@@ -13,9 +13,23 @@ sealed interface StudyChange {
     /** This device's answers once the change is made to them (`mine`), beside the other devices' (`elsewhere`, by device). */
     fun applyTo(mine: Map<String, StudyCard>, elsewhere: Map<String, Map<String, StudyCard>>): Map<String, StudyCard>
 
-    /** `idea` was answered: its card goes as `card` says. */
-    data class Answer(val idea: String, val card: StudyCard) : StudyChange {
-        override fun applyTo(mine: Map<String, StudyCard>, elsewhere: Map<String, Map<String, StudyCard>>): Map<String, StudyCard> = mine + (idea to card)
+    /**
+     * `idea` was answered: its card goes as `card` says, over this device's
+     * own answer before it (`before`, as the session had it; null: none). A
+     * later answer that's there instead, as another device's is once the
+     * other devices' answers were folded into this one's (the folder was
+     * left), stays: a card goes as its latest answer anywhere left it.
+     */
+    data class Answer(val idea: String, val card: StudyCard, val before: StudyCard?) : StudyChange {
+        override fun applyTo(mine: Map<String, StudyCard>, elsewhere: Map<String, Map<String, StudyCard>>): Map<String, StudyCard> {
+            val kept = mine[idea]
+
+            if (kept != null && kept != before && kept.outranks(card)) {
+                return mine
+            }
+
+            return mine + (idea to card)
+        }
     }
 
     /**

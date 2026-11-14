@@ -7,12 +7,17 @@
 #   - the welcome map opened, until its page has drawn its planets, and closed again with Back, Orbit still in front;
 #   - a second cold start;
 #   - with the journeys' APK, the journeys in journeys/: an idea added on a map, edited, found with its search and
-#     there again after a restart; a panel open as the phone turns; a file opened with Orbit and text and a file
-#     shared to it; an idea caught from Quick Settings; and a map's screen, and a private map's, as Android brings
-#     them back after stopping Orbit's process;
-#   - the crash log, which has to stay empty, and no "Orbit isn't responding".
+#     there again after a restart; a map closed and opened again at once; a panel open as the phone turns; the welcome
+#     map presented; Orbit in Spanish and Brazilian Portuguese; a file opened with Orbit and text and a file shared to
+#     it; another version of a map here, asked about again after Android stopped Orbit; an idea caught from Quick
+#     Settings; the map widget added from the launcher's list and from a map's menu; a map's launcher shortcut, renamed
+#     with the map on Home, opening it; and a map's screen, and a private map's, as Android brings them back after
+#     stopping Orbit's process, and an idea added right before;
+#   - the crash log, which has to stay empty, and no "Orbit isn't responding" (a run that fails, or sees any app stop
+#     responding, keeps the ANR traces and the crash log in anr/ of the output folder).
 #
-# On a WebView too old to draw maps (older than Chromium 99), it checks Orbit says so instead: on Home, and in the
+# On a WebView too old to draw maps (older than Chromium 99), it checks Orbit says so instead: on Home, as the
+# welcome map is renamed, tagged and duplicated from its card (each says why it can't be, and Orbit stays), and in the
 # welcome map's place, which it still opens and closes. The journeys need maps drawn, and are left out there.
 #
 # Under load, the emulator's own apps (its launcher, System UI) can stop responding as it starts: their dialog is
@@ -50,12 +55,30 @@ build_tools=$(ls -d "$sdk"/build-tools/* | sort -V | tail -1)
 # The oldest Chromium Orbit's pages draw maps in (SystemWebView.MINIMUM_CHROMIUM).
 minimum_chromium=99
 
+# Keeps what Android knows about an app that stopped responding: its ANR records and, where the device lets shell read
+# them, the thread dumps in /data/anr, with the crash buffer. A run that passes after an ANR keeps them too, since an
+# ANR's stacks are gone once the device is.
+save_anr_traces() {
+    mkdir -p "$out/anr"
+    "$adb" shell dumpsys activity anr > "$out/anr/dumpsys-anr.txt" 2> /dev/null || true
+    "$adb" logcat -b crash -d > "$out/anr/crash.txt" 2> /dev/null || true
+    "$adb" logcat -d | grep -B 2 -A 40 'ANR in ' > "$out/anr/logcat-anr.txt" 2> /dev/null || true
+    local trace
+    for trace in $("$adb" shell ls /data/anr 2> /dev/null | tr -d '\r'); do
+        "$adb" shell cat "/data/anr/$trace" > "$out/anr/$trace" 2> /dev/null || true
+    done
+    # An empty file says nothing: only what was found stays.
+    find "$out/anr" -type f -empty -delete
+    rmdir "$out/anr" 2> /dev/null || true
+}
+
 # Says what went wrong, with the crash log when Orbit crashed, and keeps the screen and the log.
 fail() {
     echo "Smoke test failed: $*" >&2
     "$adb" exec-out screencap -p > "$out/failure.png" 2> /dev/null || true
     "$adb" logcat -d > "$out/logcat.txt" 2> /dev/null || true
     "$adb" logcat -b crash -d > "$out/crash.txt" 2> /dev/null || true
+    save_anr_traces
     if [ -s "$out/crash.txt" ]; then
         echo "The crash log:" >&2
         cat "$out/crash.txt" >&2
@@ -74,16 +97,23 @@ done
 [ "$("$adb" shell getprop sys.boot_completed | tr -d '\r')" = 1 ] || fail "the device didn't finish starting"
 
 # A newer WebView than the device came with, installed as an update of its own: Android 10 with Chromium 101, say.
-# Android takes it up once it has prepared it.
+# Android takes it up once it has prepared it, and the run goes on only with it: on the WebView the device came with,
+# a run meant for the newer one would check something else and pass.
 if [ -n "${SMOKE_WEBVIEW:-}" ]; then
-    "$adb" install -r -d "$SMOKE_WEBVIEW" > /dev/null || fail "the WebView in $SMOKE_WEBVIEW didn't install as an update of the device's own"
     version=$("$build_tools/aapt2" dump badging "$SMOKE_WEBVIEW" 2> /dev/null | grep -oE "versionName='[^']*'" | head -1 | cut -d"'" -f2)
+    [ -n "$version" ] || fail "$SMOKE_WEBVIEW isn't an APK that says its version"
+    "$adb" install -r -d "$SMOKE_WEBVIEW" > /dev/null || fail "the WebView in $SMOKE_WEBVIEW didn't install as an update of the device's own"
     for _ in $(seq 1 60); do
-        if "$adb" shell dumpsys webviewupdate | grep -q "Current WebView package.*, $version)"; then
+        if "$adb" shell dumpsys webviewupdate | grep -m1 'Current WebView package' | tr -d '\r' | grep -qF ", $version)"; then
             break
         fi
         sleep 1
     done
+    current=$("$adb" shell dumpsys webviewupdate | grep -m1 -oE 'Current WebView package.*' | tr -d '\r')
+    case "$current" in
+        *", $version)") ;;
+        *) fail "the WebView in $SMOKE_WEBVIEW ($version) didn't become the one apps use: ${current:-no WebView}" ;;
+    esac
 fi
 
 webview=$("$adb" shell dumpsys webviewupdate | grep -m1 -oE 'Current WebView package.*' | tr -d '\r')
@@ -221,10 +251,53 @@ screen "$home" 90 > /dev/null || fail "Home didn't show"
 screen '^👋 Welcome to Orbit$' 30 text > "$out/welcome.txt" || fail "Home didn't show the welcome map"
 "$adb" exec-out screencap -p > "$out/1-home.png"
 
+# Opens the welcome map's card menu on Home and picks `item` in it.
+card_menu() {
+    local menu item
+    menu=$(screen '^More options for 👋 Welcome to Orbit$' 30 content-desc) || fail "the welcome map's card had no menu"
+    read -r x y <<< "$menu"
+    "$adb" shell input tap "$x" "$y"
+    item=$(screen "^$1\$" 30 text) || fail "the welcome map's card menu had no $1"
+    read -r x y <<< "$item"
+    "$adb" shell input tap "$x" "$y"
+}
+
 if [ -n "$old_webview" ]; then
     # Home says what to update, and that the maps are all still there.
     screen '^Update .* to see your maps$' 30 text > /dev/null || fail "Home didn't say the WebView is too old to draw maps"
     "$adb" exec-out screencap -p > "$out/1-old-webview-on-home.png"
+
+    # Home renames, tags and duplicates maps on the page that draws them, which can't run here: it says why, and Orbit
+    # stays, rather than closing.
+    echo "Renaming, tagging and duplicating the welcome map from its card"
+    card_menu Rename
+    screen '^Rename map$' 30 text > /dev/null || fail "Rename didn't ask for the map's new name"
+    read -r x y < <(screen '^Rename$' 10 text) || fail "Rename's dialog had no Rename"
+    "$adb" shell input tap "$x" "$y"
+    screen "^Orbit couldn.t rename the map\. This device.s WebView is too old" 30 text > /dev/null || fail "Home didn't say why the map couldn't be renamed"
+    in_front || fail "Orbit closed as the welcome map was renamed"
+    "$adb" exec-out screencap -p > "$out/1-old-webview-rename.png"
+    # The message can cover the card's menu: it goes by itself.
+    gone '^Orbit couldn.t rename the map' 30 text || fail "Home's message about the rename didn't go"
+
+    card_menu Tags
+    read -r x y < <(screen '^New tag$' 30 text) || fail "Tags didn't open the map's tags"
+    "$adb" shell input tap "$x" "$y"
+    "$adb" shell input text Lisbon
+    read -r x y < <(screen '^Add$' 10 text) || fail "the map's tags had no Add"
+    "$adb" shell input tap "$x" "$y"
+    screen "^Orbit couldn.t change the map.s tags\. This device.s WebView is too old" 30 text > /dev/null || fail "the map's tags didn't say why they couldn't change"
+    in_front || fail "Orbit closed as the welcome map was tagged"
+    "$adb" exec-out screencap -p > "$out/1-old-webview-tags.png"
+    "$adb" shell input keyevent KEYCODE_BACK
+    gone '^Tags for ' 10 text || "$adb" shell input keyevent KEYCODE_BACK
+    gone '^Tags for ' 10 text || fail "Back didn't close the map's tags"
+
+    card_menu Duplicate
+    screen "^Orbit couldn.t duplicate the map\. This device.s WebView is too old" 30 text > /dev/null || fail "Home didn't say why the map couldn't be duplicated"
+    in_front || fail "Orbit closed as the welcome map was duplicated"
+    "$adb" exec-out screencap -p > "$out/1-old-webview-duplicate.png"
+    gone '^Orbit couldn.t duplicate the map' 30 text || fail "Home's message about the copy didn't go"
 fi
 
 echo "Opening the welcome map"
@@ -284,6 +357,10 @@ fi
 if grep -q -E "Process: $package( |,|$)|>>> $package <<<" "$out/crash.txt" || grep -q "ANR in $package" "$out/logcat.txt"; then
     grep -A 20 "ANR in $package" "$out/logcat.txt" >&2 || true
     fail "Orbit crashed or stopped responding"
+fi
+if grep -q 'ANR in ' "$out/logcat.txt"; then
+    save_anr_traces
+    echo "An app stopped responding meanwhile, and its traces are in $out/anr"
 fi
 others=$( (grep -oE 'Process: [A-Za-z0-9_.:]+' "$out/crash.txt" || true) | cut -d' ' -f2 | sort -u | tr '\n' ' ')
 if [ -n "$others" ]; then

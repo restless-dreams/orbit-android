@@ -64,6 +64,8 @@
     <!-- A drop takes a while to add (its files read, its pictures copied): meanwhile the map was presented, made into a path, studied or
          locked, or an earlier version of it shown, so it takes no changes, and the drop adds nothing. -->
     <string name="drop_not_added_now">What you dropped wasn’t added: the map can’t change right now</string>
+    <!-- What was let go on an idea that was deleted while it came in. -->
+    <string name="drop_idea_gone">What you dropped wasn’t added: its idea is gone</string>
 
     <!-- What a picture, video or sound from another app is called on the map, when its file has no name. -->
     <string name="drop_picture">Picture</string>

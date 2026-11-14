@@ -10,6 +10,7 @@ import com.hyuchia.orbit.page.CheckedMap
 import com.hyuchia.orbit.page.ImportProblem
 import com.hyuchia.orbit.page.ImportWarning
 import com.hyuchia.orbit.page.ImportedFile
+import com.hyuchia.orbit.page.ImportedFileMap
 import com.hyuchia.orbit.page.MapCommand
 import com.hyuchia.orbit.page.PageException
 import com.hyuchia.orbit.page.PagePool
@@ -26,7 +27,11 @@ sealed interface ImportResult {
     /** A map that came in; `notes` say what another app's map had that Orbit keeps another way, or couldn't keep. */
     data class Imported(val id: String, val title: String, val notes: List<String> = emptyList()) : ImportResult
 
-    /** A zip of maps, as Export all writes them, or a workbook's sheets: `added` came in, `alreadyHere` were here. */
+    /**
+     * A zip of maps, as Export all writes them, or a workbook's sheets: `added` came in, `alreadyHere` were here.
+     * What's said of the private maps here waits until it's known whether they hide ([ImportedMaps]). `stopped`
+     * says why a zip of maps stopped partway, when it did ([ImportStoppedException]): the rest is what came before.
+     */
     data class ImportedMany(
         val added: Int,
         val alreadyHere: Int,
@@ -34,6 +39,9 @@ sealed interface ImportResult {
         val privateAlreadyHere: Int = 0,
         val filledIn: Int = 0,
         val privateFilledIn: Int = 0,
+        val pastRoom: Int = 0,
+        val privatePastRoom: Int = 0,
+        val stopped: String? = null,
     ) : ImportResult
 
     /** A map that's already here, `existing`, in another version: it can update it, or be kept as well. */
@@ -69,6 +77,9 @@ private val HEADING = Regex("""^\s{0,3}#{1,6}\s""")
 /** How many spaces a tab counts for in an outline's indents (web/paste.ts reads them the same). */
 private const val TAB_WIDTH = 4
 
+/** How many times files shared into a new map are put on its idea, the map read again each time, while it changes as they're put there. */
+private const val ATTACHING_TRIES = 3
+
 /** What each of Orbit's warnings about another app's map says, by its code. */
 private val WARNING_TEXTS = mapOf(
     "floating-ideas-moved" to R.plurals.data_import_floating_ideas_moved,
@@ -90,15 +101,43 @@ internal fun importable(scheme: String?, authority: String?, ownAuthority: Strin
     scheme == ContentResolver.SCHEME_CONTENT && authority != null && authority != ownAuthority
 
 /**
+ * The maps an import made before Orbit stopped it midway (`made`, in the
+ * order it made them), which it doesn't make again when it runs again, and
+ * what hears each map it makes, as soon as it's there (`making`), to keep it
+ * with the import ([com.hyuchia.orbit.ImportRequests]); a workbook's sheets
+ * come in together, so it hears of them together.
+ */
+class ImportProgress(
+    val made: List<String> = emptyList(),
+    val making: (List<String>) -> Unit = {},
+
+    /** Hears each map made before that goes to the trash after all, as a new map for files that couldn't be put on it does. */
+    val unmaking: (String) -> Unit = {},
+) {
+    /** The `index`th map made before, while it's still there (`exists`). */
+    internal fun made(index: Int, exists: (String) -> Boolean): String? = made.getOrNull(index)?.takeIf(exists)
+
+    companion object {
+        val NONE = ImportProgress()
+    }
+}
+
+/**
  * Turns what other apps hand Orbit into maps: markdown and YAML files, zips
  * of a map and its pictures, maps from other apps (OPML, FreeMind and
  * Freeplane, XMind), and text shared from anywhere. Each map keeps the text
  * it came from in its history, as it came in. What went wrong is said in
- * `words`.
+ * `words`. A private map that's `locked` now is found by its identity alone
+ * as a zip of every map comes in ([MapRepository.importAll]).
  */
-class Importer(private val maps: MapRepository, private val pages: PagePool, private val words: Words) {
+class Importer(
+    private val maps: MapRepository,
+    private val pages: PagePool,
+    private val words: Words,
+    private val locked: (MapSummary) -> Boolean = { false },
+) {
 
-    suspend fun importFile(uri: Uri, resolver: ContentResolver): ImportResult {
+    suspend fun importFile(uri: Uri, resolver: ContentResolver, progress: ImportProgress = ImportProgress.NONE): ImportResult {
         // Orbit reads what it's handed with its own access, so a path on the phone or one of
         // Orbit's own shared files would give another app a way to read Orbit's private files.
         if (!importable(uri.scheme, uri.authority, "${BuildConfig.APPLICATION_ID}.files")) {
@@ -108,20 +147,10 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
         return try {
             // Even asking a file's name can be refused, when the app that gave it can't give it: then the address names it.
             val (name, type) = withContext(Dispatchers.IO) { displayName(uri, resolver).orEmpty() to fromProvider { resolver.getType(uri) }.orEmpty() }
-            val zipNamed = name.endsWith(".zip", ignoreCase = true) || type in MapFileTypes.ZIP
-            val kind = withContext(Dispatchers.IO) { resolver.openInputStream(uri)?.use { OtherApps.kindOf(name, type, zipNamed, it) } }
-                ?: return ImportResult.Failed(words.string(R.string.data_file_unreadable))
+            val kind = withContext(Dispatchers.IO) { kindOf(uri, resolver, name, type) } ?: return ImportResult.Failed(words.string(R.string.data_file_unreadable))
 
             if (kind is FileKind.FromOtherApp) {
-                val limit = if (kind.format == OtherFormat.XMind) OtherApps.WORKBOOK_LIMIT else MAP_TEXT_LIMIT
-                val bytes = withContext(Dispatchers.IO) { resolver.openInputStream(uri)?.use { it.readAtMost((limit + 1).toInt()) } }
-                    ?: return ImportResult.Failed(words.string(R.string.data_file_unreadable))
-
-                if (bytes.size > limit) {
-                    return ImportResult.Failed(words.string(R.string.data_file_too_big_for_map))
-                }
-
-                return importFromOtherApp(bytes, name.ifBlank { null }, kind.format)
+                return importFromOtherApp(uri, resolver, name, kind.format, progress)
             }
 
             if (kind == FileKind.Zip) {
@@ -131,17 +160,20 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
                     ?: return ImportResult.Failed(words.string(R.string.data_file_unreadable))
 
                 if (many) {
-                    val imported = withContext(Dispatchers.IO) { resolver.openInputStream(uri)?.use { maps.importAll(it) } }
-                        ?: return ImportResult.Failed(words.string(R.string.data_file_unreadable))
-                    // Files brought into maps already here are said once it's known whether private maps hide.
-                    return ImportResult.ImportedMany(
-                        imported.added,
-                        imported.alreadyHere,
-                        notes = zipNotes(filledIn = 0, skipped = imported.skipped, leftOut = imported.leftOut, words),
-                        privateAlreadyHere = imported.privateAlreadyHere,
-                        filledIn = imported.filledIn,
-                        privateFilledIn = imported.privateFilledIn,
-                    )
+                    val imported = try {
+                        withContext(Dispatchers.IO) { resolver.openInputStream(uri)?.use { maps.importAll(it, locked) } }
+                            ?: return ImportResult.Failed(words.string(R.string.data_file_unreadable))
+                    } catch (stopped: ImportStoppedException) {
+                        // What came in before it stopped is said as exactly as a whole import is, and why it stopped first.
+                        return importedMany(stopped.soFar, stoppedNote(stopReason(stopped.cause, words.language), words))
+                    }
+
+                    return importedMany(imported)
+                }
+
+                // Made before Orbit stopped: it's there whole, as a map's zip comes in in one step.
+                progress.made(0, maps::exists)?.let { id ->
+                    return ImportResult.Imported(id, maps.summary(id)?.title ?: words.string(R.string.data_map_without_a_title))
                 }
 
                 // A map's zip unpacks to about its size: one there's no room for here is refused before any of it is read.
@@ -156,7 +188,8 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
                     return ImportResult.AlreadyHere(bundle, existing, name.ifBlank { null })
                 }
 
-                return ImportResult.Imported(maps.receive(bundle), bundle.title, notes = listOfNotNull(leftOutNote(bundle.leftOut)))
+                val id = maps.receive(bundle).also { progress.making(listOf(it)) }
+                return ImportResult.Imported(id, bundle.title, notes = listOfNotNull(leftOutNote(bundle.leftOut)))
             }
 
             val text = withContext(Dispatchers.IO) {
@@ -167,7 +200,7 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
             } ?: return ImportResult.Failed(words.string(R.string.data_file_too_big_for_map))
 
             val yaml = name.endsWith(".yaml", ignoreCase = true) || name.endsWith(".yml", ignoreCase = true) || "yaml" in type
-            importText(text, name.substringBeforeLast('.').ifBlank { null }, yaml, plain = isPlainText(name, type), fileName = name.ifBlank { null })
+            importText(text, name.substringBeforeLast('.').ifBlank { null }, yaml, plain = isPlainText(name, type), fileName = name.ifBlank { null }, progress = progress)
         } catch (unreadable: SecurityException) {
             ImportResult.Failed(words.string(R.string.common_not_allowed_to_read_that_file))
         } catch (refused: RefusedZipException) {
@@ -183,6 +216,80 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
         }
     }
 
+    /**
+     * What a zip of every map brought, `imported`, to say once it's known
+     * whether private maps hide, which counts the files it brought into maps
+     * already here; `stopped`, when it stopped partway.
+     */
+    private fun importedMany(imported: ImportedMaps, stopped: String? = null) = ImportResult.ImportedMany(
+        imported.added,
+        imported.alreadyHere,
+        notes = zipNotes(filledIn = 0, skipped = imported.skipped, leftOut = imported.leftOut, words, stayedPrivate = imported.stayedPrivate),
+        privateAlreadyHere = imported.privateAlreadyHere,
+        filledIn = imported.filledIn,
+        privateFilledIn = imported.privateFilledIn,
+        pastRoom = imported.pastRoom,
+        privatePastRoom = imported.privatePastRoom,
+        stopped = stopped,
+    )
+
+    /** What the file at `uri`, named `name` and typed `type` by its app, holds, by those and its first bytes; null when it can't be opened. */
+    private fun kindOf(uri: Uri, resolver: ContentResolver, name: String, type: String): FileKind? {
+        val zipNamed = name.endsWith(".zip", ignoreCase = true) || type in MapFileTypes.ZIP
+        return resolver.openInputStream(uri)?.use { OtherApps.kindOf(name, type, zipNamed, it) }
+    }
+
+    /**
+     * Another app's map at `uri` (OPML, FreeMind and Freeplane, XMind), by
+     * its name and format, as [importFile] tells it from other files; null
+     * when it's any other file, or can't be opened. For Settings' Import
+     * maps, which takes these as Open a file does, and other files as a zip
+     * of maps.
+     */
+    internal suspend fun otherAppFile(uri: Uri, resolver: ContentResolver): Pair<String, OtherFormat>? = withContext(Dispatchers.IO) {
+        val name = displayName(uri, resolver).orEmpty()
+        val type = fromProvider { resolver.getType(uri) }.orEmpty()
+        (kindOf(uri, resolver, name, type) as? FileKind.FromOtherApp)?.let { name to it.format }
+    }
+
+    /**
+     * The maps in another app's file at `uri` ([otherAppFile]), made as
+     * [importFile] makes them; null when it isn't one. Settings' Import maps
+     * takes those first, and other files as a zip of maps.
+     */
+    suspend fun importFromOtherAppFile(uri: Uri, resolver: ContentResolver): ImportResult? {
+        if (!importable(uri.scheme, uri.authority, "${BuildConfig.APPLICATION_ID}.files")) {
+            return ImportResult.Failed(words.string(R.string.common_not_allowed_to_read_that_file))
+        }
+
+        return try {
+            val (name, format) = otherAppFile(uri, resolver) ?: return null
+            importFromOtherApp(uri, resolver, name, format)
+        } catch (unreadable: SecurityException) {
+            ImportResult.Failed(words.string(R.string.common_not_allowed_to_read_that_file))
+        } catch (unreadable: IOException) {
+            ImportResult.Failed(words.string(R.string.data_file_unreadable))
+        } catch (stopped: CancellationException) {
+            throw stopped
+        } catch (unreadable: RuntimeException) {
+            Logs.warn(TAG, "Couldn't read a file to import", unreadable)
+            ImportResult.Failed(words.string(R.string.data_file_unreadable))
+        }
+    }
+
+    /** The maps in another app's file at `uri`, named `name`, in `format`: read whole, while it's no bigger than such a file may be. */
+    private suspend fun importFromOtherApp(uri: Uri, resolver: ContentResolver, name: String, format: OtherFormat, progress: ImportProgress = ImportProgress.NONE): ImportResult {
+        val limit = if (format == OtherFormat.XMind) OtherApps.WORKBOOK_LIMIT else MAP_TEXT_LIMIT
+        val bytes = withContext(Dispatchers.IO) { resolver.openInputStream(uri)?.use { it.readAtMost((limit + 1).toInt()) } }
+            ?: return ImportResult.Failed(words.string(R.string.data_file_unreadable))
+
+        if (bytes.size > limit) {
+            return ImportResult.Failed(words.string(R.string.data_file_too_big_for_map))
+        }
+
+        return importFromOtherApp(bytes, name.ifBlank { null }, format, progress)
+    }
+
     /** How long a zip is, as its file says, when its app doesn't say in its listing; 0 when it can't tell, as for a stream. */
     private fun zipLength(uri: Uri, resolver: ContentResolver): Long = try {
         fromProvider { resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } }?.takeIf { it > 0 } ?: 0L
@@ -194,18 +301,26 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
     private fun leftOutNote(leftOut: Int): String? = words.plural(R.plurals.data_zip_files_left_out, leftOut, leftOut).takeIf { leftOut > 0 }
 
     /** Text shared from another app, or dropped on the list, with the title it came with (an article's, say). */
-    suspend fun importShared(text: String, subject: String?): ImportResult = importText(text, title = subject, plain = true)
+    suspend fun importShared(text: String, subject: String?, progress: ImportProgress = ImportProgress.NONE): ImportResult =
+        importText(text, title = subject, plain = true, progress = progress)
 
     /**
      * A new map for files shared to Orbit while no map is open: named after
      * the first, and holding them all on its idea, each copied in as it is.
      * One that can't join, too big or unreadable, is left out and said; with
-     * none that could, there's no map.
+     * none that could, there's no map, and nor is there when they can't be
+     * put on its idea: it goes to the trash with them, and that's said.
      */
-    suspend fun newMapWithFiles(uris: List<Uri>, resolver: ContentResolver): ImportResult {
+    suspend fun newMapWithFiles(uris: List<Uri>, resolver: ContentResolver, progress: ImportProgress = ImportProgress.NONE): ImportResult {
         val first = uris.firstOrNull() ?: return ImportResult.Failed(words.string(R.string.data_nothing_to_make_a_map_from))
         val title = ideaName(withContext(Dispatchers.IO) { displayName(first, resolver) }) ?: words.string(R.string.files_title)
-        val made = importText(title, plain = true) as? ImportResult.Imported ?: return ImportResult.Failed(words.string(R.string.files_unreadable))
+        // Made before Orbit stopped, while its files were copied: they're copied into it again, unless they're in it already.
+        val made = importText(title, plain = true, progress = progress) as? ImportResult.Imported ?: return ImportResult.Failed(words.string(R.string.files_unreadable))
+
+        if (progress.made.isNotEmpty() && FILES_ATTRIBUTE in maps.read(made.id)) {
+            return made
+        }
+
         val files = mutableListOf<AddedFile>()
         val notes = mutableListOf<String>()
 
@@ -224,12 +339,51 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
 
         if (files.isEmpty()) {
             maps.delete(made.id)
+            progress.unmaking(made.id)
             return ImportResult.Failed(notes.firstOrNull() ?: words.string(R.string.files_unreadable))
         }
 
-        val markdown = maps.read(made.id)
-        maps.write(made.id, "${markdown.trimEnd()}\n${filesAttribute(files)}\n", base = markdown)
+        val attached = attach(made.id, files)
+
+        if (attached != WriteResult.Written) {
+            val why = if (attached == WriteResult.NotWritten) maps.whyNotWritten() else maps.whyNotChanged()
+
+            // A map without what it was made for isn't one to keep: it goes to the trash, the files with it. One deleted
+            // meanwhile is gone already; one that won't go is there, and says why its files aren't on it. Run again, the
+            // import makes another, never the one in the trash.
+            return if (attached == WriteResult.Missing || maps.delete(made.id) != null) {
+                progress.unmaking(made.id)
+                ImportResult.Failed(why)
+            } else {
+                made.copy(notes = notes + why)
+            }
+        }
+
         return made.copy(notes = notes)
+    }
+
+    /**
+     * Puts `files`, copied into new map `id`, on its idea: on its text as it
+     * is now, read again when it changed meanwhile (opened and edited while
+     * they copied, say), as a change from outside its screen, which a screen
+     * showing it catches up with ([MapRepository.change]).
+     */
+    private suspend fun attach(id: String, files: List<AddedFile>): WriteResult {
+        repeat(ATTACHING_TRIES) {
+            val markdown = try {
+                maps.read(id)
+            } catch (unreadable: IOException) {
+                return if (maps.exists(id)) WriteResult.Refused else WriteResult.Missing
+            }
+
+            val result = maps.change(id, "${markdown.trimEnd()}\n${filesAttribute(files)}\n", base = markdown, reason = VersionReason.Editing)
+
+            if (result != WriteResult.Changed) {
+                return result
+            }
+        }
+
+        return WriteResult.Changed
     }
 
     /**
@@ -246,6 +400,7 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
         title: String? = null,
         plain: Boolean = false,
         fileName: String? = null,
+        progress: ImportProgress = ImportProgress.NONE,
     ): ImportResult {
         val trimmed = text.trim()
 
@@ -276,8 +431,13 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
             newMap(text, title, plain, ::outline)
         }
 
+        // Made before Orbit stopped: it's there whole, as a map's made in one step.
+        progress.made(0, maps::exists)?.let { id ->
+            return ImportResult.Imported(id, maps.summary(id)?.title ?: fallbackTitle ?: words.string(R.string.data_map_without_a_title))
+        }
+
         val id = try {
-            maps.add(markdown, original = text, originalName = fileName)
+            maps.add(markdown, original = text, originalName = fileName).also { progress.making(listOf(it)) }
         } catch (failed: IOException) {
             return ImportResult.Failed(failed.message ?: words.string(R.string.common_could_not_keep_that_map))
         }
@@ -308,7 +468,7 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
      * or `.mm` file is kept in the map's history as it came in, as text files
      * are; a workbook isn't text, so it isn't.
      */
-    suspend fun importFromOtherApp(bytes: ByteArray, name: String?, format: OtherFormat): ImportResult {
+    suspend fun importFromOtherApp(bytes: ByteArray, name: String?, format: OtherFormat, progress: ImportProgress = ImportProgress.NONE): ImportResult {
         val file = try {
             pages.work { page ->
                 page.request(ImportedFile.serializer()) { job -> MapCommand.ImportFile(job, Base64.getEncoder().encodeToString(bytes), name) }
@@ -325,11 +485,9 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
 
         val original = if (format == OtherFormat.XMind || file.maps.size > 1) null else decodeText(bytes)
 
+        // A workbook's sheets come in together or not at all, so a file that stops partway never leaves some of its maps.
         val ids = try {
-            file.maps.map { map ->
-                val pictures = map.media.mapValues { (_, data) -> Base64.getDecoder().decode(data) }
-                maps.add(map.markdown, original = original, pictures = pictures, originalName = name)
-            }
+            addMaps(file.maps, original, name, progress)
         } catch (failed: IOException) {
             return ImportResult.Failed(failed.message ?: words.string(R.string.common_could_not_keep_that_map))
         } catch (damaged: IllegalArgumentException) {
@@ -345,7 +503,34 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
         }
     }
 
+    /**
+     * Adds the maps another app's file holds (a workbook's sheets), all in
+     * one step ([MapRepository.addAll]), telling `progress` of them as soon
+     * as they're there. Made before Orbit stopped it midway, they came in
+     * together, and the ones still here aren't added again. Gives their ids,
+     * in order.
+     */
+    internal suspend fun addMaps(sheets: List<ImportedFileMap>, original: String?, name: String?, progress: ImportProgress): List<String> {
+        if (progress.made.isNotEmpty()) {
+            return progress.made.filter(maps::exists)
+        }
+
+        val made = sheets.map { map -> map.markdown to map.media.mapValues { (_, data) -> Base64.getDecoder().decode(data) } }
+
+        val ids = if (made.size == 1) {
+            listOf(maps.add(made.single().first, original = original, pictures = made.single().second, originalName = name))
+        } else {
+            maps.addAll(made)
+        }
+
+        progress.making(ids)
+        return ids
+    }
+
     companion object {
+        /** How a map's text starts the files of an idea ([filesAttribute]): one a new map for shared files has once they're in. */
+        private const val FILES_ATTRIBUTE = "<!-- orbit\nfiles:"
+
         /**
          * What didn't come over from another app's map as it was, in `words`:
          * a line for each kind, its places counted across the file's maps. A
@@ -479,13 +664,34 @@ class Importer(private val maps: MapRepository, private val pages: PagePool, pri
 
         /**
          * What an import of every map says besides what came in: the `filledIn`
-         * files its maps here were missing, the `skipped` folders without a map,
-         * and the `leftOut` files of kinds this version doesn't know.
+         * files its maps here were missing, the `pastRoom` files that stayed in
+         * the zip, past what a map carries, the `stayedPrivate` versions and
+         * files of maps private in the zip that stayed there, their map being
+         * open here, the `skipped` folders without a map, and the `leftOut`
+         * files of kinds this version doesn't know.
          */
-        fun zipNotes(filledIn: Int, skipped: Int, leftOut: Int, words: Words): List<String> = listOfNotNull(
+        fun zipNotes(filledIn: Int, skipped: Int, leftOut: Int, words: Words, pastRoom: Int = 0, stayedPrivate: Int = 0): List<String> = listOfNotNull(
             words.plural(R.plurals.data_zip_files_filled_in, filledIn, filledIn).takeIf { filledIn > 0 },
+            pastRoomNote(pastRoom, words),
+            words.plural(R.plurals.data_zip_files_stayed_private, stayedPrivate, stayedPrivate).takeIf { stayedPrivate > 0 },
             words.plural(R.plurals.data_zip_folders_without_maps, skipped, skipped).takeIf { skipped > 0 },
             words.plural(R.plurals.data_zip_files_left_out, leftOut, leftOut).takeIf { leftOut > 0 },
         )
+
+        /** What's said first of an import of a zip of maps that stopped partway, with `reason` when there's one to say ([stopReason]). */
+        fun stoppedNote(reason: String?, words: Words): String =
+            reason?.let { words.string(R.string.common_import_stopped, it) } ?: words.string(R.string.common_import_stopped_without_reason)
+
+        /**
+         * Why an import stopped, `cause`, as Android or Java says it, when
+         * that's words for people in `language` (a BCP 47 tag): they say it
+         * in English, and never a file's path.
+         */
+        fun stopReason(cause: Throwable?, language: String): String? =
+            cause?.message?.takeIf { language.substringBefore('-') == "en" && it.isNotBlank() && '/' !in it }?.trimEnd('.')
+
+        /** What's said of `pastRoom` files of a zip of every map that stayed in it, past what a map carries ([MAP_MEDIA_LIMIT]); null for none. */
+        fun pastRoomNote(pastRoom: Int, words: Words): String? =
+            words.plural(R.plurals.data_zip_files_past_map_room, pastRoom, pastRoom, readableSize(MAP_MEDIA_LIMIT, words)).takeIf { pastRoom > 0 }
     }
 }

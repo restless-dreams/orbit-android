@@ -55,7 +55,12 @@ data class Reminder(
     fun at(zone: ZoneId): Instant? = IdeaDate.parse(due)?.remindAt(zone)
 }
 
-/** What [Reminders] keeps between runs, in `reminders.json` beside the maps. */
+/**
+ * What [Reminders] keeps between runs, in `reminders.json` beside the maps.
+ * Orbit 0.5.0 kept which reminders came by a moment alone ([handledUpTo]),
+ * which a new time zone moves the dates past or back over; it still reads
+ * the file, so this version writes what it goes by too.
+ */
 @Serializable
 data class ReminderBook(
     /** Every reminder the maps make, as they were last read. */
@@ -64,11 +69,12 @@ data class ReminderBook(
     /**
      * When each reminder was first seen, by its key: one first seen after its
      * moment, as a date set in the past or a map arriving with past dates,
-     * never comes.
+     * never comes. Kept for Orbit 0.5.0, which goes by it; this version
+     * marks such a reminder [handled] as it's first seen.
      */
     val seen: Map<String, Long> = emptyMap(),
 
-    /** Reminders whose moment came up to this one (ms) have come, or were let go. */
+    /** Reminders whose moment came up to this one (ms) have come, or were let go: Orbit 0.5.0's record of them (see [handled]). */
     val handledUpTo: Long = 0,
 
     /** Each map's text when its reminders were read, by its content key: a map is read again only once its text changes. */
@@ -76,7 +82,33 @@ data class ReminderBook(
 
     /** Whether reminders were on as they were last rung: turned on again, they start from then, not from when they went off. */
     val on: Boolean = true,
-)
+
+    /**
+     * The reminders that came, or never will, by key: shown, let go as they
+     * came while reminders were off, or first seen after their moment. Each
+     * comes once, whatever time zone the phone was in as it came or is in
+     * since: a date is local time, so a new time zone moves its moment.
+     * Null in a file Orbit 0.5.0 wrote, which says it by [handledUpTo]
+     * alone ([handledOf]).
+     */
+    val handled: Set<String>? = null,
+) {
+    /**
+     * Which of `reminders` came, or never will, with dates in `zone`: as
+     * [handled] says, or, from Orbit 0.5.0's file, those whose moment came
+     * by [handledUpTo] and those first seen after their moment. One this file
+     * hasn't seen yet isn't among them.
+     */
+    fun handledOf(reminders: List<Reminder>, zone: ZoneId): Set<String> {
+        handled?.let { return it }
+
+        return reminders.filter { reminder ->
+            val seen = this.seen[reminder.key]
+            val moment = reminder.at(zone)?.toEpochMilli()
+            seen != null && moment != null && (moment <= handledUpTo || seen > moment)
+        }.mapTo(HashSet()) { it.key }
+    }
+}
 
 /** Where reminders ring: Android's alarms, or a test's own. */
 interface ReminderAlarms {
@@ -90,6 +122,14 @@ interface ReminderAlarms {
 interface ReminderNotices {
     /** Shows `reminder`, which came at `at`. */
     fun post(reminder: Reminder, at: Instant)
+
+    /**
+     * The maps `private` are private: their reminders showing now that name
+     * their idea and their map say only that they're from a private map, as
+     * one shown now would. `reminders` are those maps' reminders as they're
+     * read now.
+     */
+    fun keepPrivate(private: Set<String>, reminders: List<Reminder>)
 }
 
 /**
@@ -102,10 +142,12 @@ interface ReminderNotices {
  * remind, and neither do maps in the trash. What was read is kept in `file`,
  * so an alarm, a restart or a new time zone rings without reading a map.
  *
- * A reminder comes once: those whose moment passed while the phone was off
- * come when it starts again, but one first seen after its moment (a date set
- * in the past, a map arriving with past dates) never does. Turned off, none
- * come, and turned on again, only those still to come will.
+ * A reminder comes once, whatever time zones the phone goes through: those
+ * whose moment passed while the phone was off come when it starts again,
+ * but one first seen after its moment (a date set in the past, a map
+ * arriving with past dates) never does. Turned off, none come, and turned on
+ * again, only those still to come will. A map made private has its
+ * reminders that show say nothing more of it.
  */
 class Reminders(
     private val file: File,
@@ -120,7 +162,7 @@ class Reminders(
      * The maps' reminders, read again where their text changed (`read` gives
      * a map's text by its id, null when it can't be read), then rung: the
      * ones whose moment came show, and the next alarm is set. `on` is the
-     * setting.
+     * setting. The private maps' reminders that show say nothing of them.
      */
     suspend fun follow(maps: List<MapSummary>, read: suspend (String) -> String?, on: Boolean): Unit = mutex.withLock {
         val book = load()
@@ -145,8 +187,19 @@ class Reminders(
             }
         }
 
+        val zone = zone()
         val seen = reminders.associate { it.key to (book.seen[it.key] ?: now) }
-        save(ring(book.copy(reminders = reminders, seen = seen, read = texts), now, on))
+        // First seen after its moment (a date set in the past, a map arriving with past dates): it never comes.
+        val late = reminders.filter { it.key !in book.seen && (it.at(zone)?.toEpochMilli() ?: Long.MAX_VALUE) <= now }.map { it.key }
+        val handled = (book.handledOf(reminders, zone) + late).filterTo(HashSet()) { it in seen }
+        save(ring(book.copy(reminders = reminders, seen = seen, read = texts, handled = handled), now, on))
+
+        // A map made private since its reminder showed: what shows says nothing more of it either.
+        val private = maps.filter { it.metadata.isPrivate }.mapTo(HashSet()) { it.id }
+
+        if (private.isNotEmpty()) {
+            notices.keepPrivate(private, reminders.filter { it.mapId in private })
+        }
     }
 
     /** An alarm went off, the phone started again or its clock changed: the reminders whose moment came show, and the next alarm is set. */
@@ -168,22 +221,24 @@ class Reminders(
 
     private fun ring(book: ReminderBook, now: Long, on: Boolean): ReminderBook {
         val zone = zone()
-        // Turned on again, reminders start from now: those that came while they were off stay away.
-        val since = if (on && !book.on) maxOf(book.handledUpTo, now) else book.handledUpTo
+        val handled = book.handledOf(book.reminders, zone).toMutableSet()
 
-        if (on) {
-            for (reminder in book.reminders) {
-                val at = reminder.at(zone) ?: continue
-                val moment = at.toEpochMilli()
+        for (reminder in book.reminders) {
+            val at = reminder.at(zone) ?: continue
 
-                if (moment in (since + 1)..now && (book.seen[reminder.key] ?: now) <= moment) {
-                    notices.post(reminder, at)
-                }
+            if (reminder.key in handled || at.toEpochMilli() > now) {
+                continue
             }
+
+            // Its moment came: it shows while reminders are on. Turned on again, those that came while they were off stay away.
+            if (on && book.on) {
+                notices.post(reminder, at)
+            }
+
+            handled += reminder.key
         }
 
-        val handled = maxOf(since, now)
-        val next = if (on) book.reminders.mapNotNull { it.at(zone)?.toEpochMilli() }.filter { it > handled }.minOrNull() else null
+        val next = if (on) book.reminders.filter { it.key !in handled }.mapNotNull { it.at(zone)?.toEpochMilli() }.filter { it > now }.minOrNull() else null
 
         if (next == null) {
             alarms.cancel()
@@ -191,7 +246,7 @@ class Reminders(
             alarms.set(next)
         }
 
-        return book.copy(handledUpTo = handled, on = on)
+        return book.copy(handled = handled, handledUpTo = maxOf(book.handledUpTo, now), on = on)
     }
 
     private suspend fun load(): ReminderBook = withContext(Dispatchers.IO) {

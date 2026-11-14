@@ -33,6 +33,9 @@
     <!-- Asked before a sketch takes the place of an idea's picture: %1$s is the idea. -->
     <string name="sketch_replace_title">Replace the picture with a sketch?</string>
     <string name="sketch_replace_text">The sketch takes the place of %1$s’s picture. Undo brings the picture back.</string>
+    <!-- Asked as Done is tapped, when a picture chosen before the sketch began finished copying in meanwhile: %1$s is the idea. -->
+    <string name="sketch_replace_new_text">%1$s got a picture while you drew. The sketch takes its place, and Undo brings the picture back.</string>
+    <string name="sketch_replace">Replace</string>
 
     <!-- Asked before closing a canvas with strokes on it. -->
     <string name="sketch_discard_title">Discard the sketch?</string>

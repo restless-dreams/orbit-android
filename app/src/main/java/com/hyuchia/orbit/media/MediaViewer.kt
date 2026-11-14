@@ -76,7 +76,6 @@ import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.utf16CodePoint
 import androidx.compose.ui.input.pointer.PointerEvent
@@ -93,17 +92,20 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import coil3.asDrawable
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.data.mediaType
 import com.hyuchia.orbit.data.soundType
+import com.hyuchia.orbit.ui.AskedAgain
 import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.linkScheme
 import com.hyuchia.orbit.ui.shareLink
-import kotlinx.coroutines.CoroutineScope
+import com.hyuchia.orbit.ui.viewKeys
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.saket.telephoto.ExperimentalTelephotoApi
@@ -140,7 +142,8 @@ private val Dark = Color(0xFF0B0C0F)
  * tapped, the wheel, or + and - (0 fits it again), and stays sharp at any
  * zoom, as Telephoto reads big pictures a part at a time; an animated GIF
  * or WebP plays while it's on screen, and pauses and plays from the bar
- * above or with space or K. A video's page shows its poster, and plays
+ * above or with space or K (a button Tab went to takes Space and Enter, as
+ * it takes a tap). A video's page shows its poster, and plays
  * with `onPlay`. A sound's page plays it from its play button, as a video's
  * does, in the map's player (`sounds`, where `sound` is how it goes), so
  * it goes on once the viewer closes; stepping to another page pauses it. A
@@ -184,6 +187,8 @@ fun MediaViewer(
         val focus = remember { FocusRequester() }
         val rightToLeft = LocalLayoutDirection.current == LayoutDirection.Rtl
         val view = LocalView.current
+        // Here rather than in the bar above, which hides with a tap: its questions stay while the controls don't.
+        val sharing = rememberViewerSharing(mapId)
 
         // After a touch, Android spends the first arrow key on finding a view to focus: the viewer has it already.
         DisposableEffect(view) {
@@ -244,7 +249,7 @@ fun MediaViewer(
                     val live = lives[pager.currentPage]
 
                     when {
-                        item.kind == MediaKind.Video && event.key != Key.K -> onPlay(item)
+                        item.kind == MediaKind.Video -> onPlay(item)
                         motion != null -> motion.toggle()
                         live != null -> live()
                         else -> return false
@@ -262,7 +267,7 @@ fun MediaViewer(
                 .background(Dark.copy(alpha = 1f - flicked))
                 .focusRequester(focus)
                 .focusable()
-                .onPreviewKeyEvent(::keys),
+                .viewKeys(::keys),
         ) {
             HorizontalPager(
                 state = pager,
@@ -306,7 +311,7 @@ fun MediaViewer(
             val fade = Modifier.graphicsLayer { alpha = (1f - flicked * 4f).coerceAtLeast(0f) }
 
             AnimatedVisibility(controls, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopCenter).then(fade)) {
-                TopControls(mapId, shown, pager, items.size, source(shown.media.src), motions[pager.currentPage], lives[pager.currentPage], onClose = window::close)
+                TopControls(shown, pager, items.size, source(shown.media.src), motions[pager.currentPage], lives[pager.currentPage], sharing, onClose = window::close)
             }
 
             // A sound's page has its name and caption on it.
@@ -314,6 +319,8 @@ fun MediaViewer(
                 Caption(shown)
             }
         }
+
+        SharingDialogs(sharing)
     }
 }
 
@@ -404,19 +411,32 @@ private fun PicturePage(
 
     // A live photo's motion: once without sound as its page comes up and its still shows (unless Android's animations
     // are off), with its sound while the picture is held or its mark is pressed, and never while it's zoomed in.
-    var livePlay by remember(live) { mutableStateOf<LivePlay?>(null) }
-    var held by remember(live) { mutableStateOf(false) }
+    val livePhoto = remember(live) { LivePhotoPlay() }
     var motionShowing by remember(live) { mutableStateOf(false) }
     val stillAlpha by animateStillAlpha(motionShowing)
     val fitted = { zoomable.zoomFraction.let { it == null || it < FITTED_ZOOM } }
     val shown = state.isImageDisplayed
 
     LaunchedEffect(live, current, moving, shown) {
-        livePlay = if (live != null && current && moving && shown) LivePlay(sound = false) else null
+        livePhoto.arrive(live != null && current, moving, shown, fitted())
+    }
+
+    // Zoomed in, the motion ends there: the still is what's zoomed.
+    LaunchedEffect(livePhoto, zoomable) {
+        snapshotFlow { fitted() }.collect { fits ->
+            if (!fits) {
+                livePhoto.stop()
+            }
+        }
+    }
+
+    // Orbit leaving the screen ends it too, the picture held or not.
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        livePhoto.stop()
     }
 
     DisposableEffect(live) {
-        onLive(live?.let { { if (fitted()) livePlay = LivePlay(sound = true) } })
+        onLive(live?.let { { livePhoto.press(fitted()) } })
         onDispose { onLive(null) }
     }
 
@@ -425,8 +445,8 @@ private fun PicturePage(
         modifier = Modifier
             .fillMaxSize()
             // Watches for the finger lifting after a hold, without taking anything from zooming and swiping.
-            .pointerInput(held) {
-                if (!held) {
+            .pointerInput(livePhoto.held) {
+                if (!livePhoto.held) {
                     return@pointerInput
                 }
 
@@ -436,14 +456,13 @@ private fun PicturePage(
                     } while (event.changes.any { it.pressed })
                 }
 
-                held = false
-                livePlay = null
+                livePhoto.lift()
             },
     ) {
         if (model != null) {
             // A live photo's motion plays under its still, so the still keeps every touch.
             if (live != null && !failed) {
-                LiveMotion(live, livePlay, onShowing = { motionShowing = it }, onEnded = { if (!held) livePlay = null }, modifier = Modifier.fillMaxSize())
+                LiveMotion(live, livePhoto.play, onShowing = { motionShowing = it }, onEnded = livePhoto::ended, modifier = Modifier.fillMaxSize())
             }
 
             // Android's animations coming back on, or its play button, load it again to play.
@@ -467,12 +486,7 @@ private fun PicturePage(
                 state = state,
                 onClick = { onTap() },
                 onLongClick = if (live != null) {
-                    { _ ->
-                        if (fitted()) {
-                            held = true
-                            livePlay = LivePlay(sound = true, held = true)
-                        }
-                    }
+                    { _ -> livePhoto.hold(fitted()) }
                 } else {
                     null
                 },
@@ -561,11 +575,8 @@ private fun Problem(message: String, onTap: () -> Unit) {
  * over a shade so they read on any picture.
  */
 @Composable
-private fun TopControls(mapId: String, item: GalleryItem, pager: PagerState, count: Int, source: Any?, motion: Motion?, live: (() -> Unit)?, onClose: () -> Unit) {
+private fun TopControls(item: GalleryItem, pager: PagerState, count: Int, source: Any?, motion: Motion?, live: (() -> Unit)?, sharing: ViewerSharing, onClose: () -> Unit) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    // A file Orbit couldn't clean, waiting for the person to say whether it goes as it is.
-    var asItIs by remember { mutableStateOf<File?>(null) }
 
     CompositionLocalProvider(LocalContentColor provides Color.White) {
         Row(
@@ -616,22 +627,59 @@ private fun TopControls(mapId: String, item: GalleryItem, pager: PagerState, cou
                 }
 
                 Hint(shareLabel) {
-                    IconButton(onClick = { share(context, scope, mapId, item, source) { file -> asItIs = file } }) {
+                    IconButton(onClick = { share(context, sharing, item, source) }, enabled = !sharing.busy) {
                         Icon(Icons.Outlined.Share, contentDescription = shareLabel)
                     }
                 }
             }
         }
     }
+}
 
-    asItIs?.let { file ->
-        ShareAsItIsDialog(
-            kind = item.kind,
-            onShare = {
-                asItIs = null
-                scope.launch { shareAsItIs(context, mapId, file, sharedType(item.kind, file), item.label) }
+/**
+ * How the viewer shares the map `mapId`'s pictures, videos and sounds: a
+ * clean copy, or as it is once the person chose to (see [ViewerSharing]).
+ */
+@Composable
+private fun rememberViewerSharing(mapId: String): ViewerSharing {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    return remember(mapId, scope) {
+        ViewerSharing(
+            scope,
+            share = { item, file ->
+                when (item.kind) {
+                    MediaKind.Picture -> sharePicture(context, mapId, file, item.label)
+                    MediaKind.Video, MediaKind.Sound -> shareVideoOrSound(context, mapId, file, sharedType(item.kind, file), item.label)
+                }
             },
-            onDismiss = { asItIs = null },
+            shareAsItIs = { item, file, stamp -> shareAsItIs(context, mapId, file, stamp, sharedType(item.kind, file), item.label) },
+        )
+    }
+}
+
+/** Whether a file Orbit couldn't clean goes as it is, asked about the very one it is; and that one no copy could be made of didn't go. */
+@Composable
+private fun SharingDialogs(sharing: ViewerSharing) {
+    sharing.asking?.let { asked ->
+        ShareAsItIsDialog(kind = asked.item.kind, changed = asked.changed, onShare = { sharing.answer(asItIs = true) }, onDismiss = { sharing.answer(asItIs = false) })
+    }
+
+    sharing.failed?.let { kind ->
+        val problem = when (kind) {
+            MediaKind.Picture -> R.string.media_share_picture_failed
+            MediaKind.Video -> R.string.media_share_video_failed
+            MediaKind.Sound -> R.string.media_share_sound_failed
+        }
+
+        AlertDialog(
+            onDismissRequest = sharing::dismissFailure,
+            text = {
+                EscapeCloses(sharing::dismissFailure)
+                Text(stringResource(problem))
+            },
+            confirmButton = { TextButton(onClick = sharing::dismissFailure) { Text(stringResource(R.string.common_close)) } },
         )
     }
 }
@@ -639,10 +687,11 @@ private fun TopControls(mapId: String, item: GalleryItem, pager: PagerState, cou
 /**
  * Asks whether a picture, video or sound Orbit couldn't clean goes as it is,
  * with where and when it was taken or recorded and on what: a risk the
- * person takes knowingly, never one Orbit takes for them.
+ * person takes knowingly, never one Orbit takes for them. Asked again as it
+ * `changed` after they answered, it says so first.
  */
 @Composable
-private fun ShareAsItIsDialog(kind: MediaKind, onShare: () -> Unit, onDismiss: () -> Unit) {
+private fun ShareAsItIsDialog(kind: MediaKind, changed: Boolean, onShare: () -> Unit, onDismiss: () -> Unit) {
     val (title, text) = when (kind) {
         MediaKind.Picture -> R.string.media_share_picture_as_it_is_title to R.string.media_share_picture_as_it_is_text
         MediaKind.Video -> R.string.media_share_video_as_it_is_title to R.string.media_share_video_as_it_is_text
@@ -655,7 +704,15 @@ private fun ShareAsItIsDialog(kind: MediaKind, onShare: () -> Unit, onDismiss: (
             EscapeCloses(onDismiss)
             Text(stringResource(title))
         },
-        text = { Text(stringResource(text)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (changed) {
+                    AskedAgain(1)
+                }
+
+                Text(stringResource(text))
+            }
+        },
         confirmButton = { TextButton(onClick = onShare) { Text(stringResource(R.string.media_share_as_it_is)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) } },
     )
@@ -700,24 +757,14 @@ private fun Caption(item: GalleryItem) {
 private fun shareable(source: Any?): Boolean = (source is File && source.isFile) || (source is String && linkScheme(source).let { it == "http" || it == "https" })
 
 /**
- * Shares a file in the folder of the map `mapId` without what its file says
- * beyond what it shows or plays, such as where and when it was taken or
- * recorded ([sharePicture], [shareVideoOrSound]), or, when Orbit couldn't
- * take that out, hands it to `notClean` for the person to choose; and the
- * address of one on the web.
+ * Shares a file in the map's folder without what its file says beyond what
+ * it shows or plays, such as where and when it was taken or recorded, or
+ * asks whether it goes as it is when Orbit couldn't take that out
+ * ([ViewerSharing]); and the address of one on the web.
  */
-private fun share(context: Context, scope: CoroutineScope, mapId: String, item: GalleryItem, source: Any?, notClean: (File) -> Unit) {
+private fun share(context: Context, sharing: ViewerSharing, item: GalleryItem, source: Any?) {
     when (source) {
-        is File -> scope.launch {
-            val shared = when (item.kind) {
-                MediaKind.Picture -> sharePicture(context, mapId, source, item.label)
-                MediaKind.Video, MediaKind.Sound -> shareVideoOrSound(context, mapId, source, sharedType(item.kind, source), item.label)
-            }
-
-            if (shared == Shared.NotClean) {
-                notClean(source)
-            }
-        }
+        is File -> sharing.start(item, source)
         is String -> shareLink(context, source, item.label)
     }
 }

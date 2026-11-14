@@ -110,6 +110,28 @@ class DocumentFolderTest {
     }
 
     @Test
+    fun aPictureWrittenOverIsRefusedBeforeAnyOfItIsWrittenWithoutRoomForWhatItAddsAndSomeToSpare() {
+        var room = Long.MAX_VALUE
+        val roomy = DocumentFolder(context.contentResolver, FolderApp.tree, words) { room }
+        roomy.files()
+        val start = disk.newFile("start.jpg").apply { writeBytes(ByteArray(64) { 7 }) }
+        val whole = disk.newFile("whole.jpg").apply { writeBytes(ByteArray(128) { 7 }) }
+        roomy.writeMedia("photo.jpg", start)
+        val stored = File(FolderApp.folder, "$MEDIA_DIRECTORY/photo.jpg")
+
+        // The 64 bytes it adds, but not some to spare beside them: the one there stays as it was.
+        room = ROOM_LEFT_FREE + 63
+        roomy.files()
+        assertThrows(NoRoomForMedia::class.java) { roomy.writeMedia("photo.jpg", whole) }
+        assertArrayEquals(ByteArray(64) { 7 }, stored.readBytes())
+
+        room = ROOM_LEFT_FREE + 64
+        roomy.files()
+        roomy.writeMedia("photo.jpg", whole)
+        assertArrayEquals(ByteArray(128) { 7 }, stored.readBytes())
+    }
+
+    @Test
     fun aPictureInTheFoldersMediaIsDeletedByName() {
         folder.files()
         val photo = disk.newFile("photo.jpg").apply { writeBytes(ByteArray(64) { 7 }) }

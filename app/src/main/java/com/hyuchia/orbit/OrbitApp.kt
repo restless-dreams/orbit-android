@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
@@ -43,8 +44,12 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
@@ -54,12 +59,14 @@ import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
 import androidx.window.core.layout.WindowSizeClass
 import com.hyuchia.orbit.data.ImportResult
+import com.hyuchia.orbit.data.Importer
 import com.hyuchia.orbit.data.MapSummary
-import com.hyuchia.orbit.data.VersionReason
+import com.hyuchia.orbit.data.WaitingArrivals
 import com.hyuchia.orbit.home.HomeScreen
 import com.hyuchia.orbit.home.MapPlaceholder
 import com.hyuchia.orbit.home.NewMapScreen
 import com.hyuchia.orbit.map.MapScreen
+import com.hyuchia.orbit.nearby.Accepted
 import com.hyuchia.orbit.nearby.Arrival
 import com.hyuchia.orbit.nearby.ArrivalDialog
 import com.hyuchia.orbit.nearby.IncomingDialog
@@ -70,6 +77,7 @@ import com.hyuchia.orbit.privacy.conceals
 import com.hyuchia.orbit.privacy.mentionedAlreadyHere
 import com.hyuchia.orbit.privacy.mentionedFilledIn
 import com.hyuchia.orbit.reminders.IdeaToShow
+import com.hyuchia.orbit.reminders.KeepIdeaToShow
 import com.hyuchia.orbit.settings.AboutScreen
 import com.hyuchia.orbit.settings.LicensesScreen
 import com.hyuchia.orbit.settings.PrivacyScreen
@@ -80,14 +88,16 @@ import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.MinimumMapWidth
 import com.hyuchia.orbit.ui.ShortScreen
 import com.hyuchia.orbit.ui.WideScreen
-import com.hyuchia.orbit.ui.orbitViewModel
 import com.hyuchia.orbit.ui.rememberDefaultButton
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
-import java.io.IOException
 
 @Serializable
 data object HomeKey : NavKey
@@ -148,14 +158,221 @@ fun MutableList<NavKey>.becomes(wanted: List<NavKey>) {
  * What came in and waits for an answer or a look: why a file couldn't be
  * opened, what a zip or another app's map brought, maps that are here
  * already. Kept while the window is made again for a new language or font
- * size, as `remember` isn't, so the question never goes unanswered.
+ * size, as `remember` isn't, so the question never goes unanswered. Files
+ * of maps that are here already wait on disk too (`waiting`), and the
+ * screen's saved state (`saved`) says which: Android may stop Orbit while
+ * one is asked about, as the screen lock is asked for to update a private
+ * map, and the screens it brings back ask about them again, as they were,
+ * once the maps are read (`mapsRead` returns then): until then nothing says
+ * which maps are private, and the question would name one. Those no screen
+ * will ask about again go as a new screen starts.
+ *
+ * Files opened with Orbit and things shared to it are imported by
+ * `intake`, and the saved state lists them until what they brought is
+ * taken ([importing], [took]): a screen Android brings back imports again
+ * what it stopped in the middle of, or shows what it brought.
+ *
+ * One answered Update or Keep both goes to `intake`, which takes it in
+ * whatever happens to the screen ([answer]). The saved state lists it until
+ * its answer is kept beside its files, so a screen Android brings back
+ * before then asks it again. One that couldn't be taken in comes back, once
+ * why is said ([askAgain]), and every screen that starts asks it again.
  */
-class Arrivals : ViewModel() {
+class Arrivals(private val waiting: WaitingArrivals, private val intake: Intake, private val saved: SavedStateHandle, private val mapsRead: suspend () -> Unit) : ViewModel() {
     var problem by mutableStateOf<String?>(null)
+
+    private var notTakenInBecause by mutableStateOf<String?>(null)
+
+    /**
+     * Why a map answered Update or Keep both couldn't be taken in, said
+     * once nothing is asked; the questions that come back after it
+     * ([askAgain]) are asked once it's said.
+     */
+    var notTakenIn: String?
+        get() = notTakenInBecause
+        set(value) {
+            notTakenInBecause = value
+
+            if (value == null && returning.isNotEmpty()) {
+                asking += returning
+                returning = emptyList()
+                remember(asking)
+            }
+        }
+
     var many by mutableStateOf<ImportResult.ImportedMany?>(null)
     var notes by mutableStateOf<List<String>?>(null)
-    var otherVersions by mutableStateOf(OtherVersions())
+
+    private var asking by mutableStateOf(OtherVersions())
+
+    /** Questions answered Update or Keep both whose answers aren't kept on disk yet: the saved state still lists them. */
+    private var answering = emptyList<OtherVersion>()
+
+    /** Questions that couldn't be taken in, asked again once why is said ([notTakenIn]). */
+    private var returning = emptyList<OtherVersion>()
+
+    /** Keeps and lets go of what waits on disk one at a time, in the order asked, so nothing outlasts its answer. */
+    private val disk = Mutex()
+
+    /**
+     * Files of maps that are here already, asked about one after another
+     * (see [OtherVersions]): each one that joins is kept on disk until it's
+     * answered ([answer], [decline]).
+     */
+    var otherVersions: OtherVersions
+        get() = asking
+        set(value) {
+            val before = asking.waiting
+            asking = value
+            remember(value)
+
+            for (joined in value.waiting.filter { question -> before.none { it === question } }) {
+                onDisk { waiting.keep(joined.arrival, joined.opens) }
+            }
+        }
+
+    init {
+        val kept = saved.get<ArrayList<String>>(WAITING_KEY).orEmpty()
+        val opens = saved.get<BooleanArray>(OPENS_KEY)
+        val answered = saved.get<Int>(ANSWERED_KEY) ?: 0
+
+        // What this screen was importing before Android stopped Orbit is imported again, or what it brought shown; a new
+        // screen, whose task was closed and with it the files' permissions, lets them go.
+        intake.resumeImports(saved.get<ArrayList<String>>(REQUESTS_KEY).orEmpty())
+
+        // The screens Android brought back ask again what their screen asked before it stopped Orbit; a new one, nothing,
+        // but what couldn't be taken in once answered, which every screen asks again.
+        viewModelScope.launch {
+            val back = disk.withLock {
+                withContext(NonCancellable) {
+                    waiting.letGoAllBut(kept.toSet())
+                    val listed = kept.mapIndexedNotNull { index, id -> waiting.read(id)?.let { OtherVersion(it, opens = opens?.getOrNull(index) == true) } }
+                    val again = waiting.askedAgain().filter { (arrival, _) -> listed.none { it.arrival.folder == arrival.folder } }
+                    listed + again.map { (arrival, opens) -> OtherVersion(arrival, opens) }
+                }
+            }
+
+            // Asked once Orbit knows which maps are private, so a private map's question says nothing of it.
+            mapsRead()
+
+            val fresh = back.filter { question -> (asking.waiting + returning).none { it.arrival.folder == question.arrival.folder } }
+
+            if (fresh.isNotEmpty()) {
+                asking = OtherVersions(fresh + asking.waiting, answered)
+                remember(asking)
+            }
+        }
+    }
+
+    /**
+     * `question`, the one asked, was answered Update, or Keep both
+     * (`keepBoth`): it's taken in whatever happens to this screen, and the
+     * next question is asked. The saved state lists it until its answer is
+     * kept on disk.
+     */
+    fun answer(question: OtherVersion, keepBoth: Boolean) {
+        if (asking.asked !== question) {
+            return
+        }
+
+        answering = answering + question
+        asking = asking.after(question)
+        remember(asking)
+        val written = intake.accept(question, keepBoth)
+
+        viewModelScope.launch {
+            written.await()
+            answering = answering.filterNot { it === question }
+            remember(asking)
+        }
+    }
+
+    /** `question`, the one asked, was answered Neither: what its file was unpacked to goes now, as a map's can come to a gigabyte. */
+    fun decline(question: OtherVersion) {
+        if (asking.asked !== question) {
+            return
+        }
+
+        asking = asking.after(question)
+        remember(asking)
+        onDisk { waiting.letGo(question.arrival) }
+    }
+
+    /** Import `id` ([Intake.importFile]) runs for this screen: the saved state lists it until what it brought is taken ([took]). */
+    fun importing(id: String) {
+        saved[REQUESTS_KEY] = ArrayList(saved.get<ArrayList<String>>(REQUESTS_KEY).orEmpty() + id)
+    }
+
+    /** What import `id` brought is taken: no screen Android brings back asks for it again. */
+    fun took(id: String?) {
+        if (id != null) {
+            saved[REQUESTS_KEY] = ArrayList(saved.get<ArrayList<String>>(REQUESTS_KEY).orEmpty() - id)
+        }
+    }
+
+    /** Questions about maps here already that `result` brought join those asked, but those asked already, as a file a screen that started meanwhile asks too. */
+    fun join(questions: List<OtherVersion>) {
+        otherVersions += questions.filter { question -> (asking.waiting + returning).none { it.arrival.folder == question.arrival.folder } }
+    }
+
+    /** `question` was answered, but couldn't be taken in, for `reason`: why is said, then it's asked again. */
+    fun askAgain(question: OtherVersion, reason: String) {
+        if ((asking.waiting + returning).any { it.arrival.folder == question.arrival.folder }) {
+            return
+        }
+
+        returning = returning + question
+
+        if (notTakenInBecause == null) {
+            notTakenInBecause = reason
+        }
+    }
+
+    /** Says which files wait, in order, whether each opens its map, and how many were answered before them, for the screen's saved state. */
+    private fun remember(versions: OtherVersions) {
+        val kept = (answering + versions.waiting).mapNotNull { question -> question.arrival.bundle.unpacked?.let { it.name to question.opens } }
+        saved[WAITING_KEY] = ArrayList(kept.map { it.first })
+        saved[OPENS_KEY] = kept.map { it.second }.toBooleanArray()
+        saved[ANSWERED_KEY] = versions.answered
+    }
+
+    private fun onDisk(work: suspend () -> Unit) {
+        viewModelScope.launch {
+            disk.withLock { withContext(NonCancellable) { work() } }
+        }
+    }
+
+    private companion object {
+        const val WAITING_KEY = "waiting"
+        const val OPENS_KEY = "opens"
+        const val ANSWERED_KEY = "answered"
+        const val REQUESTS_KEY = "requests"
+    }
 }
+
+/** The folder an arrival was unpacked to, which says which one it is wherever it's read from. */
+private val ImportResult.AlreadyHere.folder: String? get() = bundle.unpacked?.name
+
+/**
+ * Whether a question about another version of map `id` keeps which map it
+ * is to itself: while private maps are `locked`, for one `hides` says is
+ * locked, and for one Orbit has no details of (`summary` gives none), as
+ * before the maps are read, since it may be a private one.
+ */
+internal fun arrivalHides(id: String?, locked: Boolean, summary: (String) -> MapSummary?, hides: (MapSummary) -> Boolean): Boolean {
+    if (id == null || !locked) {
+        return false
+    }
+
+    return summary(id)?.let(hides) ?: true
+}
+
+/**
+ * Whether a question about another version of map `id` is about a private
+ * map, which Recents then gets no picture of: one Orbit has no details of
+ * counts, as it may be one.
+ */
+internal fun arrivalNamesPrivate(id: String?, summary: (String) -> MapSummary?): Boolean = id != null && summary(id)?.metadata?.isPrivate != false
 
 /**
  * A file of a map that's here already, in another version, waiting for an
@@ -210,6 +427,13 @@ sealed interface AppRequest {
 
     /** Files of any kind shared to Orbit, to join an idea: the one in focus on the map that's open, or a new map's. */
     data class AttachFiles(val uris: List<Uri>) : AppRequest
+
+    /**
+     * Text shared to Orbit to join an idea, with no file: ideas under the one
+     * in focus on the map that's open, as pasting there makes them, or a new
+     * map, as text shared to Orbit makes one, with its `subject`.
+     */
+    data class AttachText(val text: String, val subject: String?) : AppRequest
 }
 
 /** Whether a window has room for the list beside a map one way up or the other, as a tablet's does and a phone's doesn't. */
@@ -316,7 +540,8 @@ fun OrbitApp(requests: Flow<AppRequest>) {
     val container = context.container
     val scope = rememberCoroutineScope()
     val backStack = rememberNavBackStack(HomeKey)
-    val arrivals = orbitViewModel { Arrivals() }
+    KeepIdeaToShow(container.ideaToShow)
+    val arrivals = viewModel { Arrivals(container.maps.waitingArrivals, container.intake, createSavedStateHandle(), mapsRead = { container.maps.maps.filterNotNull().first() }) }
     var importProblem by arrivals::problem
     // What a zip of maps brought in.
     var importedMany by arrivals::many
@@ -401,11 +626,11 @@ fun OrbitApp(requests: Flow<AppRequest>) {
                     backStack.remove(NewMapKey)
                 }
             }
-            is ImportResult.AlreadyHere -> otherVersions += listOf(OtherVersion(result, opens = true))
+            is ImportResult.AlreadyHere -> arrivals.join(listOf(OtherVersion(result, opens = true)))
             is ImportResult.Failed -> importProblem = result.reason
             is ImportResult.SeveralFiles -> {
                 // What the rest brought is said once these are answered (see below).
-                otherVersions += result.otherVersions.map { OtherVersion(it, opens = false) }
+                arrivals.join(result.otherVersions.map { OtherVersion(it, opens = false) })
                 result.summary?.let(::imported)
             }
         }
@@ -429,20 +654,58 @@ fun OrbitApp(requests: Flow<AppRequest>) {
                 AppRequest.NewMap -> if (backStack.lastOrNull() != NewMapKey) {
                     backStack.add(NewMapKey)
                 }
-                is AppRequest.ImportFile -> scope.launch { imported(container.importer.importFile(request.uri, context.contentResolver)) }
-                is AppRequest.ImportText -> scope.launch { imported(container.importer.importShared(request.text, request.subject)) }
+                // Imported by the app, not this screen: made again meanwhile, it's imported all the same, and what it brought is
+                // said by the screen there is then (see below).
+                is AppRequest.ImportFile -> arrivals.importing(container.intake.importFile(request.uri))
+                is AppRequest.ImportText -> arrivals.importing(container.intake.importText(request.text, request.subject))
                 is AppRequest.AttachFiles -> {
                     // The map that's open takes them, into its idea in focus, unless it's locked: a new map holds them then.
                     val open = (backStack.lastOrNull() as? MapKey)?.id?.takeIf { container.maps.exists(it) && !container.privateMaps.hidesNow(it) }
 
+                    // They wait for its map to be ready, however soon they came (MapViewModel.takeShares).
                     if (open != null) {
-                        container.sharedFiles.tryEmit(SharedFiles(open, request.uris))
+                        container.sharedFiles.offer(SharedFiles(open, request.uris))
                     } else {
-                        scope.launch { imported(container.importer.newMapWithFiles(request.uris, context.contentResolver)) }
+                        arrivals.importing(container.intake.newMapWithFiles(request.uris))
+                    }
+                }
+                is AppRequest.AttachText -> {
+                    // As files: the map that's open takes it, as ideas under its idea in focus, unless it's locked; a new map then.
+                    val open = (backStack.lastOrNull() as? MapKey)?.id?.takeIf { container.maps.exists(it) && !container.privateMaps.hidesNow(it) }
+
+                    if (open != null) {
+                        val lines = listOfNotNull(request.subject, request.text).filter { it.isNotBlank() }.distinct().joinToString("\n")
+                        container.sharedFiles.offer(SharedFiles(open, emptyList(), text = lines))
+                    } else {
+                        arrivals.importing(container.intake.importText(request.text, request.subject))
                     }
                 }
             }
         }
+    }
+
+    // What the app imported, took in once answered, or couldn't take in, here or before this screen was made again: each
+    // once, by the screen there is.
+    val outcomes by container.intake.outcomes.collectAsStateWithLifecycle()
+
+    LaunchedEffect(outcomes) {
+        for (outcome in outcomes) {
+            container.intake.take(outcome)
+
+            when (outcome) {
+                is IntakeOutcome.Imported -> {
+                    arrivals.took(outcome.request)
+                    imported(outcome.result)
+                }
+                is IntakeOutcome.Opened -> openMap(outcome.id)
+                is IntakeOutcome.AskAgain -> arrivals.askAgain(outcome.question, outcome.reason)
+            }
+        }
+    }
+
+    // What's shared to a map waits for it while it's open, and goes as it closes.
+    LaunchedEffect(backStack) {
+        snapshotFlow { backStack.filterIsInstance<MapKey>().map { it.id }.toSet() }.collect(container.sharedFiles::keepFor)
     }
 
     NavDisplay<NavKey>(
@@ -553,13 +816,13 @@ fun OrbitApp(requests: Flow<AppRequest>) {
     val privacy by container.privateMaps.view.collectAsStateWithLifecycle()
 
     // Asked of the lock itself, so it's right even the moment after they unlock: `privacy`, read with it, draws the dialogs again as they change.
-    fun hides(id: String?): Boolean = privacy.locked && id?.let(container.maps::summary)?.let(container.privateMaps::hides) == true
+    fun hides(id: String?): Boolean = arrivalHides(id, privacy.locked, container.maps::summary, container.privateMaps::hides)
 
     // A private map here is named by the cover its owner chose, if it has one, while its name isn't said.
     fun cover(id: String?) = id?.let(container.maps::summary)?.metadata?.cover
 
     // Unlocked, a dialog about another version of a private map names it: Recents gets no picture of Orbit then, as of the map.
-    fun namesPrivate(id: String?): Boolean = id?.let(container.maps::summary)?.metadata?.isPrivate == true && !hides(id)
+    fun namesPrivate(id: String?): Boolean = arrivalNamesPrivate(id, container.maps::summary) && !hides(id)
 
     offers.firstOrNull()?.let { offer ->
         PrivateOnScreen(namesPrivate(offer.existing))
@@ -578,12 +841,11 @@ fun OrbitApp(requests: Flow<AppRequest>) {
                 container.nearby.decline(offer)
             } else {
                 scope.launch {
-                    val id = container.nearby.accept(offer, keepBoth = answer == Arrival.KeepBoth)
-
-                    if (id != null) {
-                        openMap(id)
-                    } else {
-                        importProblem = resources.getString(R.string.main_could_not_keep_sent_map, offer.from)
+                    // A second tap, or one after the offer's time ran out, finds it answered: it does nothing.
+                    when (val accepted = container.nearby.accept(offer, keepBoth = answer == Arrival.KeepBoth)) {
+                        is Accepted.Opened -> openMap(accepted.id)
+                        Accepted.NotKept -> importProblem = resources.getString(R.string.main_could_not_keep_sent_map, offer.from)
+                        Accepted.AnsweredAlready -> Unit
                     }
                 }
             }
@@ -606,28 +868,12 @@ fun OrbitApp(requests: Flow<AppRequest>) {
             number = otherVersions.number,
             count = otherVersions.count,
         ) { answer ->
-            if (otherVersions.asked !== question) {
-                return@ArrivalDialog
-            }
-
-            otherVersions = otherVersions.after(question)
-
+            // Taken in by the app, not this screen: made again or closed meanwhile, it's still taken in, once, and its map
+            // opens on the screen there is then.
             if (answer == Arrival.Decline) {
-                // What the zip unpacked to goes now: a map's can come to a gigabyte.
-                container.maps.discard(arrival.bundle)
+                arrivals.decline(question)
             } else {
-                scope.launch {
-                    try {
-                        val replacing = if (answer == Arrival.KeepBoth) null else arrival.existing
-                        val id = container.maps.receive(arrival.bundle, replacing = replacing, reason = VersionReason.FromFile(arrival.name))
-
-                        if (question.opens) {
-                            openMap(id)
-                        }
-                    } catch (failed: IOException) {
-                        importProblem = failed.message ?: resources.getString(R.string.common_could_not_keep_that_map)
-                    }
-                }
+                arrivals.answer(question, keepBoth = answer == Arrival.KeepBoth)
             }
         }
     }
@@ -640,7 +886,16 @@ fun OrbitApp(requests: Flow<AppRequest>) {
             onDismissRequest = { importedMany = null },
             title = {
                 EscapeCloses { importedMany = null }
-                Text(stringResource(if (result.added == 0) R.string.main_nothing_new else R.string.main_maps_added))
+
+                Text(
+                    stringResource(
+                        when {
+                            result.stopped != null -> R.string.main_import_stopped
+                            result.added == 0 -> R.string.main_nothing_new
+                            else -> R.string.main_maps_added
+                        },
+                    ),
+                )
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -648,18 +903,33 @@ fun OrbitApp(requests: Flow<AppRequest>) {
                     val concealing = privacy.conceals(hidingPrivateMaps)
                     val alreadyHere = mentionedAlreadyHere(result.alreadyHere, result.privateAlreadyHere, concealing)
                     val filledIn = mentionedFilledIn(result.filledIn, result.privateFilledIn, concealing)
+                    val pastRoom = mentionedFilledIn(result.pastRoom, result.privatePastRoom, concealing)
 
-                    Text(
-                        when {
-                            result.added == 0 && result.alreadyHere == 0 -> stringResource(R.string.main_no_maps_in_zip)
-                            result.added == 0 -> stringResource(R.string.main_every_map_in_zip_already_here)
-                            alreadyHere == 0 -> pluralStringResource(R.plurals.common_added_maps, result.added, result.added)
-                            alreadyHere == 1 -> pluralStringResource(R.plurals.common_added_maps_with_one_already_here, result.added, result.added)
-                            else -> pluralStringResource(R.plurals.common_added_maps_with_several_already_here, result.added, result.added, alreadyHere)
-                        },
-                    )
+                    // One that stopped partway says why first, then only what came: nothing of the file as a whole.
+                    result.stopped?.let { Text(it) }
 
-                    ImportNotes(listOfNotNull(pluralStringResource(R.plurals.data_zip_files_filled_in, filledIn, filledIn).takeIf { filledIn > 0 }) + result.notes)
+                    when {
+                        result.stopped != null && result.added == 0 -> null
+                        result.added == 0 && result.alreadyHere == 0 -> stringResource(R.string.main_no_maps_in_zip)
+                        result.added == 0 -> stringResource(R.string.main_every_map_in_zip_already_here)
+                        alreadyHere == 0 -> pluralStringResource(R.plurals.common_added_maps, result.added, result.added)
+                        alreadyHere == 1 -> pluralStringResource(R.plurals.common_added_maps_with_one_already_here, result.added, result.added)
+                        else -> pluralStringResource(R.plurals.common_added_maps_with_several_already_here, result.added, result.added, alreadyHere)
+                    }?.let { Text(it) }
+
+                    val notes = listOfNotNull(
+                        pluralStringResource(R.plurals.data_zip_files_filled_in, filledIn, filledIn).takeIf { filledIn > 0 },
+                        Importer.pastRoomNote(pastRoom, container.words),
+                    ) + result.notes
+
+                    // Only when there are some, so what follows is spaced as the rest is.
+                    if (notes.isNotEmpty()) {
+                        ImportNotes(notes)
+                    }
+
+                    if (result.stopped != null) {
+                        Text(stringResource(R.string.common_import_again_for_the_rest))
+                    }
                 }
             },
             confirmButton = { TextButton(onClick = { importedMany = null }, modifier = Modifier.focusRequester(rememberDefaultButton())) { Text(stringResource(R.string.main_ok)) } },
@@ -675,6 +945,19 @@ fun OrbitApp(requests: Flow<AppRequest>) {
             },
             text = { ImportNotes(notes) },
             confirmButton = { TextButton(onClick = { importNotes = null }, modifier = Modifier.focusRequester(rememberDefaultButton())) { Text(stringResource(R.string.main_ok)) } },
+        )
+    }
+
+    // Why a map answered Update or Keep both couldn't be taken in: its question comes back once this is said.
+    arrivals.notTakenIn?.takeUnless { answering }?.let { reason ->
+        AlertDialog(
+            onDismissRequest = { arrivals.notTakenIn = null },
+            title = {
+                EscapeCloses { arrivals.notTakenIn = null }
+                Text(stringResource(R.string.main_could_not_take_map_in))
+            },
+            text = { Text(reason) },
+            confirmButton = { TextButton(onClick = { arrivals.notTakenIn = null }, modifier = Modifier.focusRequester(rememberDefaultButton())) { Text(stringResource(R.string.main_ok)) } },
         )
     }
 

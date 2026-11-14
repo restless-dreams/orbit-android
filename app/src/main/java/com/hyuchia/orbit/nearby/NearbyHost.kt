@@ -10,6 +10,7 @@ import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.ResourceWords
 import com.hyuchia.orbit.Words
+import com.hyuchia.orbit.data.AsTheyAreFiles
 import com.hyuchia.orbit.data.BUNDLE_SIZE
 import com.hyuchia.orbit.data.MAP_FORMAT
 import com.hyuchia.orbit.data.MEDIA_DIRECTORY
@@ -25,6 +26,7 @@ import com.hyuchia.orbit.page.AppTheme
 import com.hyuchia.orbit.page.WebPage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,6 +53,17 @@ import java.util.zip.ZipException
 private const val PORT = 8766
 /** How long a device that showed its check code waits for the map, while the person sending checks the codes. */
 const val CONFIRMING_LIFETIME_MILLISECONDS = 3 * 60 * 1000L
+
+/**
+ * How long a map that arrived waits here for the person to answer, before
+ * it's declined: as long as every release's sender waits for the answer
+ * (three minutes, to Orbit 0.5.0), so a sender never says no answer came
+ * while the map can still be opened here.
+ */
+const val ANSWER_LIFETIME_MILLISECONDS = 3 * 60 * 1000L
+
+/** How long Orbit 0.5.0 and earlier keep a map that arrived waiting for an answer: a sender waits that long for them. */
+const val ANSWER_LIFETIME_UP_TO_0_5_0 = 10 * 60 * 1000L
 /** Room a map has to leave on this device, besides itself, for it to be taken: nothing fills the storage to the brim. */
 internal const val SPARE_SPACE = 32L * 1024 * 1024
 /** Sender keys remembered this launch, so an offer copied off the network can't be sent here again. */
@@ -131,6 +144,53 @@ class Incoming internal constructor(
 ) {
     /** Whether the map is arriving now: only one upload at a time. */
     internal var uploading = false
+
+    /** Whether its offer was declined here or cancelled there: a map still arriving for it stops at its next piece. */
+    @Volatile
+    internal var dropped = false
+}
+
+/** What came of opening a map offered here, or keeping both. */
+sealed interface Accepted {
+    /** The map is here, as `id`. */
+    data class Opened(val id: String) : Accepted
+
+    /** It couldn't be taken in: the sender hears it was declined. */
+    data object NotKept : Accepted
+
+    /** Another answer came first, or the map's time to be answered ran out: nothing more was done. */
+    data object AnsweredAlready : Accepted
+}
+
+/** A map's upload whose offer was declined or cancelled as it arrived. */
+private class OfferDroppedException : IOException("The offer was declined or cancelled as its map arrived")
+
+/**
+ * A map's stream as it arrives, for as long as its offer stands: once it's
+ * declined here or cancelled there, the next piece read stops it, rather
+ * than read the rest of a map no one will take.
+ */
+private class WhileOffered(input: InputStream, private val incoming: Incoming) : FilterInputStream(input) {
+    override fun read(): Int {
+        stillOffered()
+        return super.read()
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        stillOffered()
+        return super.read(buffer, offset, length)
+    }
+
+    override fun skip(count: Long): Long {
+        stillOffered()
+        return super.skip(count)
+    }
+
+    private fun stillOffered() {
+        if (incoming.dropped) {
+            throw OfferDroppedException()
+        }
+    }
 }
 
 /** Where an offer is, as `GET /offer/<id>` says: its code shown and the map on its way, the map waiting for an answer, or answered. */
@@ -149,8 +209,8 @@ internal data class OfferTimes(
     /** A device that showed its check code waits this long for the map to start coming, while the person sending checks the codes. */
     val confirming: Long = CONFIRMING_LIFETIME_MILLISECONDS,
 
-    /** A map waits this long for an answer before it's dropped. */
-    val waiting: Long = 10 * 60 * 1000L,
+    /** A map waits this long for an answer before it's declined. */
+    val waiting: Long = ANSWER_LIFETIME_MILLISECONDS,
 
     /** An offer answered, opened or declined, is still said to its sender this long. */
     val settled: Long = 10 * 60 * 1000L,
@@ -166,8 +226,12 @@ class SharedMap internal constructor(
     /** Where its pages are made, a file for each version of the map. */
     private val pages: File,
 
-    /** The map's files that can't go clean which the person sharing chose to share as they are: its page and zip carry them. */
-    internal val asTheyAre: Set<String> = emptySet(),
+    /**
+     * The map's files that can't go clean which the person sharing chose to
+     * share as they are, as they were then: its page and zip carry them. One
+     * that changed since stays here, as a browser can't be asked.
+     */
+    internal val asTheyAre: AsTheyAreFiles = AsTheyAreFiles.NONE,
 ) {
     private val building = Mutex()
 
@@ -351,9 +415,11 @@ private fun roomIn(folder: File): Long = folder.usableSpace
  * Otherwise nothing listens. `policy` says which connections it takes: the
  * room's, unless a test over this machine's loopback says otherwise; and
  * `words` what its pages say. An offer's stages last `times`, on `clock`,
- * `room` says how much room is left where offers and shared maps' zips are
- * made, and `mapLimit` is the largest map it takes, sealed, as it tells
- * senders.
+ * and `answerTime` is a map's time to be answered, [OfferTimes.waiting]
+ * unless a test says when it's over; `room` says how much room is left
+ * where offers and shared maps' zips are made, and `mapLimit` is the largest
+ * map it takes, sealed, as it tells senders. `asset` reads one of the app's
+ * map assets by name: the join page, for one.
  */
 class NearbyHost internal constructor(
     private val context: Context,
@@ -366,6 +432,8 @@ class NearbyHost internal constructor(
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
     private val room: () -> Long = { roomIn(context.cacheDir) },
     private val mapLimit: Long = OFFER_LIMIT,
+    private val answerTime: suspend () -> Unit = { delay(times.waiting) },
+    private val asset: (String) -> String = { name -> context.assets.open("map/$name").bufferedReader().use { it.readText() } },
 ) {
     constructor(context: Context, maps: MapRepository, scope: CoroutineScope) :
         this(context, maps, scope, RoomNetworks(), ResourceWords(context), ::roomAddresses)
@@ -542,35 +610,76 @@ class NearbyHost internal constructor(
 
     /**
      * Takes in an offered map: opens it as a new one, updates this device's
-     * copy, or keeps both. Returns its id, or null when it couldn't be taken
-     * in (the offer is then dropped, and the sender hears it was declined).
+     * copy, or keeps both. An offer takes one answer: a second one, a tap
+     * on Decline while it's taken in, or its time running out, does nothing.
+     * It's taken in on the host's own scope, so a screen made again meanwhile
+     * never leaves it half answered. If it couldn't be taken in, the sender
+     * hears it was declined.
      */
-    suspend fun accept(offer: Offer, keepBoth: Boolean): String? {
-        val id = try {
-            // Its pictures, videos and sounds are in their files already: they move into the map.
-            maps.receive(offer.bundle, replacing = if (keepBoth) null else offer.existing, reason = VersionReason.FromDevice(offer.from))
-        } catch (failed: IOException) {
-            Logs.warn(TAG, "Couldn't take in an offered map", failed)
-            null
+    suspend fun accept(offer: Offer, keepBoth: Boolean): Accepted {
+        if (!claim(offer)) {
+            return Accepted.AnsweredAlready
         }
 
-        settle(offer, if (id != null) OfferState.Opened else OfferState.Declined)
-        return id
+        return scope.async {
+            val id = try {
+                // Its pictures, videos and sounds are in their files already: they move into the map.
+                maps.receive(offer.bundle, replacing = if (keepBoth) null else offer.existing, reason = VersionReason.FromDevice(offer.from))
+            } catch (failed: IOException) {
+                Logs.warn(TAG, "Couldn't take in an offered map", failed)
+                null
+            }
+
+            settle(offer, if (id != null) OfferState.Opened else OfferState.Declined)
+            id?.let(Accepted::Opened) ?: Accepted.NotKept
+        }.await()
     }
 
+    /** Declines an offered map, unless it was answered already. */
     fun decline(offer: Offer) {
-        settle(offer, OfferState.Declined)
-    }
-
-    /** Refuses a map on its way here: the sender hears it was declined, and sends nothing. */
-    fun decline(incoming: Incoming) {
-        synchronized(opening) {
-            drop(incoming)
+        if (claim(offer)) {
+            settle(offer, OfferState.Declined)
         }
     }
 
-    /** Drops a map on its way here: its offer is declined, and its place is free. Called holding [opening]. */
+    /**
+     * Takes `offer` off the maps waiting for an answer, for the one answer it
+     * takes: false when another answer, or its time running out, took it first.
+     */
+    private fun claim(offer: Offer): Boolean {
+        var claimed = false
+
+        waiting.update { offers ->
+            claimed = offers.any { it === offer }
+            offers.filterNot { it === offer }
+        }
+
+        return claimed
+    }
+
+    /**
+     * Refuses a map on its way here: the sender hears it was declined, and
+     * sends nothing. A tap that comes as the map arrives declines the map it
+     * became, as one answer, unless another came first; one on a map on its
+     * way no more, answered or gone, does nothing. So what the sender hears
+     * is always what became of the map here.
+     */
+    fun decline(incoming: Incoming) {
+        val arrived = synchronized(opening) {
+            if (announced.value.any { it === incoming }) {
+                drop(incoming)
+                null
+            } else {
+                waiting.value.firstOrNull { it.id == incoming.id && it.session === incoming.session }
+            }
+        }
+
+        arrived?.let(::decline)
+    }
+
+    /** Drops a map on its way here: its offer is declined, its place is free, and an upload of it stops. Called holding [opening]. */
     private fun drop(incoming: Incoming) {
+        incoming.dropped = true
         states.set(incoming.id, OfferState.Declined, incoming.session)
         announced.update { list -> list.filterNot { it.id == incoming.id } }
     }
@@ -579,9 +688,10 @@ class NearbyHost internal constructor(
      * Shows a map to computers' browsers at a code, until [unshare]: to
      * explore, present or download it, for whoever `options` lets in. Its
      * files that can't go clean stay out of its page and zip, but those of
-     * `asTheyAre`, which the person sharing chose to share as they are.
+     * `asTheyAre`, which the person sharing chose to share as they are, as
+     * they were then ([AsTheyAreFiles.lasting]).
      */
-    fun share(mapId: String, theme: AppTheme, options: JoiningOptions = JoiningOptions(askNames = false), asTheyAre: Set<String> = emptySet()): SharedMap {
+    fun share(mapId: String, theme: AppTheme, options: JoiningOptions = JoiningOptions(askNames = false), asTheyAre: AsTheyAreFiles = AsTheyAreFiles.NONE): SharedMap {
         if (shares.isEmpty()) {
             // A new code: wrong guesses at old ones no longer keep anyone waiting.
             guard.reset()
@@ -593,7 +703,7 @@ class NearbyHost internal constructor(
             code = newCode()
         }
 
-        val shared = SharedMap(code, mapId, theme, Joining(code, RoomKind.Share, options, template = { asset("join.html") }, words = words), sharedPages, asTheyAre)
+        val shared = SharedMap(code, mapId, theme, Joining(code, RoomKind.Share, options, template = { asset("join.html") }, words = words), sharedPages, asTheyAre.lasting())
         synchronized(endedShares) { endedShares.remove(code) }
         shares[code] = shared
         refresh()
@@ -616,9 +726,9 @@ class NearbyHost internal constructor(
         synchronized(zips) { zips.remove(code) }?.end()
     }
 
+    /** Answers an offer [claim] took: the sender hears `state`. */
     private fun settle(offer: Offer, state: OfferState) {
         states.set(offer.id, state, offer.session)
-        waiting.update { offers -> offers.filterNot { it.id == offer.id } }
         // What it brought that's still in the files it arrived in, all of it when it was declined, goes now.
         maps.discard(offer.bundle)
     }
@@ -806,7 +916,7 @@ class NearbyHost internal constructor(
         try {
             bundle = try {
                 withContext(Dispatchers.IO) {
-                    incoming.session.openMap(request.bodyStream(), mapLimit).use { opened ->
+                    incoming.session.openMap(WhileOffered(request.bodyStream(), incoming), mapLimit).use { opened ->
                         val read = maps.readBundle(KeptOpen(opened), room = room)
 
                         try {
@@ -823,6 +933,9 @@ class NearbyHost internal constructor(
             } catch (cut: BodyCutShortException) {
                 cutShort = true
                 return Response.text(400, "The map was cut short on its way. Send it again.")
+            } catch (dropped: OfferDroppedException) {
+                // Declined here, or cancelled there, as it arrived: what came of it is gone, and the sender hears so.
+                return Response.notFound()
             } catch (unreadable: UnreadableOfferException) {
                 null
             } catch (full: NoRoomForZipException) {
@@ -858,9 +971,10 @@ class NearbyHost internal constructor(
             }
 
             scope.launch {
-                delay(times.waiting)
+                answerTime()
 
-                if (states[offer.id] == OfferState.Waiting) {
+                // Unless it was answered meanwhile, or is being taken in.
+                if (claim(offer)) {
                     settle(offer, OfferState.Declined)
                 }
             }
@@ -889,8 +1003,13 @@ class NearbyHost internal constructor(
             val session = hello?.session ?: incoming?.session ?: return Response.notFound()
 
             hello?.let { arriving.remove(it.id) }
-            states.set(id, OfferState.Declined, session)
-            announced.update { list -> list.filterNot { it.id == id } }
+
+            // A map on its way stops at its next piece.
+            if (incoming != null) {
+                drop(incoming)
+            } else {
+                states.set(id, OfferState.Declined, session)
+            }
         }
 
         return stateAnswer(id)
@@ -995,6 +1114,12 @@ class NearbyHost internal constructor(
 
         val parts = request.path.trim('/').split('/').filter { it.isNotEmpty() }
         val first = parts.firstOrNull()
+
+        // Another site's page gets the same of every code, and its tries count as no one's.
+        if (looksLikeCode(first) && fromAnotherSite(request)) {
+            return fromElsewhere(request, parts.drop(1), asset("join.html"), words)
+        }
+
         var share = first?.let(shares::get)
 
         if (share != null && endedAsHidden(share)) {
@@ -1172,8 +1297,6 @@ class NearbyHost internal constructor(
         advertisement = null
         runCatching { context.getSystemService(NsdManager::class.java)?.unregisterService(listener) }
     }
-
-    private fun asset(name: String): String = context.assets.open("map/$name").bufferedReader().use { it.readText() }
 
     private companion object {
         /** An offer's id and what's after it, from `/offer/<id>` or `/offer/<id>/<what>`, or null for any other path. */

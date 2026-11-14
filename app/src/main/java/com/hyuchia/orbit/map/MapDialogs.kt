@@ -78,6 +78,16 @@ internal class MapDialogsState(
     var taggingMap by taggingMap
     var deletingMap by deletingMap
     var sending by sending
+
+    /**
+     * One with a field of its own is open, in a window over the map: the
+     * keyboard that comes up is its own, and the map makes no room for it
+     * ([MapLayout.roomForKeyboard]). An icon's search, a typed color, day or
+     * time, a goal's amount, the map's name, cover and tags, and the address
+     * to send to.
+     */
+    val fieldOver: Boolean
+        get() = pickingIcon != null || pickingColor != null || pickingDate != null || changingGoal != null || renamingMap || coveringMap || taggingMap || sending
 }
 
 @Composable

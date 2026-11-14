@@ -6,6 +6,7 @@ import android.content.res.Resources
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +33,7 @@ import androidx.compose.material3.ExposedDropdownMenu
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LoadingIndicator
@@ -39,16 +41,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -62,7 +66,6 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.pluralStringResource
@@ -75,24 +78,33 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
 import com.hyuchia.orbit.data.AppSettings
+import com.hyuchia.orbit.data.LockedCover
 import com.hyuchia.orbit.data.MapSummary
 import com.hyuchia.orbit.privacy.KeyboardsDontLearn
+import com.hyuchia.orbit.privacy.LockEmblem
+import com.hyuchia.orbit.privacy.LockedLook
 import com.hyuchia.orbit.privacy.PrivateOnScreen
 import com.hyuchia.orbit.privacy.PrivateView
 import com.hyuchia.orbit.privacy.ShowPrivateMapsButton
 import com.hyuchia.orbit.privacy.conceals
+import com.hyuchia.orbit.privacy.coverTitle
 import com.hyuchia.orbit.privacy.keepPrivateMapsOutOfRecents
+import com.hyuchia.orbit.privacy.lockedLook
+import com.hyuchia.orbit.privacy.privateSheetProperties
 import com.hyuchia.orbit.privacy.rememberUnlocking
 import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.theme.OrbitTheme
 import com.hyuchia.orbit.theme.ThemedSystemBars
 import com.hyuchia.orbit.theme.appIsDark
 import com.hyuchia.orbit.ui.EscapeCloses
+import com.hyuchia.orbit.ui.orbitViewModel
 import com.hyuchia.orbit.ui.systemReason
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -103,11 +115,19 @@ import kotlinx.coroutines.launch
 /** The map a capture adds to, when one asks for it (a home screen widget's). */
 const val EXTRA_CAPTURE_MAP = "capture_map"
 
-/** Opens the sheet to catch ideas into a map: `mapId`'s, or the one ideas went to last. */
+/**
+ * Opens the sheet to catch ideas into a map: `mapId`'s, or the one ideas
+ * went to last. A sheet left open, in a task of its own, comes back as it
+ * was, with what was typed in it, even after Android stopped Orbit: it
+ * takes `mapId`, if any, and keeps the draft ([CaptureActivity.onNewIntent]).
+ */
 fun captureIntent(context: Context, mapId: String? = null): Intent =
     Intent(context, CaptureActivity::class.java)
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         .apply { mapId?.let { putExtra(EXTRA_CAPTURE_MAP, it) } }
+
+/** The sheet opened again while it's there, by the tile or a widget's +, which asks for `mapId`'s map, if any: each one is new, even for the same map. */
+internal class CaptureAgain(val mapId: String?)
 
 /**
  * What another app shared, to catch as ideas: its subject and its text, a
@@ -129,6 +149,9 @@ internal fun sharedText(intent: Intent): String =
  * nested as the lines are indented, as pasting nests them.
  */
 class CaptureActivity : ComponentActivity() {
+    /** The latest time the sheet was opened again while it was there ([onNewIntent]). */
+    private var again by mutableStateOf<CaptureAgain?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -165,12 +188,20 @@ class CaptureActivity : ComponentActivity() {
                             maps = loaded,
                             initialMapId = requested ?: chosen.captureMapId,
                             initialText = shared,
+                            again = again,
                             onDone = ::finish,
                         )
                     }
                 }
             }
         }
+    }
+
+    /** Opened again while it's there: the sheet stays as it is, with its draft, and takes the map a widget's + asks for. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        again = CaptureAgain(intent.getStringExtra(EXTRA_CAPTURE_MAP))
     }
 }
 
@@ -196,25 +227,74 @@ internal fun captureChoices(maps: List<MapSummary>, privacy: PrivateView, hiding
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CaptureSheet(maps: List<MapSummary>, initialMapId: String?, initialText: String, onDone: () -> Unit) {
+private fun CaptureSheet(maps: List<MapSummary>, initialMapId: String?, initialText: String, again: CaptureAgain?, onDone: () -> Unit) {
     val context = LocalContext.current
-    val resources = LocalResources.current
-    val scope = rememberCoroutineScope()
-    // While private maps are locked, they aren't offered, nor named: Unlock brings them in (see captureChoices).
-    val privacy by context.container.privateMaps.view.collectAsStateWithLifecycle()
+
+    // Adding outlasts the sheet made again as the phone turns: it goes on, and is said once, by the sheet there is then.
+    val model = orbitViewModel { container ->
+        CaptureModel { target, ideas, text ->
+            // Said as private maps are once the ideas are in, which takes a moment: the map as it is then, and the lock.
+            val hidesNow = { container.privateMaps.view.value.hides(container.maps.summary(target.id) ?: target) }
+            captureInto(target, ideas, container.application.resources, hidesNow) { container.capture.add(target.id, text) }
+        }
+    }
+
+    // While private maps are locked, they aren't offered, nor named: Unlock brings them in (see captureChoices). As they
+    // are now, not as last heard: the sheet coming back is drawn, from its first frame, as they are then, and so is a
+    // draft under their lock (below).
+    val heard by context.container.privateMaps.view.collectAsStateWithLifecycle()
+    var starts by remember { mutableIntStateOf(0) }
+    LifecycleEventEffect(Lifecycle.Event.ON_START) { starts += 1 }
+    val privacy = remember(heard, starts) { context.container.privateMaps.view.value }
     val unlocking = rememberUnlocking()
     val hiding = LocalAppSettings.current.hideLockedPrivateMaps
     val choices = remember(maps, privacy, hiding) { captureChoices(maps, privacy, hiding) }
     val ordered = choices.maps
-    PrivateOnScreen(choices.namesPrivateMaps)
     fun lockedPrivate(id: String?): Boolean = maps.any { it.id == id && privacy.hides(it) }
 
     // Ideas never quietly go to another map than the one meant: while that's a private map that's locked, none is
     // chosen (`waitingFor` is it), until the person picks one or unlocks.
     var waitingFor by rememberSaveable { mutableStateOf(initialMapId?.takeIf(::lockedPrivate)) }
     var mapId by rememberSaveable { mutableStateOf(if (waitingFor != null) null else initialMapId?.takeIf { id -> ordered.any { it.id == id } } ?: ordered.firstOrNull()?.id) }
-    // Ideas that couldn't be added stay here, with what went wrong, to try again or copy elsewhere.
-    var problem by remember { mutableStateOf<String?>(null) }
+
+    // Shared text arrives with the cursor after it, ready for a line more.
+    var text by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(initialText, TextRange(initialText.length))) }
+
+    // A draft for a private map stays as private maps lock, but under a lock of its own in the sheet, worked out as it's
+    // drawn: never shown, nor added anywhere, until they're unlocked, and never thrown away. What's typed for one while
+    // it's locked shows as it's typed, and as the phone turns (`shownLocked`), but not once the sheet comes back after
+    // being away; once covered, it stays covered for its map (`coveredFor`), whatever map is chosen then. Typed for a
+    // private map, the sheet is kept out of Recents and screenshots, as the map is.
+    var shownLocked by rememberSaveable { mutableStateOf(initialText.isNotBlank()) }
+    var coveredFor by rememberSaveable { mutableStateOf<String?>(null) }
+    fun hidesNow(id: String?): Boolean = id != null && lockedPrivate(id)
+    val target = waitingFor ?: mapId
+    val coveredNow = text.text.isNotBlank() && !shownLocked && hidesNow(target)
+    val covered = target?.takeIf { coveredNow } ?: coveredFor?.takeIf(::hidesNow)
+
+    SideEffect {
+        if (coveredNow) {
+            coveredFor = target
+        }
+    }
+
+    // Away, but to be made again as the phone turns: what was typed while it was locked shows no more once it's back.
+    val activity = LocalActivity.current
+
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        if (activity?.isChangingConfigurations != true) {
+            shownLocked = false
+        }
+    }
+
+    LaunchedEffect(privacy.locked) {
+        if (!privacy.locked) {
+            shownLocked = false
+            coveredFor = null
+        }
+    }
+
+    PrivateOnScreen(choices.namesPrivateMaps || maps.any { it.id == mapId && it.metadata.isPrivate } || waitingFor != null || covered != null)
 
     // Unlocked, private maps come in: the one ideas went to last, or were going to, when it's one of them.
     LaunchedEffect(ordered) {
@@ -223,7 +303,7 @@ private fun CaptureSheet(maps: List<MapSummary>, initialMapId: String?, initialT
         when {
             // A private map chosen that locks goes, and so does what went wrong adding to it, which names it.
             chosen != null && ordered.none { it.id == chosen } && lockedPrivate(chosen) -> {
-                problem = null
+                model.problem = null
                 waitingFor = chosen
                 mapId = null
             }
@@ -237,44 +317,46 @@ private fun CaptureSheet(maps: List<MapSummary>, initialMapId: String?, initialT
         }
     }
 
-    // Shared text arrives with the cursor after it, ready for a line more.
-    var text by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(initialText, TextRange(initialText.length))) }
-    var adding by remember { mutableStateOf(false) }
+    // Opened again over itself, it keeps its draft: a widget's + chooses its map, named above the draft, so it's seen where the
+    // ideas will go; a private one that's locked is waited for, as at the start.
+    LaunchedEffect(again) {
+        val requested = again?.mapId ?: return@LaunchedEffect
+
+        when {
+            lockedPrivate(requested) -> {
+                waitingFor = requested
+                mapId = null
+            }
+            ordered.any { it.id == requested } -> {
+                mapId = requested
+                waitingFor = null
+            }
+        }
+    }
+
+    val adding = model.adding
     val ideas = ideasFromText(text.text)
     val map = ordered.firstOrNull { it.id == mapId }
     val focus = remember { FocusRequester() }
     val state = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded))
 
     fun add() {
-        val target = map ?: return
+        val into = map?.takeIf { covered == null } ?: return
 
-        if (ideas.isEmpty() || adding) {
-            return
-        }
-
-        adding = true
-        problem = null
-        val container = context.container
-        val typed = text.text
-
-        scope.launch {
-            // Said as private maps are once the ideas are in, which takes a moment: the map as it is then, and the lock.
-            val hidesNow = { container.privateMaps.view.value.hides(container.maps.summary(target.id) ?: target) }
-
-            when (val outcome = captureInto(target, ideas.size, resources, hidesNow) { container.capture.add(target.id, typed) }) {
-                is CaptureOutcome.Added -> {
-                    Toast.makeText(context.applicationContext, outcome.said, Toast.LENGTH_SHORT).show()
-                    onDone()
-                }
-                is CaptureOutcome.NotAdded -> {
-                    adding = false
-                    problem = outcome.problem
-                }
-            }
+        if (ideas.isNotEmpty()) {
+            model.add(into, ideas.size, text.text)
         }
     }
 
-    ModalBottomSheet(onDismissRequest = onDone, sheetState = state) {
+    // In, the ideas are said once, by the sheet there is then, which closes.
+    LaunchedEffect(model.added) {
+        model.added?.let { said ->
+            Toast.makeText(context.applicationContext, said, Toast.LENGTH_SHORT).show()
+            onDone()
+        }
+    }
+
+    ModalBottomSheet(onDismissRequest = onDone, sheetState = state, properties = privateSheetProperties()) {
         EscapeCloses(onDone)
 
         Column(
@@ -317,39 +399,50 @@ private fun CaptureSheet(maps: List<MapSummary>, initialMapId: String?, initialT
                 onUnlock = if (choices.unlockInList) ({ unlocking.ask() }) else null,
             )
 
-            // Ideas for a private map, chosen or waited for while it's locked, ask keyboards not to learn from them, as
-            // what's typed into the map does.
-            KeyboardsDontLearn(enabled = map?.metadata?.isPrivate == true || waitingFor != null) {
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    label = {
-                        val label = if (ideas.size > 1) {
-                            pluralStringResource(R.plurals.capture_ideas_one_on_each_line, ideas.size, ideas.size)
-                        } else {
-                            stringResource(R.string.capture_your_idea)
-                        }
+            if (covered != null) {
+                DraftLock(cover = maps.firstOrNull { it.id == covered }?.metadata?.cover, look = lockedLook(covered), onUnlock = { unlocking.ask() })
+            } else {
+                // Ideas for a private map, chosen or waited for while it's locked, ask keyboards not to learn from them, as
+                // what's typed into the map does.
+                KeyboardsDontLearn(enabled = map?.metadata?.isPrivate == true || waitingFor != null) {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = {
+                            text = it
 
-                        Text(label)
-                    },
-                    placeholder = { Text(stringResource(R.string.capture_one_idea_on_each_line)) },
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    minLines = 2,
-                    maxLines = 8,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 96.dp)
-                        .focusRequester(focus)
-                        // With a keyboard, Ctrl+Enter adds, as Enter starts a new line, a new idea.
-                        .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown && event.key == Key.Enter && event.isCtrlPressed) {
-                                add()
-                                true
-                            } else {
-                                false
+                            // Typed for a private map while it's locked, by whoever has the phone now: it shows to them.
+                            if (hidesNow(target)) {
+                                shownLocked = true
                             }
                         },
-                )
+                        label = {
+                            val label = if (ideas.size > 1) {
+                                pluralStringResource(R.plurals.capture_ideas_one_on_each_line, ideas.size, ideas.size)
+                            } else {
+                                stringResource(R.string.capture_your_idea)
+                            }
+
+                            Text(label)
+                        },
+                        placeholder = { Text(stringResource(R.string.capture_one_idea_on_each_line)) },
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                        minLines = 2,
+                        maxLines = 8,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 96.dp)
+                            .focusRequester(focus)
+                            // With a keyboard, Ctrl+Enter adds, as Enter starts a new line, a new idea.
+                            .onPreviewKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown && event.key == Key.Enter && event.isCtrlPressed) {
+                                    add()
+                                    true
+                                } else {
+                                    false
+                                }
+                            },
+                    )
+                }
             }
 
             // The sheet has a window of its own, focused once it's up (from Quick Settings, once the panel
@@ -357,15 +450,16 @@ private fun CaptureSheet(maps: List<MapSummary>, initialMapId: String?, initialT
             val window = LocalWindowInfo.current
             val keyboard = LocalSoftwareKeyboardController.current
 
-            LaunchedEffect(window.isWindowFocused) {
-                if (window.isWindowFocused && !adding) {
+            // Under its lock, the draft has no field to type in: none comes up.
+            LaunchedEffect(window.isWindowFocused, covered) {
+                if (window.isWindowFocused && !adding && covered == null) {
                     focus.requestFocus()
                     keyboard?.show()
                 }
             }
 
             // Screen readers hear what went wrong as it shows: the ideas are still here.
-            problem?.let { reason ->
+            model.problem?.let { reason ->
                 Text(
                     reason,
                     style = MaterialTheme.typography.bodyMedium,
@@ -381,7 +475,7 @@ private fun CaptureSheet(maps: List<MapSummary>, initialMapId: String?, initialT
                 // Adding, it keeps its place and says so, beside a small indicator.
                 Button(
                     onClick = ::add,
-                    enabled = ideas.isNotEmpty() && map != null && !adding,
+                    enabled = ideas.isNotEmpty() && map != null && !adding && covered == null,
                     contentPadding = if (adding) ButtonDefaults.ButtonWithIconContentPadding else ButtonDefaults.ContentPadding,
                 ) {
                     if (adding) {
@@ -447,6 +541,8 @@ internal suspend fun captureInto(target: MapSummary, ideas: Int, resources: Reso
 private fun captureProblem(resources: Resources, title: String, failure: Exception): String {
     if (failure is CaptureException) {
         val words = when (failure.failure) {
+            // Nothing to add: the text holds no idea, which no map's name helps with.
+            CaptureFailure.NoIdeas -> return resources.getString(R.string.pages_no_ideas)
             CaptureFailure.Refused -> R.string.capture_problem_refused
             CaptureFailure.Missing -> R.string.capture_problem_missing
             CaptureFailure.KeptChanging -> R.string.capture_problem_kept_changing
@@ -509,6 +605,32 @@ private fun MapChooser(maps: List<MapSummary>, chosen: MapSummary?, onChoose: (M
                         unlock()
                     },
                 )
+            }
+        }
+    }
+}
+
+/**
+ * A draft for a private map, under a lock of its own while private maps are
+ * locked: the map's lock, as its own cover shows it (`cover`, `look`), that
+ * the ideas are kept, and Unlock, which asks for the screen lock as the
+ * map's own lock does.
+ */
+@Composable
+private fun DraftLock(cover: LockedCover?, look: LockedLook, onUnlock: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(16.dp)) {
+            LockEmblem(open = false, modifier = Modifier.size(48.dp), iconSize = 22.dp, look = look, icon = cover?.icon)
+
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(coverTitle(cover), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(R.string.capture_draft_locked), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            FilledTonalButton(onClick = onUnlock) {
+                Icon(Icons.Outlined.LockOpen, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(stringResource(R.string.private_unlock))
             }
         }
     }

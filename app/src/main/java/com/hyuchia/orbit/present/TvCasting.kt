@@ -14,6 +14,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.data.AsTheyAreFiles
 import com.hyuchia.orbit.ui.Hint
 import kotlinx.coroutines.CoroutineScope
 import java.io.File
@@ -25,9 +26,10 @@ fun interface Tv {
     /**
      * An audience on the TV for a presentation of the map in `mapFolder`: a
      * new one each time a presentation starts on it. It gets the map's
-     * pictures that can't go clean only when they're among `asTheyAre`.
+     * pictures that can't go clean only when they're among `asTheyAre`, as
+     * they were when the presenter chose.
      */
-    fun audience(mapFolder: File, scope: CoroutineScope, asTheyAre: () -> Set<String>): Audience
+    fun audience(mapFolder: File, scope: CoroutineScope, asTheyAre: () -> AsTheyAreFiles): Audience
 }
 
 /**

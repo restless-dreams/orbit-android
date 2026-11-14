@@ -31,7 +31,9 @@ class SketchPictures : Decoder.Factory {
         peek.request(START)
         val start = peek.readByteString(minOf(START, peek.buffer.size)).utf8()
 
-        if ("class=\"${SketchSvg.SKETCH}\"" !in start) {
+        // Only a drawing that is one of Orbit's sketches from its first element: a photo whose text happens to name the
+        // class goes on to Coil's own decoders.
+        if (!SketchSvg.startsAsSketch(start)) {
             return null
         }
 
@@ -46,7 +48,7 @@ class SketchPictures : Decoder.Factory {
 
     companion object {
         /** How much of a file tells a sketch from another drawing: as far as its first element's class. */
-        private const val START = 512L
+        private const val START = SketchSvg.START.toLong()
 
         /** The sizes a sketch is drawn at, in px: never smaller than this, nor bigger. */
         private const val SMALLEST = 64

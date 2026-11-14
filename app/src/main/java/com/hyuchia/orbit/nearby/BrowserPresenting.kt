@@ -5,14 +5,20 @@ import android.os.SystemClock
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.ResourceWords
 import com.hyuchia.orbit.Words
+import com.hyuchia.orbit.container
+import com.hyuchia.orbit.data.AsTheyAreFiles
 import com.hyuchia.orbit.data.MEDIA_DIRECTORY
 import com.hyuchia.orbit.data.MediaNames
+import com.hyuchia.orbit.data.OUTGOING_COPIES
 import com.hyuchia.orbit.data.OutgoingCopies
 import com.hyuchia.orbit.data.isSoundFile
+import com.hyuchia.orbit.data.mapMediaFile
 import com.hyuchia.orbit.data.mediaType
 import com.hyuchia.orbit.data.soundNamesIn
 import com.hyuchia.orbit.data.withoutFiles
 import com.hyuchia.orbit.page.AudienceCommand
+import com.hyuchia.orbit.page.FIRST_FRAMES_DIRECTORY
+import com.hyuchia.orbit.page.FirstFrames
 import com.hyuchia.orbit.page.PageWords
 import com.hyuchia.orbit.page.escapeHtml
 import com.hyuchia.orbit.page.fill
@@ -31,6 +37,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
+import java.io.IOException
 import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 
@@ -61,8 +68,12 @@ private const val ENDED_PRESENTATIONS = 16
  * browser joins: the phone's own clock, which its reckoning uses.
  * `outgoing` gives the file to send for one of the map's: in the app, a
  * copy without what its file says beyond what it shows ([OutgoingCopies]),
- * or the file as it is when it can't go clean and it's among `asTheyAre`,
- * the files the presenter chose to show as they are.
+ * or a copy of it as it is when it can't go clean and it's one of
+ * `asTheyAre`, the files the presenter chose to show as they are, as they
+ * were then; those copies go as the presentation ends (`ended`), and none
+ * is made once the room stops (`stopped`). `drawn`
+ * gives a HEIC or HEIF picture as a JPEG, which browsers other than Safari
+ * draw, as web pages carry it.
  */
 class BrowserPresenting internal constructor(
     private val asset: (String) -> String,
@@ -75,8 +86,31 @@ class BrowserPresenting internal constructor(
     private val listenOn: () -> List<InetAddress>? = ::roomAddresses,
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
     private val outgoing: (File) -> File? = { it },
+    private val drawn: (File) -> File? = { null },
+    private val ended: () -> Unit = {},
+    private val stopped: () -> Unit = {},
 ) {
-    constructor(context: Context, mapFolder: File, scope: CoroutineScope, options: JoiningOptions, asTheyAre: () -> Set<String> = { emptySet() }) :
+    constructor(context: Context, mapFolder: File, scope: CoroutineScope, options: JoiningOptions, asTheyAre: () -> AsTheyAreFiles = { AsTheyAreFiles.NONE }) :
+        this(
+            context,
+            mapFolder,
+            scope,
+            options,
+            asTheyAre,
+            OutgoingCopies(
+                File(context.cacheDir, OUTGOING_COPIES),
+                // A private map's copies go as private maps lock, whatever the room does.
+                madeAsItIs = { copy ->
+                    val container = context.applicationContext.container
+
+                    if (container.maps.summary(mapFolder.name)?.metadata?.isPrivate == true) {
+                        container.privateCopies.keep(copy)
+                    }
+                },
+            ),
+        )
+
+    private constructor(context: Context, mapFolder: File, scope: CoroutineScope, options: JoiningOptions, asTheyAre: () -> AsTheyAreFiles, copies: OutgoingCopies) :
         this(
             { name -> context.assets.open("map/$name").bufferedReader().use { it.readText() } },
             ResourceWords(context),
@@ -84,7 +118,10 @@ class BrowserPresenting internal constructor(
             scope,
             options,
             clock = SystemClock::elapsedRealtime,
-            outgoing = OutgoingCopies(File(context.cacheDir, "outgoing")).let { copies -> { file: File -> copies.of(file, asTheyAre()) } },
+            outgoing = { file -> copies.of(file, asTheyAre()) },
+            drawn = FirstFrames(File(context.cacheDir, FIRST_FRAMES_DIRECTORY)).let { frames -> { file: File -> frames.of(file, animations = false) } },
+            ended = copies::forgetAsTheyAre,
+            stopped = copies::close,
         )
 
     val code: String = newCode()
@@ -126,6 +163,9 @@ class BrowserPresenting internal constructor(
     /** The picture or video over the map, and where a video is, reckoned from what was sent: a browser that joins halfway opens it there. */
     @Volatile private var shown: ShownMedia? = null
 
+    /** How many times the presentation ended: a file asked for while it was shown goes only if it didn't end since, even when it's shown again. */
+    @Volatile private var ends = 0L
+
     private val watchingNow = MutableStateFlow(0)
     private var tidying: Job? = null
 
@@ -144,7 +184,7 @@ class BrowserPresenting internal constructor(
         override fun send(command: AudienceCommand) {
             val json = encode(command)
             // What a map points at is worked out before the lock: a big map's text takes a while to read.
-            val files = (command as? AudienceCommand.Show)?.let { soundNamesIn(it.markdown).toSet() to MediaNames.references(withoutFiles(it.markdown)).toSet() }
+            val files = (command as? AudienceCommand.Show)?.let { soundNamesIn(it.markdown).toSet() to MediaNames.references(withoutFiles(MediaNames.withoutCode(it.markdown))).toSet() }
 
             synchronized(sending) {
                 when (command) {
@@ -159,13 +199,21 @@ class BrowserPresenting internal constructor(
                     }
                     is AudienceCommand.Captions -> latest[CAPTIONS] = json
                     is AudienceCommand.Step -> latest[STEP] = json
-                    AudienceCommand.End -> latest.clear()
+                    AudienceCommand.End -> {
+                        latest.clear()
+                        ends += 1
+                    }
                     is AudienceCommand.Media, is AudienceCommand.Playback, is AudienceCommand.Seek, AudienceCommand.CloseMedia -> Unit
                 }
 
                 shown = shown.after(command, clock())
                 // Streams only queue what they're sent, so the lock is held for no write.
                 streams.keys.forEach { it.send(json) }
+            }
+
+            // What was copied of the files chosen to show as they are goes with it, as it ends.
+            if (command == AudienceCommand.End) {
+                ended()
             }
         }
 
@@ -192,9 +240,11 @@ class BrowserPresenting internal constructor(
     fun stop() {
         tidying?.cancel()
         joining.end()
-        synchronized(ended) { ended[code] = joining }
+        synchronized(endedPresentations) { endedPresentations[code] = joining }
         streams.keys.forEach { it.close() }
         server.stop()
+        // A request still on its way gets no copy of a file as it is any more, rather than leave one behind.
+        stopped()
     }
 
     /** What to type in a browser, or null when the phone isn't on a network others can reach, so nothing listens. */
@@ -223,13 +273,18 @@ class BrowserPresenting internal constructor(
         val parts = request.path.trim('/').split('/').filter { it.isNotEmpty() }
         val first = parts.firstOrNull()
 
+        // Another site's page gets the same of every code, and its tries count as no one's.
+        if (looksLikeCode(first) && fromAnotherSite(request)) {
+            return fromElsewhere(request, parts.drop(1), asset("join.html"), words)
+        }
+
         if (first != code) {
             if (looksLikeCode(first) && guard.waitFor(request.from) > 0) {
                 return codePage(429, guard.waitingMessage(request.from, words))
             }
 
             // A browser still following an earlier presentation, as it tries again and again, hears that it ended.
-            val earlier = first?.let { synchronized(ended) { ended[it] } }
+            val earlier = first?.let { synchronized(endedPresentations) { endedPresentations[it] } }
 
             if (earlier != null) {
                 return earlier.serve(request, parts.drop(1)) { _, _ -> Response.notFound() }
@@ -309,12 +364,10 @@ class BrowserPresenting internal constructor(
 
         // Only while the map is shown. Once the presentation ended, nothing of it goes: as when a private map locks
         // with the phone's screen off, and the room hears the end before Orbit is back on screen to stop listening.
-        if (!latest.containsKey(SHOW)) {
-            return Response.notFound()
-        }
+        // Only what the map shows, too: its pictures, a video's poster, a live photo's motion, the pictures in its notes.
+        val showing = ends
 
-        // Only what the map shows: its pictures, a video's poster, a live photo's motion, the pictures in its notes.
-        if (name !in shownFiles) {
+        if (!stillShown(name, showing)) {
             return Response.notFound()
         }
 
@@ -326,23 +379,35 @@ class BrowserPresenting internal constructor(
             return Response.notFound()
         }
 
-        val file = File(File(mapFolder, MEDIA_DIRECTORY), name)
+        // Only a file in the map's own media folder, reached through no link: never one a link there leads to.
+        val file = mapMediaFile(mapFolder, name) ?: return Response.notFound()
 
-        if (!file.isFile) {
+        // The room gets it as it would in a zip, without where it was taken; one that can't be read through doesn't go,
+        // and nor does one there's no room to make ready.
+        val sent = try {
+            outgoing(file)
+        } catch (failed: IOException) {
+            null
+        } ?: return Response.notFound()
+
+        // A HEIC picture goes as the JPEG made of it, nothing but its pixels: browsers other than Safari don't draw it.
+        val picture = try {
+            drawn(file)
+        } catch (unkept: IOException) {
+            null
+        }
+
+        // A big video's copy and a HEIC picture's JPEG take a while: a presentation that ended meanwhile, as when a
+        // private map locks, gives out nothing of it, even once it's shown again, nor does a map that stopped showing it.
+        if (!stillShown(name, showing)) {
             return Response.notFound()
         }
 
-        // The room gets it as it would in a zip, without where it was taken; one that can't be read through doesn't go.
-        val sent = outgoing(file) ?: return Response.notFound()
-
-        // A big video's copy takes a while: a presentation that ended meanwhile, as when a private map locks, gives out
-        // nothing of it.
-        if (!latest.containsKey(SHOW)) {
-            return Response.notFound()
-        }
-
-        return Response.FromFile(type, sent)
+        return if (picture != null) Response.FromFile("image/jpeg", picture) else Response.FromFile(type, sent)
     }
+
+    /** Whether the map shows the file `name` still, in the presentation that hadn't ended more than `showing` times. */
+    private fun stillShown(name: String, showing: Long): Boolean = ends == showing && latest.containsKey(SHOW) && name in shownFiles
 
     private fun encode(command: AudienceCommand): String = protocolJson.encodeToString(AudienceCommand.serializer(), command)
 
@@ -372,7 +437,7 @@ class BrowserPresenting internal constructor(
         const val STEP = "step"
 
         /** Presentations this launch of Orbit showed in browsers and ended, by their codes. */
-        val ended = object : LinkedHashMap<String, Joining>() {
+        val endedPresentations = object : LinkedHashMap<String, Joining>() {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Joining>?): Boolean = size > ENDED_PRESENTATIONS
         }
     }

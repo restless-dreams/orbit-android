@@ -39,5 +39,8 @@
     <string name="media_open_video_as_it_is_text">O Orbit não conseguiu remover onde e quando ele foi gravado nem em qual dispositivo, então o app em que você abrir o vídeo também receberia essas informações.</string>
     <string name="media_open_as_it_is">Abrir como está</string>
     <string name="media_open_video_failed">O Orbit não conseguiu fazer a cópia deste vídeo para abrir em outro app. Talvez não haja espaço para ela neste dispositivo.</string>
+    <string name="media_share_picture_failed">O Orbit não conseguiu fazer a cópia desta imagem para compartilhar. Talvez não haja espaço para ela neste dispositivo.</string>
+    <string name="media_share_video_failed">O Orbit não conseguiu fazer a cópia deste vídeo para compartilhar. Talvez não haja espaço para ela neste dispositivo.</string>
+    <string name="media_share_sound_failed">O Orbit não conseguiu fazer a cópia deste áudio para compartilhar. Talvez não haja espaço para ela neste dispositivo.</string>
     <string name="media_watch_on">Assistir no %1$s</string>
 </resources>

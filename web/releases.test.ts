@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { parseOrbit, serializeOrbitMarkdown, type OrbitDocument, type OrbitNode } from '@restless-dreams/orbit';
+import { parseOrbit, serializeOrbitMarkdown, setNoteCheckbox, type OrbitDocument, type OrbitNode } from '@restless-dreams/orbit';
 import { isGoal, readGoal } from './goal';
 import { nodeTypes } from './look';
 import { readingOf } from './reading';
@@ -36,6 +36,18 @@ const read = (text: string) => parseOrbit(text, { untitled: 'Untitled map' });
 const meaning = (map: OrbitDocument): string => serializeOrbitMarkdown(map, { keepSource: false });
 
 const everyNode = (node: OrbitNode): OrbitNode[] => [node, ...(node.children ?? []).flatMap(everyNode)];
+
+/** Whether `release`, a folder's name, is `version` or a later release, as ReleaseDataTest's `since` says. */
+const since = (release: string, version: string): boolean => {
+  if (release === 'before-0.1.0') {
+    return false;
+  }
+
+  const left = release.split('.').map(Number);
+  const right = version.split('.').map(Number);
+  const differs = left.map((part, index) => part - (right[index] ?? 0)).find((difference) => difference !== 0);
+  return (differs ?? 0) >= 0;
+};
 
 describe("each release's maps", () => {
   test('are all here to read', () => {
@@ -73,6 +85,47 @@ describe("each release's maps", () => {
       } else {
         expect(saved).toBe(text);
       }
+    });
+  }
+});
+
+// From 0.5.0, the README's steps leave a date, a file, a sketch and a note with a table and a checklist on Lisbon's
+// ideas: the map's page reads each of them, and a box of the note checks on its own line of the file.
+describe('what each release from 0.5.0 left on ideas', () => {
+  const lisbons = readdirSync(releases)
+    .filter((release) => since(release, '0.5.0'))
+    .map((release) => ({ release, text: readFileSync(join(releases, release, 'files/maps/lisbon-in-may/map.md'), 'utf8') }));
+
+  test('is here to read', () => {
+    expect(lisbons.map(({ release }) => release)).toContain('0.5.0');
+  });
+
+  for (const { release, text } of lisbons) {
+    const idea = (map: OrbitDocument, name: string): OrbitNode | undefined => everyNode(map.root).find((node) => node.text === name);
+
+    test(`${release}: a date, a file and a sketch`, () => {
+      const map = read(text);
+
+      expect(idea(map, 'Night markets')?.due).toMatch(/^\d{4}-\d{2}-20 18:30$/);
+      expect(idea(map, 'Food')?.files?.map((file) => file.src)).toEqual(['media/file-boarding-pass.pdf']);
+      expect(idea(map, 'Sardines')?.image).toEqual({ src: expect.stringMatching(/^media\/sketch-[a-z0-9]+\.svg$/), alt: 'A sardine' });
+    });
+
+    test(`${release}: a note's table and checklist, whose boxes check on their own lines`, () => {
+      const map = read(text);
+      const museums = idea(map, 'Museums');
+      const note = museums?.note ?? '';
+      const line = note.split('\n').indexOf('- [ ] Check Monday closures');
+
+      expect(note).toContain('| Museum | Opens |\n| --- | ---: |\n| Azulejo | 10:00 |\n| Gulbenkian | 10:00 |');
+      expect(note).toContain('- [x] Buy tickets online');
+      expect(museums).toBeDefined();
+
+      if (museums) {
+        museums.note = setNoteCheckbox(note, line, true) ?? note;
+      }
+
+      expect(serializeOrbitMarkdown(map)).toBe(text.replace('> - [ ] Check Monday closures', '> - [x] Check Monday closures'));
     });
   }
 });

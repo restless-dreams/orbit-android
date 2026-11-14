@@ -9,7 +9,9 @@ import java.io.IOException
  * other apps' blocks (where the flac tool keeps a WAV's own chunks), become
  * padding of the same length with nothing in it, so the frames stay where
  * they are. An ID3v2 tag some apps put before `fLaC` says nothing any more,
- * and tags after the frames stay out ([SoundTags]). A file cut short, as a
+ * and tags after the frames stay out ([SoundTags]). The frames come one
+ * right after another: a file with anything between them, which players
+ * skip, can't be read through. A file cut short, as a
  * recording that stopped or a copy that didn't finish, goes as far as its
  * last whole frame: the frame or the tag the cut falls in stays out, as no
  * player can play or read it. FLAC in Ogg keeps its blocks in packets, and
@@ -77,12 +79,65 @@ internal object FlacBlocks {
             return null
         }
 
-        if (endsWithWholeFrame(bytes, position, end, largestFrame)) {
-            return patches to end
+        val framesEnd = if (endsWithWholeFrame(bytes, position, end, largestFrame)) end else cutShortFramesEnd(bytes, position, end, largestFrame) ?: return null
+
+        // Frames alone, one after another: anything between them, which players skip, could say anything.
+        return (patches to framesEnd).takeIf { onlyFrames(bytes, position, framesEnd) }
+    }
+
+    /**
+     * Whether what's from `frames` to `end` is FLAC's frames alone, each
+     * right after the one before: each starts with a header its checksum
+     * agrees with, and ends where the checksum of all of it comes to zero,
+     * right before the next one's header or `end`. Bytes between frames,
+     * which a player skips as it looks for the next one, break that, so a
+     * file with any can't be read through; but zeros, which say nothing and
+     * leave the checksum as it was. Read once, in one pass a chunk at a time,
+     * the checksum going on from frame to frame (it's zero where each
+     * starts); a frame goes on no further than the largest FLAC makes.
+     */
+    private fun onlyFrames(bytes: Bytes, frames: Long, end: Long): Boolean {
+        if (!frameAt(bytes, frames)) {
+            return false
         }
 
-        return cutShortFramesEnd(bytes, position, end, largestFrame)?.let { patches to it }
+        var start = frames
+        var crc = 0
+        var position = frames
+
+        while (position < end) {
+            val chunk = bytes.read(position, minOf(FRAMES_CHUNK.toLong(), end - position).toInt())
+
+            if (chunk.isEmpty()) {
+                return false
+            }
+
+            for (index in chunk.indices) {
+                crc = ((crc shl 8) xor CRC16_TABLE[(crc shr 8) xor chunk.byteAt(index)]) and 0xFFFF
+                val next = position + index + 1
+
+                if (crc == 0 && next - start >= SMALLEST_FRAME && (next == end || frameAt(chunk, index + 1, bytes, next))) {
+                    start = next
+                } else if (next - start > LARGEST_FRAME_SOUGHT) {
+                    return false
+                }
+            }
+
+            position += chunk.size
+        }
+
+        return start == end
     }
+
+    /** Whether a frame starts at `at`: its sync code, and a header its checksum agrees with. */
+    private fun frameAt(bytes: Bytes, at: Long): Boolean {
+        val header = bytes.read(at, LONGEST_HEADER)
+        return startsFrame(header, 0) && headerAgrees(header, 0)
+    }
+
+    /** Whether a frame starts at `at` in the file, which is `index` in `chunk`: read from the chunk when its header is all there. */
+    private fun frameAt(chunk: ByteArray, index: Int, bytes: Bytes, at: Long): Boolean =
+        if (index + LONGEST_HEADER <= chunk.size) startsFrame(chunk, index) && headerAgrees(chunk, index) else frameAt(bytes, at)
 
     /**
      * What a metadata block that starts with `first` becomes as it goes:
@@ -288,6 +343,9 @@ internal object FlacBlocks {
 
     /** How far before the end the last frame is sought at most: the largest frames FLAC makes, eight channels of 32 bits verbatim, come to about 2 MB. */
     private const val LARGEST_FRAME_SOUGHT = 2L shl 20
+
+    /** How much of the frames is read at a time as they're checked one by one. */
+    private const val FRAMES_CHUNK = 256 * 1024
 
     /** How many headers that check out the search for the last frame tries before it gives up. */
     private const val HEADERS_SOUGHT = 8

@@ -77,6 +77,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.page.MapNode
+import com.hyuchia.orbit.privacy.CountsOverTheMap
+import com.hyuchia.orbit.privacy.privateSheetProperties
 import com.hyuchia.orbit.theme.parseCssColor
 import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.Hint
@@ -296,29 +298,45 @@ private fun PathStep(
             }
         }
 
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            if (!first) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.present_path_earlier)) },
-                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = null) },
-                    onClick = { menu = false; onMove(-1) },
-                )
-            }
+        PathStepMenu(
+            expanded = menu,
+            first = first,
+            last = last,
+            onDismiss = { menu = false },
+            onMove = { menu = false; onMove(it) },
+            onRemove = { menu = false; onRemove() },
+        )
+    }
+}
 
-            if (!last) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.present_path_later)) },
-                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null) },
-                    onClick = { menu = false; onMove(1) },
-                )
-            }
+/** A step's menu, held on the step: earlier or later in the path, or off it. */
+@Composable
+internal fun PathStepMenu(expanded: Boolean, first: Boolean, last: Boolean, onDismiss: () -> Unit, onMove: (Int) -> Unit, onRemove: () -> Unit) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        // A window of its own over the map: a lock covers it.
+        CountsOverTheMap()
 
+        if (!first) {
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.present_path_take_off)) },
-                leadingIcon = { Icon(Icons.Outlined.RemoveCircleOutline, contentDescription = null) },
-                onClick = { menu = false; onRemove() },
+                text = { Text(stringResource(R.string.present_path_earlier)) },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = null) },
+                onClick = { onMove(-1) },
             )
         }
+
+        if (!last) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.present_path_later)) },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null) },
+                onClick = { onMove(1) },
+            )
+        }
+
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.present_path_take_off)) },
+            leadingIcon = { Icon(Icons.Outlined.RemoveCircleOutline, contentDescription = null) },
+            onClick = onRemove,
+        )
     }
 }
 
@@ -335,7 +353,7 @@ fun RehearsalSheet(rehearsal: Rehearsal, nodes: Map<String, MapNode>, onAgain: (
     val longest = rehearsal.steps.maxOfOrNull { it.seconds }?.coerceAtLeast(1) ?: 1
     val state = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded))
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state) {
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state, properties = privateSheetProperties()) {
         EscapeCloses(onDismiss)
 
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 16.dp)) {

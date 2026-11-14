@@ -67,7 +67,7 @@ fun soundNamesIn(markdown: String): List<String> {
     if (MapText.isYaml(markdown)) {
         soundsIn(yamlKeys(markdown.lines()), names)
     } else {
-        for (attributes in OrbitAttributes.findAll(markdown)) {
+        for (attributes in orbitAttributes(markdown)) {
             soundsIn(attributes.groupValues[1].lines(), names)
         }
     }
@@ -158,6 +158,22 @@ private val BlockValue = Regex("""^(\s*(?:-\s+)*)([^\s#][^#]*?:\s+)?[|>][1-9+-]*
 /** An idea's attributes in orbit-md: `<!-- orbit key: value -->`, or a block of them. */
 internal val OrbitAttributes = Regex("""<!--\s*orbit\b(.*?)-->""", RegexOption.DOT_MATCHES_ALL)
 
+/**
+ * The text's attribute comments ([OrbitAttributes]), what each holds in its
+ * first group, read up to the text's last `-->` alone: none ends after it,
+ * and each `<!-- orbit` before it reaches a `-->`, so each is read once,
+ * where thousands that never close, after the last `-->`, would each be
+ * read again to the end of the text (seconds for 5,000). A pattern that
+ * reads to the `-->` in one pass would repeat a group for each character,
+ * which Android's patterns keep on a stack that runs out a few hundred
+ * thousand characters in.
+ */
+internal fun orbitAttributes(text: String): Sequence<MatchResult> {
+    val last = text.lastIndexOf("-->")
+
+    return if (last < 0) emptySequence() else OrbitAttributes.findAll(text.substring(0, last + 3))
+}
+
 /** An idea's sound, and what follows it on its line. The spaces after its colon are read once: a long run of them costs one pass, even on a line that turns out not to say one. */
 private val SoundKey = Regex("""(?:^|[\s,{])(?:audio|sound|voice|recording)\s*:\s*+(.*)$""")
 
@@ -185,14 +201,14 @@ internal class PageSound(val file: File, val outgoing: OutgoingFile)
  * in the order the map gives them, as long as they come to at most `limit`
  * bytes. One past what's left of it stays out, and a smaller one after it
  * may still go; so does one Orbit can't read through, unless it's one of
- * `asTheyAre`, which the person sharing chose to share as they are.
+ * `asTheyAre`, which the person sharing chose to share as they are, as it
+ * was then ([AsTheyAreFiles]).
  */
-internal fun soundsFitting(markdown: String, mapFolder: File, limit: Long = PAGE_SOUNDS_LIMIT, asTheyAre: Set<String> = emptySet()): List<PageSound> {
+internal fun soundsFitting(markdown: String, mapFolder: File, limit: Long = PAGE_SOUNDS_LIMIT, asTheyAre: AsTheyAreFiles = AsTheyAreFiles.NONE): List<PageSound> {
     var room = limit
-    val media = File(mapFolder, MEDIA_DIRECTORY)
 
-    return soundNamesIn(markdown).mapNotNull { name ->
-        val file = File(media, name).takeIf { it.isFile && isMediaName(name) } ?: return@mapNotNull null
+    return soundNamesIn(MediaNames.withoutCode(markdown)).mapNotNull { name ->
+        val file = mapMediaFile(mapFolder, name)?.takeIf { isMediaName(name) } ?: return@mapNotNull null
         val outgoing = OutgoingMedia.of(file, asTheyAre)?.takeIf { it.size <= room } ?: return@mapNotNull null
         room -= outgoing.size
         PageSound(file, outgoing)

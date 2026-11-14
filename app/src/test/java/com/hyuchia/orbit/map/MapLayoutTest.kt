@@ -81,6 +81,79 @@ class MapLayoutTest {
     }
 
     @Test
+    fun `a panel is over the map as a sheet only while one is open and there's no room for it beside the map`() {
+        val searching = MapUi(panel = Panel.Search)
+
+        listOf(phone, tablet).forEach { screen ->
+            assertTrue("$screen", screen.layout(searching).panelOver)
+            assertTrue("$screen", screen.layout(editing).panelOver)
+            // Picking a result closes the search at once: no panel, so no sheet's top counts (rememberSheetTop).
+            assertFalse("$screen", screen.layout(nothingOpen).panelOver)
+            assertFalse("$screen", screen.layout(MapUi(panel = Panel.Menu("porto", 10f, 20f))).panelOver)
+        }
+
+        listOf(phoneOnItsSide, tabletOnItsSide).forEach { screen ->
+            assertFalse("$screen", screen.layout(searching).panelOver)
+            assertFalse("$screen", screen.layout(editing).panelOver)
+            // Exporting stays a sheet over the map wherever it opens.
+            assertTrue("$screen", screen.layout(MapUi(panel = Panel.Export)).panelOver)
+        }
+    }
+
+    @Test
+    fun `the map makes room for a keyboard that's its own, or for a panel that lifts it, on phones and tablets both ways up`() {
+        val menu = MapUi(panel = Panel.Menu("porto", 120f, 300f))
+        val lifting = listOf(editing, MapUi(panel = Panel.Details("porto")), MapUi(panel = Panel.Outline), MapUi(panel = Panel.Style), MapUi(panel = Panel.History))
+
+        listOf(phone, phoneOnItsSide, tablet, tabletOnItsSide).forEach { screen ->
+            // Typing on the map, in a planet or the + in an orbit, with an idea's menu open at most.
+            assertTrue(screen.layout(nothingOpen).roomForKeyboard)
+            assertTrue(screen.layout(menu).roomForKeyboard)
+            // A panel that lifts the map over it, or stands beside it, keeps the idea it's about in view above the keyboard.
+            lifting.forEach { ui -> assertTrue("${ui.panel} on $screen", screen.layout(ui).roomForKeyboard) }
+        }
+    }
+
+    @Test
+    fun `the map makes no room for a keyboard that's another field's, on phones and tablets both ways up`() {
+        val searching = MapUi(panel = Panel.Search)
+        val exporting = MapUi(panel = Panel.Export)
+        val source = MapUi(source = SourceState("# Cities"))
+        val sketching = MapUi(sketch = SketchUi("porto", SketchPhase.Describing))
+
+        listOf(phone, phoneOnItsSide, tablet, tabletOnItsSide).forEach { screen ->
+            // The search keeps its own field above the keyboard, as a sheet over the map or beside it.
+            assertFalse("search on $screen", screen.layout(searching).roomForKeyboard)
+            assertFalse("export on $screen", screen.layout(exporting).roomForKeyboard)
+            // The map's text has its own room for the keyboard, and a sketch's description rides over it.
+            assertFalse("the map's text on $screen", screen.layout(source).roomForKeyboard)
+            assertFalse("a sketch on $screen", screen.layout(sketching).roomForKeyboard)
+            // A sheet or dialog with a field of its own: an idea's icon being picked, the map's tags.
+            assertFalse("a field over the map on $screen", screen.layout(nothingOpen, fieldOver = true).roomForKeyboard)
+            // Over a panel that lifts the map too: the icon's search, opened from the editor.
+            assertFalse("a field over the editor on $screen", screen.layout(editing, fieldOver = true).roomForKeyboard)
+        }
+    }
+
+    @Test
+    fun `the map keeps its size until another field's keyboard has gone`() {
+        // The search opens, and the keyboard comes up for its field.
+        var elsewhere = keyboardElsewhere(before = false, roomForKeyboard = false, keyboardUp = false)
+        assertFalse(elsewhere)
+        elsewhere = keyboardElsewhere(elsewhere, roomForKeyboard = false, keyboardUp = true)
+        assertTrue(elsewhere)
+
+        // An idea found is picked, with the keyboard still up: the map has room for a keyboard again, but not for this one.
+        elsewhere = keyboardElsewhere(elsewhere, roomForKeyboard = true, keyboardUp = true)
+        assertTrue(elsewhere)
+
+        // Once it has gone, the next keyboard is the map's, for typing on a planet.
+        elsewhere = keyboardElsewhere(elsewhere, roomForKeyboard = true, keyboardUp = false)
+        assertFalse(elsewhere)
+        assertFalse(keyboardElsewhere(elsewhere, roomForKeyboard = true, keyboardUp = true))
+    }
+
+    @Test
     fun `the map's text stands beside the map, wider than a panel, where there's room`() {
         val source = MapUi(source = SourceState("# Cities"))
 
@@ -151,6 +224,8 @@ class MapLayoutTest {
     }
 
     private class Screen(val width: Dp, val height: Dp) {
-        fun layout(ui: MapUi): MapLayout = mapLayout(width, height, ui)
+        fun layout(ui: MapUi, fieldOver: Boolean = false): MapLayout = mapLayout(width, height, ui, fieldOver)
+
+        override fun toString() = "a screen $width by $height"
     }
 }

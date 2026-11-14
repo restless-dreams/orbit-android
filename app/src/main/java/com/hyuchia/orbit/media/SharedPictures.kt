@@ -4,11 +4,16 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import com.hyuchia.orbit.Logs
+import com.hyuchia.orbit.container
+import com.hyuchia.orbit.data.AsTheyAreFiles
+import com.hyuchia.orbit.data.FileChanged
+import com.hyuchia.orbit.data.FileStamp
+import com.hyuchia.orbit.data.OutgoingFile
 import com.hyuchia.orbit.data.OutgoingMedia
+import com.hyuchia.orbit.data.mapMediaFile
 import com.hyuchia.orbit.data.mediaType
 import com.hyuchia.orbit.data.readAtMost
 import com.hyuchia.orbit.ui.openMapExport
-import com.hyuchia.orbit.ui.openMapFile
 import com.hyuchia.orbit.ui.shareMapExport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -23,16 +28,32 @@ import kotlin.math.max
 private const val REDRAWN_SIZE = 4096
 
 /** How sharing a file from a map went. */
-enum class Shared {
-    /** It went, without what its file says beyond what it shows or plays. */
-    Clean,
+sealed interface Shared {
+    /** It went: without what its file says beyond what it shows or plays, or as it is, as the person chose. */
+    data object Clean : Shared
 
-    /** It didn't go: Orbit couldn't take that out, and its file would say it ([shareAsItIs] sends it if the person chooses). */
-    NotClean,
+    /**
+     * It didn't go: Orbit couldn't take that out of the file as it is now
+     * (`stamp`), and its file would say it ([shareAsItIs] sends that very
+     * file if the person chooses).
+     */
+    data class NotClean(val stamp: FileStamp) : Shared
+
+    /** It didn't go: the file changed after the person chose to share it as it is, and is asked about again as it is now. */
+    data object Changed : Shared
 
     /** It didn't go: it couldn't be read or written. */
-    Failed,
+    data object Failed : Shared
 }
+
+/**
+ * The file `file` of the map `mapId`, which the viewer shows, as everything
+ * that leaves the phone reads it ([mapMediaFile]): only one in the map's
+ * own media folder, never one a link there leads to. It reads the storage:
+ * off the main thread.
+ */
+private fun sharedFile(context: Context, mapId: String, file: File): File? =
+    runCatching { mapMediaFile(context.container.maps.folder(mapId), file.name)?.takeIf { it == file.canonicalFile } }.getOrNull()
 
 /**
  * Shares a picture from the folder of the map `mapId` as a copy without its
@@ -44,18 +65,20 @@ enum class Shared {
  * opens for a private map that locked meanwhile ([shareMapExport]).
  */
 suspend fun sharePicture(context: Context, mapId: String, file: File, label: String): Shared = try {
-    val copy = withContext(Dispatchers.IO) { sharedCopy(file) }
+    val copy = withContext(Dispatchers.IO) { sharedFile(context, mapId, file)?.let(::sharedCopy) }
 
-    if (copy == null) {
-        Shared.NotClean
-    } else {
-        shareMapExport(context, mapId, copy.name, mediaType(copy.name), label) { output ->
-            // A picture can be 250 MB: it's begun only where there's room for all of it.
-            this(copy.size)
-            copy.write(output)
+    when (copy) {
+        null -> Shared.Failed
+        is SharedCopy.Unclean -> Shared.NotClean(copy.stamp)
+        is SharedCopy.Clean -> {
+            shareMapExport(context, mapId, copy.name, mediaType(copy.name), label) { output ->
+                // A picture can be 250 MB: it's begun only where there's room for all of it.
+                this(copy.size)
+                copy.write(output)
+            }
+
+            Shared.Clean
         }
-
-        Shared.Clean
     }
 } catch (failed: IOException) {
     Logs.warn("OrbitMedia", "A picture couldn't be shared", failed)
@@ -72,13 +95,16 @@ suspend fun sharePicture(context: Context, mapId: String, file: File, label: Str
  * ([shareMapExport]).
  */
 suspend fun shareVideoOrSound(context: Context, mapId: String, file: File, type: String, label: String): Shared = try {
-    val outgoing = withContext(Dispatchers.IO) { OutgoingMedia.of(file) }
+    val judged = withContext(Dispatchers.IO) { sharedFile(context, mapId, file)?.let(OutgoingMedia::judge) }
+    val outgoing = judged?.clean
 
-    if (outgoing == null) {
-        Shared.NotClean
-    } else {
-        shareMapExport(context, mapId, file.name, type, label) { output -> outgoing.writeTo(output) }
-        Shared.Clean
+    when {
+        judged == null -> Shared.Failed
+        outgoing == null -> Shared.NotClean(judged.stamp)
+        else -> {
+            shareMapExport(context, mapId, file.name, type, label) { output -> outgoing.writeTo(output) }
+            Shared.Clean
+        }
     }
 } catch (failed: IOException) {
     Logs.warn("OrbitMedia", "A video or sound couldn't be shared", failed)
@@ -95,18 +121,21 @@ suspend fun shareVideoOrSound(context: Context, mapId: String, file: File, type:
  * ([Shared.Failed], [openMapExport]).
  */
 suspend fun openVideoInAnotherApp(context: Context, mapId: String, file: File): Shared = try {
-    val outgoing = withContext(Dispatchers.IO) { OutgoingMedia.of(file) }
+    val judged = withContext(Dispatchers.IO) { sharedFile(context, mapId, file)?.let(OutgoingMedia::judge) }
+    val outgoing = judged?.clean
 
-    if (outgoing == null) {
-        Shared.NotClean
-    } else {
-        openMapExport(context, mapId, file.name, videoType(file)) { output ->
-            // Not begun on a storage without room for all of it, and some to spare.
-            invoke(outgoing.size)
-            outgoing.writeTo(output)
+    when {
+        judged == null -> Shared.Failed
+        outgoing == null -> Shared.NotClean(judged.stamp)
+        else -> {
+            openMapExport(context, mapId, file.name, videoType(file)) { output ->
+                // Not begun on a storage without room for all of it, and some to spare.
+                invoke(outgoing.size)
+                outgoing.writeTo(output)
+            }
+
+            Shared.Clean
         }
-
-        Shared.Clean
     }
 } catch (failed: IOException) {
     Logs.warn("OrbitMedia", "A video couldn't be opened in another app", failed)
@@ -117,10 +146,42 @@ suspend fun openVideoInAnotherApp(context: Context, mapId: String, file: File): 
  * Opens a video from the folder of the map `mapId` in another app exactly
  * as it is, with all its file says: only once the person chose to, knowing
  * what goes with it, after Orbit couldn't take that out
- * ([Shared.NotClean]), and while the map doesn't show locked.
+ * ([Shared.NotClean]), and while the map doesn't show locked. The app gets a
+ * copy in the exports of the very file they were asked about (`stamp`),
+ * never the map's own file, deleted as private maps lock for a private
+ * map's ([openMapExport]); a file Orbit can clean now goes clean, and one
+ * that changed into another it can't is asked about again
+ * ([Shared.Changed]).
  */
-fun openVideoAsItIs(context: Context, mapId: String, file: File) {
-    openMapFile(context, mapId, file, videoType(file))
+suspend fun openVideoAsItIs(context: Context, mapId: String, file: File, stamp: FileStamp): Shared = try {
+    val outgoing = asChosen(context, mapId, file, stamp)
+
+    if (outgoing == null) {
+        Shared.Failed
+    } else {
+        openMapExport(context, mapId, file.name, videoType(file)) { output ->
+            // Not begun on a storage without room for all of it, and some to spare.
+            invoke(outgoing.size)
+            outgoing.writeTo(output)
+        }
+
+        Shared.Clean
+    }
+} catch (changed: FileChanged) {
+    Shared.Changed
+} catch (failed: IOException) {
+    Logs.warn("OrbitMedia", "A video couldn't be opened in another app as it is", failed)
+    Shared.Failed
+}
+
+/**
+ * How `file` of the map `mapId` goes once the person chose to share it as
+ * it is, as it was when they were asked (`stamp`): clean when Orbit can
+ * clean it now, as it is when it's that very file, or [FileChanged] when it
+ * changed into another Orbit can't clean. Null when it isn't there.
+ */
+private suspend fun asChosen(context: Context, mapId: String, file: File, stamp: FileStamp): OutgoingFile? = withContext(Dispatchers.IO) {
+    sharedFile(context, mapId, file)?.let { local -> OutgoingMedia.of(local, AsTheyAreFiles(asked = setOf(stamp), chosen = setOf(stamp))) }
 }
 
 /** The media type a video opens in another app as: its own, as its name says, or any video's. */
@@ -130,34 +191,58 @@ private fun videoType(file: File): String = mediaType(file.name).takeIf { it.sta
  * Shares a file from the folder of the map `mapId` exactly as it is, with
  * all its file says: only once the person chose to, knowing what goes with
  * it, after Orbit couldn't take that out ([Shared.NotClean]), and while the
- * map doesn't show locked ([shareMapExport]).
+ * map doesn't show locked ([shareMapExport]). What goes is the very file
+ * they were asked about (`stamp`): one Orbit can clean now goes clean, and
+ * one that changed into another it can't is asked about again
+ * ([Shared.Changed]). [Shared.Failed] when its copy couldn't be made, as on
+ * a full storage.
  */
-suspend fun shareAsItIs(context: Context, mapId: String, file: File, type: String, label: String) {
-    try {
-        shareMapExport(context, mapId, file.name, type, label) { output -> file.inputStream().use { it.copyTo(output) } }
-    } catch (failed: IOException) {
-        Logs.warn("OrbitMedia", "A file couldn't be shared as it is", failed)
+suspend fun shareAsItIs(context: Context, mapId: String, file: File, stamp: FileStamp, type: String, label: String): Shared = try {
+    val outgoing = asChosen(context, mapId, file, stamp)
+
+    if (outgoing == null) {
+        Shared.Failed
+    } else {
+        shareMapExport(context, mapId, file.name, type, label) { output ->
+            this(outgoing.size)
+            outgoing.writeTo(output)
+        }
+
+        Shared.Clean
     }
+} catch (changed: FileChanged) {
+    Shared.Changed
+} catch (failed: IOException) {
+    Logs.warn("OrbitMedia", "A file couldn't be shared as it is", failed)
+    Shared.Failed
 }
 
-/** What sharing a picture sends: its name, about how big it is, and what writes it, without what its file says beyond the picture. */
-private class SharedCopy(val name: String, val size: Long, val write: (OutputStream) -> Unit)
+/** What sharing a picture sends, or why it can't go clean. */
+private sealed interface SharedCopy {
+    /** Its name, about how big it is, and what writes it, without what its file says beyond the picture. */
+    class Clean(val name: String, val size: Long, val write: (OutputStream) -> Unit) : SharedCopy
+
+    /** Orbit can't clean it, nor draw it again: the file as it is now. */
+    class Unclean(val stamp: FileStamp) : SharedCopy
+}
 
 /**
  * What sharing `file` sends: the picture as it leaves the phone in a zip,
  * written from its file a piece at a time, however big it is
  * ([OutgoingMedia]); one that can't be read through drawn again, but a
- * drawing, which can't be drawn again either, and isn't shared.
+ * drawing, which can't be drawn again either, and isn't shared. Null when
+ * it can't be read.
  */
 private fun sharedCopy(file: File): SharedCopy? {
-    OutgoingMedia.of(file)?.let { outgoing -> return SharedCopy(file.name, outgoing.size) { output -> outgoing.writeTo(output) } }
+    val judged = OutgoingMedia.judge(file) ?: return null
+    judged.clean?.let { outgoing -> return SharedCopy.Clean(file.name, outgoing.size) { output -> outgoing.writeTo(output) } }
     val start = file.inputStream().use { it.readAtMost(KIND_BYTES) }
 
     if (SharedPictures.kindOf(start) == SharedPictures.Kind.Svg) {
-        return null
+        return SharedCopy.Unclean(judged.stamp)
     }
 
-    return redrawn(file)?.let { (name, bytes) -> SharedCopy(name, bytes.size.toLong()) { output -> output.write(bytes) } }
+    return redrawn(file)?.let { (name, bytes) -> SharedCopy.Clean(name, bytes.size.toLong()) { output -> output.write(bytes) } } ?: SharedCopy.Unclean(judged.stamp)
 }
 
 /** How much of a picture's file tells its kind. */
@@ -270,8 +355,15 @@ internal object SharedPictures {
         null
     }
 
+    /** A part of a JPEG as it goes: a segment, or more, as it was, or JFIF's written again. */
+    private sealed interface JpegPart {
+        class Kept(val range: IntRange) : JpegPart
+
+        class Jfif(val segment: ByteArray) : JpegPart
+    }
+
     private fun jpeg(bytes: PictureBytes): PicturePieces? {
-        val kept = mutableListOf<IntRange>()
+        val kept = mutableListOf<JpegPart>()
         var orientation = UPRIGHT
         var position = 2
 
@@ -289,12 +381,12 @@ internal object SharedPictures {
             }
 
             if (marker == JPEG_END) {
-                kept += position until position + 2
-                return assembleJpeg(bytes, kept, orientation)
+                kept += JpegPart.Kept(position until position + 2)
+                return assembleJpeg(kept, orientation)
             }
 
             if (marker in JPEG_RESTARTS || marker == JPEG_TEMPORARY) {
-                kept += position until position + 2
+                kept += JpegPart.Kept(position until position + 2)
                 position += 2
                 continue
             }
@@ -311,7 +403,7 @@ internal object SharedPictures {
 
             if (marker == JPEG_SCAN) {
                 val next = scanEnd(bytes, end) ?: return null
-                kept += position until next
+                kept += JpegPart.Kept(position until next)
                 position = next
                 continue
             }
@@ -322,8 +414,10 @@ internal object SharedPictures {
                 orientation = orientationOf(bytes, data + EXIF_HEADER.size, end) ?: orientation
             }
 
-            if (keepsJpegSegment(marker, bytes, data)) {
-                kept += position until end
+            if (marker == APP0 && bytes.startsWith(JFIF_HEADER, at = data)) {
+                jfifWithoutThumbnail(bytes, data, end)?.let { kept += JpegPart.Jfif(it) }
+            } else if (keepsJpegSegment(marker, bytes, data)) {
+                kept += JpegPart.Kept(position until end)
             }
 
             position = end
@@ -332,13 +426,27 @@ internal object SharedPictures {
         return null
     }
 
+    /**
+     * JFIF's segment, whose data starts at `data` and ends at `end`, written
+     * again without its thumbnail: a picture of the photo, which may show
+     * what an edit took out of it. Null when it's too short to be one.
+     */
+    private fun jfifWithoutThumbnail(bytes: PictureBytes, data: Int, end: Int): ByteArray? {
+        if (end - data < JFIF_FIELDS) {
+            return null
+        }
+
+        // Its header, version, units and densities; then a thumbnail of no width or height, and none after.
+        return byteArrayOf(0xFF.toByte(), APP0.toByte(), 0, (2 + JFIF_FIELDS + 2).toByte()) + bytes.bytes(data, JFIF_FIELDS) + byteArrayOf(0, 0)
+    }
+
     /** The JPEG again from the parts it keeps, with which way up it is when that isn't upright: after JFIF's segment, where EXIF's goes. */
-    private fun assembleJpeg(bytes: PictureBytes, kept: List<IntRange>, orientation: Int): PicturePieces {
+    private fun assembleJpeg(kept: List<JpegPart>, orientation: Int): PicturePieces {
         val output = PicturePieces()
         output.write(JPEG_START)
-        val jfifFirst = kept.firstOrNull()?.let { bytes.byteAt(it.first + 1) == APP0 } == true
+        val jfifFirst = kept.firstOrNull() is JpegPart.Jfif
 
-        kept.forEachIndexed { index, range ->
+        kept.forEachIndexed { index, part ->
             if (index == (if (jfifFirst) 1 else 0) && orientation != UPRIGHT) {
                 val tiff = orientationTiff(orientation)
                 val segment = ByteArrayOutputStream()
@@ -349,7 +457,10 @@ internal object SharedPictures {
                 output.write(segment.toByteArray())
             }
 
-            output.keep(range)
+            when (part) {
+                is JpegPart.Kept -> output.keep(part.range)
+                is JpegPart.Jfif -> output.write(part.segment)
+            }
         }
 
         return output
@@ -376,9 +487,10 @@ internal object SharedPictures {
 
     /**
      * Whether a JPEG keeps a segment: everything that makes the picture, and
-     * of the application segments only JFIF's, the color profile and Adobe's
-     * color transform. Comments, and the other application segments (EXIF,
-     * XMP, IPTC, thumbnails, more pictures), go.
+     * of the application segments only JFIF's (without its thumbnail, see
+     * [jfifWithoutThumbnail]), the color profile and Adobe's color
+     * transform. Comments, and the other application segments (EXIF, XMP,
+     * IPTC, JFIF's extension's thumbnails, more pictures), go.
      */
     private fun keepsJpegSegment(marker: Int, bytes: PictureBytes, data: Int): Boolean = when (marker) {
         APP0 -> bytes.startsWith(JFIF_HEADER, at = data)
@@ -684,6 +796,10 @@ internal object SharedPictures {
     private val BMP = "BM".toByteArray(Charsets.ISO_8859_1)
     private val EXIF_HEADER = byteArrayOf(0x45, 0x78, 0x69, 0x66, 0x00, 0x00)
     private val JFIF_HEADER = byteArrayOf(0x4A, 0x46, 0x49, 0x46, 0x00)
+
+    /** JFIF's fields before its thumbnail: its header, version, units and densities. */
+    private const val JFIF_FIELDS = 12
+
     private val ICC_HEADER = "ICC_PROFILE".toByteArray(Charsets.ISO_8859_1) + 0.toByte()
     private val ADOBE_HEADER = "Adobe".toByteArray(Charsets.ISO_8859_1)
 

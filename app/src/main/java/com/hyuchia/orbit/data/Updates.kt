@@ -11,13 +11,18 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.hyuchia.orbit.BuildConfig
+import com.hyuchia.orbit.Logs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -78,9 +83,20 @@ class Updates(
     /** Whether this build looks for new versions at all. */
     val available: Boolean get() = address.isNotEmpty()
 
+    /** One look at a time: one begun while another is under way waits for it, so two never ask for the same day's release. */
+    private val looking = Mutex()
+
+    /**
+     * What the last look found when the phone's storage couldn't keep it, as
+     * when it's full: it shows, and counts as the last look, until a look is
+     * kept, while Orbit runs.
+     */
+    private val unkept = MutableStateFlow<UpdateState?>(null)
+
     val state: Flow<UpdateState> = store.data
         .catch { failure -> if (failure is IOException) emit(emptyPreferences()) else throw failure }
         .map(::read)
+        .combine(unkept) { kept, found -> found?.copy(dismissed = kept.dismissed) ?: kept }
 
     /** The release to tell people about: newer than this copy, and not put away with "Not now". */
     fun announced(state: UpdateState): Release? = newer(state)?.takeIf { it.version != state.dismissed }
@@ -88,19 +104,27 @@ class Updates(
     /** The latest release when it's newer than this copy. */
     fun newer(state: UpdateState): Release? = state.latest?.takeIf { isNewer(it.version, current) }
 
-    /** Looks again when a day has passed since the last look, if this build looks at all and Settings allows it. */
+    /**
+     * Looks again when a day has passed since the last look, if this build
+     * looks at all and Settings allows it: once, however many ask at once,
+     * as the home screen does in each window it shows in.
+     */
     suspend fun checkIfDue() {
         if (!available || !enabled()) {
             return
         }
 
-        if (isDue(state.first().checkedAt, clock())) {
-            check()
+        looking.withLock {
+            if (isDue(state.first().checkedAt, clock())) {
+                look()
+            }
         }
     }
 
-    /** Looks now, whatever the time: from About. */
-    suspend fun check(): UpdateState {
+    /** Looks now, whatever the time: from About. It never throws for storage that fails: what it found shows all the same. */
+    suspend fun check(): UpdateState = looking.withLock { look() }
+
+    private suspend fun look(): UpdateState {
         val checkedAt = clock()
 
         val look: Result<Release?> = try {
@@ -120,14 +144,24 @@ class Updates(
             Result.failure(failure)
         }
 
-        store.edit { preferences ->
-            preferences[Keys.checkedAt] = checkedAt
-            preferences[Keys.failed] = look.isFailure
+        try {
+            store.edit { preferences ->
+                preferences[Keys.checkedAt] = checkedAt
+                preferences[Keys.failed] = look.isFailure
 
-            look.onSuccess { release ->
-                preferences[Keys.latestVersion] = release?.version.orEmpty()
-                preferences[Keys.latestPage] = release?.page.orEmpty()
+                look.onSuccess { release ->
+                    preferences[Keys.latestVersion] = release?.version.orEmpty()
+                    preferences[Keys.latestPage] = release?.page.orEmpty()
+                }
             }
+
+            unkept.value = null
+        } catch (unwritable: IOException) {
+            // The phone's storage failed, full or failing: what the look found shows anyway, as About's row was tapped
+            // for, and the next look is a day from now, or when Orbit starts again.
+            Logs.warn("OrbitUpdates", "Couldn't keep what the look for a new version found", unwritable)
+            val before = state.first()
+            unkept.value = UpdateState(latest = look.fold({ it }, { before.latest }), checkedAt = checkedAt, failed = look.isFailure)
         }
 
         return state.first()

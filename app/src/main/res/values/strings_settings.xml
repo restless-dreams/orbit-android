@@ -63,7 +63,7 @@
         <item quantity="other">%1$d days</item>
     </plurals>
     <string name="settings_export_all_maps">Export all maps</string>
-    <string name="settings_export_all_maps_description">A backup: every map, with its pictures, videos and history exactly as they are, in one file to keep anywhere</string>
+    <string name="settings_export_all_maps_description">A backup: every map, with its pictures, videos, sounds, files and history exactly as they are, in one file to keep anywhere</string>
     <!-- Under Export all maps while the zip is written. -->
     <string name="settings_exporting">Exporting your maps…</string>
     <!-- The name offered for the zip of every map, without its .zip. %1$s is today's date, as 2026-10-15. -->
@@ -74,6 +74,10 @@
     </plurals>
     <string name="settings_could_not_write_file">Orbit couldn\'t write that file. Try another place.</string>
     <string name="settings_not_allowed_to_write">Orbit isn\'t allowed to write there. Try another place.</string>
+    <!-- Export all, when a map's file is there but can't be read: a zip without it would look whole, so none is written. -->
+    <string name="settings_export_file_unreadable">Orbit couldn\'t read one of your maps\' files, so it didn\'t write a zip that would be missing it.</string>
+    <!-- The same, naming the map: %1$s is its title, or a private map's cover. -->
+    <string name="settings_export_file_unreadable_in">Orbit couldn\'t read one of the files of “%1$s”, so it didn\'t write a zip that would be missing it.</string>
     <string name="settings_import_maps">Import maps</string>
     <string name="settings_import_maps_description">From a file of maps exported here or on another device. Maps already here stay as they are.</string>
     <!-- Under Import maps while the zip is read. -->
@@ -92,7 +96,7 @@
     <string name="settings_your_folder">Your folder</string>
     <string name="settings_check_folder_now">Check the folder now</string>
     <!-- "media" is the name of the folder the pictures and videos go in. -->
-    <string name="settings_folder_how_it_works">Each map is a markdown file there, and pictures and videos go in a media folder beside them. Your progress in study mode goes there too, so your other devices pick up where you left off. A map changed both here and there is kept twice, so nothing\'s lost.</string>
+    <string name="settings_folder_how_it_works">Each map is a markdown file there, and pictures, videos, sounds and files go in a media folder beside them. Your progress in study mode goes there too, so your other devices pick up where you left off. A map changed both here and there is kept twice, so nothing\'s lost.</string>
     <string name="settings_folder_syncing">Bringing your maps and the folder in step…</string>
     <string name="settings_folder_checking">Checking the folder…</string>
     <!-- %1$s is how long ago the folder was checked: home_just_now, home_minutes_ago… -->
@@ -126,6 +130,10 @@
     <plurals name="settings_folder_newer_format">
         <item quantity="one">Saved for a newer Orbit than some devices in this folder have, so they can only show it: %1$s. Update Orbit on them to change it there too.</item>
         <item quantity="other">Saved for a newer Orbit than some devices in this folder have, so they can only show them: %1$s. Update Orbit on them to change them there too.</item>
+    </plurals>
+    <plurals name="settings_folder_came_in_private">
+        <item quantity="one">Came in private, as Orbit couldn\'t tell it from the file of a private map that was renamed or changed elsewhere: %1$s. If it isn\'t that map, turn off Private in its menu.</item>
+        <item quantity="other">Came in private, as Orbit couldn\'t tell them from the file of a private map that was renamed or changed elsewhere: %1$s. If they aren\'t that map, turn off Private in their menus.</item>
     </plurals>
     <!-- A map's title in a list of them. -->
     <string name="settings_quoted_map_title">“%1$s”</string>

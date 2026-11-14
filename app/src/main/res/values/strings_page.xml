@@ -6,6 +6,9 @@
     <string name="page_stopped">The page stopped</string>
     <string name="page_closed">The page closed</string>
     <string name="page_sent_nothing_back">The page sent nothing back</string>
+    <string name="page_sent_unreadable_answer">The page sent back something Orbit can’t read</string>
     <string name="page_did_not_answer">The page didn’t answer</string>
     <string name="page_did_not_load">The page didn’t load</string>
+    <!-- Why the page couldn't rename, tag or duplicate a map when the page itself refused: the app can say it after "Orbit couldn't rename the map." -->
+    <string name="page_could_not_make_change">The page couldn’t make the change</string>
 </resources>

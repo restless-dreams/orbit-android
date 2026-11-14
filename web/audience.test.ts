@@ -84,3 +84,49 @@ describe('stepping', () => {
     expect(caption()).toBe('Beta');
   });
 });
+
+describe('a new map', () => {
+  test('a caption on its way for the map before never shows on the new one', async () => {
+    receive(show);
+    receive({ type: 'step', id: 'alpha', index: 1, total: 3 });
+    // Another map, before Alpha's caption came in.
+    receive({ type: 'show', markdown: '# Trip\n\n## Lisbon\n\nBy the river.\n', theme: { dark: false, tokens: {} }, focus: 'lisbon', captions: true });
+    await settle();
+
+    expect(caption()).toBe('Lisbon');
+    expect(document.querySelector('.audience__caption')?.classList.contains('audience__caption--empty')).toBe(false);
+    expect(document.querySelector('.audience__caption')?.classList.contains('audience__caption--swapping')).toBe(false);
+  });
+
+  test('a command to show a map that can\'t be followed leaves the map on screen as it was', async () => {
+    receive(show);
+    receive({ type: 'step', id: 'beta', index: 2, total: 3 });
+    await settle();
+    const errors = spyOn(console, 'error').mockImplementation(() => undefined);
+
+    // From anyone on a TV's network, say: a map that isn't text, and one without the app's colors.
+    receive({ type: 'show', markdown: 42, theme: null } as unknown as AudienceCommand);
+    receive({ type: 'show', markdown: '# Someone else\'s' } as unknown as AudienceCommand);
+    const reported = errors.mock.calls.length;
+    errors.mockRestore();
+
+    expect(reported).toBe(2);
+    expect(document.body.classList.contains('audience--showing')).toBe(true);
+    expect(document.querySelector('#map svg')).not.toBeNull();
+    expect(drawn?.getFocusedNode()?.id).toBe('beta');
+    expect(caption()).toBe('Beta');
+  });
+});
+
+describe('in a browser in the room', () => {
+  test('people can pinch to zoom, which fights nothing: the map on the page takes no touch of its own', async () => {
+    const viewport = /<meta name="viewport" content="([^"]*)"/.exec(html)?.[1] ?? '';
+    expect(viewport).toContain('width=device-width');
+    expect(viewport).not.toMatch(/user-scalable\s*=\s*(no|0)|maximum-scale/);
+
+    // Orbit's still map leaves touches to the browser (touch-action: auto in its styles), its zoom included.
+    receive(show);
+    await settle();
+    expect(document.querySelector('#map .orbit--static')).not.toBeNull();
+  });
+});

@@ -1,6 +1,7 @@
 package com.hyuchia.orbit.capture
 
 import android.content.Context
+import android.content.res.Configuration
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.hyuchia.orbit.data.MapMetadata
@@ -15,6 +16,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.IOException
+import java.util.Locale
 
 /**
  * What quick capture says once the ideas are in, or not: as private maps
@@ -71,5 +73,18 @@ class CaptureIntoTest {
         assertEquals(CaptureOutcome.NotAdded("Orbit couldn't add to Groceries. No room left. Your ideas are still here."), failed)
         val missing = captureInto(groceries, ideas = 1, resources, { lock.view.value.hides(groceries) }) { throw CaptureException(CaptureFailure.Missing) }
         assertEquals(CaptureOutcome.NotAdded("Orbit couldn't add to Groceries. The map isn't here anymore. Your ideas are still here."), missing)
+    }
+
+    @Test
+    fun `text with no idea in it says so, in the app's language, rather than say ideas were added`() = runTest {
+        val said = listOf("en", "es", "pt-BR").map { language ->
+            val words = ApplicationProvider.getApplicationContext<Context>().createConfigurationContext(Configuration().apply { setLocale(Locale.forLanguageTag(language)) }).resources
+            captureInto(groceries, ideas = 2, words, { false }) { throw CaptureException(CaptureFailure.NoIdeas) }
+        }
+
+        assertEquals(
+            listOf("Orbit found no ideas in this text.", "Orbit no encontró ideas en este texto.", "O Orbit não encontrou ideias neste texto.").map { CaptureOutcome.NotAdded(it) },
+            said,
+        )
     }
 }

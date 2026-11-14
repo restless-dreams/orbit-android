@@ -15,7 +15,6 @@ import com.hyuchia.orbit.data.MapSummary
 import com.hyuchia.orbit.data.SettingsRepository
 import com.hyuchia.orbit.ui.hideShortcut
 import com.hyuchia.orbit.ui.offerShortcut
-import com.hyuchia.orbit.widget.refreshWidgetPreview
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -153,9 +152,6 @@ class PrivateMaps(
         } else {
             offerShortcut(context, map.id, map.title)
         }
-
-        // The launcher's list of widgets may show this map: drawn again, it shows it private, or as it is now.
-        scope.launch { refreshWidgetPreview(context, madePrivate = private) }
     }
 
     private fun hasScreenLock(): Boolean = context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true

@@ -5,6 +5,7 @@ import com.hyuchia.orbit.data.SettingsRepository
 import com.hyuchia.orbit.data.WriteResult
 import com.hyuchia.orbit.page.MapCommand
 import com.hyuchia.orbit.page.PagePool
+import com.hyuchia.orbit.page.mapBaseUrl
 import kotlinx.serialization.builtins.serializer
 import java.io.IOException
 
@@ -24,6 +25,20 @@ fun ideasFromText(text: String): List<String> =
         .map { line -> line.replace(ItemMarker, "").replace(Regex("""\s+"""), " ").trim() }
         .filter { it.isNotEmpty() }
 
+/**
+ * The map's text with the caught ideas in it, as the page gave it back for
+ * `markdown` (see [MapCommand.AddIdeas]): the very same text when Orbit read
+ * no idea in what was caught, which adds none and throws, for the sheet to
+ * say so ([CaptureFailure.NoIdeas]) rather than say ideas were added.
+ */
+internal fun withCaughtIdeas(markdown: String, changed: String): String {
+    if (changed == markdown) {
+        throw CaptureException(CaptureFailure.NoIdeas)
+    }
+
+    return changed
+}
+
 /** Why ideas didn't join a map, for the sheet that caught them to say. */
 enum class CaptureFailure {
     /** The map can only be read here, or its file couldn't be. */
@@ -37,6 +52,9 @@ enum class CaptureFailure {
 
     /** The map's file couldn't be written, as when the device's storage is full. */
     NotWritten,
+
+    /** Orbit read no idea in the text, as in frontmatter alone: nothing was added. */
+    NoIdeas,
 }
 
 /** Ideas that didn't join a map, and why. */
@@ -65,9 +83,13 @@ class QuickCapture(private val pool: PagePool, private val maps: MapRepository, 
         repeat(ATTEMPTS) {
             val markdown = maps.read(mapId)
 
-            val changed = pool.work { page ->
-                page.request(String.serializer()) { job -> MapCommand.AddIdeas(job, markdown, text) }
-            }
+            val changed = withCaughtIdeas(
+                markdown,
+                pool.work { page ->
+                    // Drawn out of sight to add them, the map's pictures come from its own folder.
+                    page.request(String.serializer()) { job -> MapCommand.AddIdeas(job, markdown, text, baseUrl = mapBaseUrl(mapId)) }
+                },
+            )
 
             when (maps.change(mapId, changed, base = markdown)) {
                 WriteResult.Written -> {

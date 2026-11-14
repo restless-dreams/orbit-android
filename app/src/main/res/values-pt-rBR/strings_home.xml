@@ -8,11 +8,18 @@
         <item quantity="other">Mapas: %1$d</item>
     </plurals>
     <string name="home_deleted_map">Mapa “%1$s” excluído</string>
+    <string name="home_map_not_deleted">O Orbit não conseguiu excluir “%1$s”. Ele continua nos seus mapas.</string>
+    <string name="home_private_map_not_deleted">O Orbit não conseguiu excluir um mapa privado. Ele continua nos seus mapas.</string>
+    <string name="home_map_not_restored">O Orbit não conseguiu restaurar “%1$s”. Ele continua na lixeira.</string>
+    <string name="home_private_map_not_restored">O Orbit não conseguiu restaurar um mapa privado. Ele continua na lixeira.</string>
     <string name="home_add_widget_from_list">Adicione o widget do Orbit pela lista de widgets da sua tela inicial</string>
     <string name="home_could_not_share_map">O Orbit não conseguiu criar um arquivo desse mapa para compartilhar. O armazenamento deste dispositivo está cheio?</string>
     <string name="home_map_from_newer_orbit">Uma versão mais nova do Orbit criou este mapa, então esta o deixa como está. Atualize o Orbit para alterá-lo.</string>
     <string name="home_map_unreadable">O Orbit não conseguiu ler este mapa inteiro, então o deixa como está. Abra o mapa para corrigir o texto dele.</string>
     <string name="home_map_kept_changing">O mapa não parava de mudar, então o Orbit o deixou como estava. Tente de novo.</string>
+    <string name="home_map_not_renamed">O Orbit não conseguiu renomear o mapa. %1$s.</string>
+    <string name="home_map_tags_not_changed">O Orbit não conseguiu alterar as etiquetas do mapa. %1$s.</string>
+    <string name="home_map_not_copied">O Orbit não conseguiu duplicar o mapa. %1$s.</string>
     <plurals name="home_tag_left_on_maps">
         <item quantity="one">A etiqueta continua em %1$d mapa que o Orbit só pode mostrar: ele foi criado por uma versão mais nova, ou o Orbit não consegue lê-lo inteiro.</item>
         <item quantity="many">A etiqueta continua em %1$d mapas que o Orbit só pode mostrar: eles foram criados por uma versão mais nova, ou o Orbit não consegue lê-los inteiros.</item>
@@ -31,12 +38,18 @@
         <item quantity="many">A etiqueta continua em %1$d mapas: o Orbit não conseguiu alterá-los. Tente de novo.</item>
         <item quantity="other">A etiqueta continua em %1$d mapas: o Orbit não conseguiu alterá-los. Tente de novo.</item>
     </plurals>
+    <string name="home_tag_stays_on_map_page_failed">A etiqueta continua em “%1$s”. %2$s.</string>
+    <plurals name="home_tag_stays_on_maps_page_failed">
+        <item quantity="one">A etiqueta continua em %1$d mapa. %2$s.</item>
+        <item quantity="many">A etiqueta continua em %1$d mapas. %2$s.</item>
+        <item quantity="other">A etiqueta continua em %1$d mapas. %2$s.</item>
+    </plurals>
     <string name="home_pinned_maps">Fixados</string>
     <string name="home_everything_else">Todos os outros</string>
     <string name="home_clear_the_search">Limpar a pesquisa</string>
     <string name="home_no_maps_match">Nenhum mapa encontrado para “%1$s”</string>
     <string name="home_no_maps_match_said">Nenhum mapa encontrado</string>
-    <string name="home_search_looks_in">A pesquisa procura nos títulos, nas ideias e nas notas.</string>
+    <string name="home_search_looks_in">A pesquisa procura nos títulos, nas ideias, nas notas e nas etiquetas.</string>
     <plurals name="home_maps_match">
         <item quantity="one">%1$d mapa encontrado</item>
         <item quantity="many">%1$d mapas encontrados</item>
@@ -139,6 +152,7 @@
     <string name="home_dismiss">Dispensar</string>
     <string name="home_share_report">Compartilhar relatório</string>
     <string name="home_share_the_crash_report">Compartilhar o relatório de falha</string>
+    <string name="home_crash_report_not_deleted">O Orbit não conseguiu excluir o relatório de falha. Ele continua neste dispositivo.</string>
 
     <!-- O cartão sobre uma nova versão, no APK do site e do GitHub, que nenhuma loja atualiza -->
     <string name="home_update_title">Saiu o Orbit %1$s</string>

@@ -1,10 +1,21 @@
 package com.hyuchia.orbit.data
 
+import com.hyuchia.orbit.BuildConfig
 import com.hyuchia.orbit.FileWords
+import com.hyuchia.orbit.reminders.Reminder
+import com.hyuchia.orbit.reminders.ReminderAlarms
+import com.hyuchia.orbit.reminders.ReminderNotices
+import com.hyuchia.orbit.reminders.Reminders
 import com.hyuchia.orbit.sketch.SketchSvg
 import com.hyuchia.orbit.study.NEW_CARDS_A_DAY
+import com.hyuchia.orbit.ui.noteBoxOn
+import com.hyuchia.orbit.ui.withNoteBox
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.longOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -15,10 +26,14 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
 import java.security.MessageDigest
+import java.time.Instant
+import java.time.LocalTime
+import java.time.ZoneId
 import java.util.Locale
 import java.util.zip.ZipInputStream
 
@@ -45,13 +60,24 @@ class ReleaseDataTest(private val release: String) {
         // The ids of the maps scripts/release-data/ adds from 0.4.0 on, in their meta.json.
         private const val STUDY_NOTES = "0b9a4c1e-37f2-4b1c-8f0e-6b2d9e7c5a22"
         private const val EVERY_KIND_OF_FILE = "7d1e5f3a-9c2b-4a8e-b6d0-2f4c8a1e9b44"
+
+        /** Sardines with the sketch drawn on its planet in step 12, as Orbit points an idea at its picture. */
+        private val SARDINES_SKETCH = Regex("""- Sardines <!-- orbit status: in progress -->\n {2}!\[A sardine]\(media/(sketch-[a-z0-9]+\.svg)\)""")
+
+        /** The file Food holds from step 11, in the map's media folder. */
+        private const val BOARDING_PASS = "file-boarding-pass.pdf"
+
+        /** An install of a version after the release's, in the same folder: another device, as far as the folder's records go. */
+        private const val LATER_INSTALL = "4b0e2c7a-later-install"
     }
 
     /**
      * Whether the release is `version` or a later one, for what its steps
      * (the README's) leave from then on: from 0.4.0, why versions were kept,
      * a private map, study progress, sounds and a live photo, the folder's
-     * records and 0.4.0's settings.
+     * records and 0.4.0's settings; from 0.5.0, a date and its reminder, an
+     * idea's file, a sketch, a note's table and checklist, and the records
+     * this install keeps in the folder maps are kept in.
      */
     private fun since(version: String): Boolean = release != "before-0.1.0" && compareVersions(release, version) >= 0
 
@@ -123,12 +149,18 @@ class ReleaseDataTest(private val release: String) {
         assertTrue(File(maps, "${lisbon.id}/media/video-2.mp4").length() > 0)
 
         val versions = repository.versions(lisbon.id)
-        assertEquals("$release: the versions it came with, and the one before the edit", 3, versions.size)
+        // The two it came with, and the one kept before the first change of each visit that changed it: step 3's,
+        // and from 0.5.0, step 10's and step 11's too.
+        assertEquals("$release: the versions it came with, and the one before each visit's edits", if (since("0.5.0")) 5 else 3, versions.size)
         assertEquals(1, versions.count { it.original })
 
-        if (since("0.4.1")) {
-            // The date the release's own editor gave an idea, in step 10, as Orbit writes one.
-            assertTrue("$release: a date set on the map", Regex("""- Night markets <!-- orbit due: "\d{4}-\d{2}-\d{2} 18:30" -->""").containsMatchIn(repository.read(lisbon.id)))
+        if (since("0.5.0")) {
+            // The date the release's own editor gave an idea, in step 10, as Orbit writes one, and as reminders read it.
+            val text = repository.read(lisbon.id)
+            assertTrue("$release: a date set on the map", Regex("""- Night markets <!-- orbit due: "\d{4}-\d{2}-\d{2} 18:30" -->""").containsMatchIn(text))
+            val dated = MapText.dates(text).single { it.name == "Night markets" }
+            assertEquals("$release: the 20th of the month after the release", 20, dated.date.day.dayOfMonth)
+            assertEquals("$release: at 18:30", LocalTime.of(18, 30), dated.date.time)
         }
 
         if (since("0.4.0")) {
@@ -150,19 +182,38 @@ class ReleaseDataTest(private val release: String) {
             assertEquals(listOf("Old ideas"), repository.trash.value.map { it.title })
         }
 
-        if (since("0.4.1")) {
+        if (since("0.5.0")) {
             // Step 11: Food holds the boarding pass, a file of a kind no earlier release carries, which the map carries and counts.
             val text = repository.read(lisbon.id)
-            assertEquals("$release: Food's file", listOf("file-boarding-pass.pdf"), fileNamesIn(text))
-            assertTrue("$release: the file itself", File(maps, "${lisbon.id}/media/file-boarding-pass.pdf").length() > 0)
-            assertEquals(setOf("file-boarding-pass.pdf"), repository.uncleaned(lisbon.id).files)
+            assertEquals("$release: Food's file", listOf(BOARDING_PASS), fileNamesIn(text))
+            assertEquals("$release: by the name it came with", mapOf(BOARDING_PASS to "boarding-pass.pdf"), fileLabelsIn(text))
+            assertTrue("$release: the file itself", File(maps, "${lisbon.id}/media/$BOARDING_PASS").length() > 0)
+            assertEquals(setOf(BOARDING_PASS), repository.uncleaned(lisbon.id).files)
             assertEquals(1, repository.mediaSummary(lisbon.id).files)
+
+            // Step 12: the sketch drawn on Sardines' planet, its picture, comes back as the sketch it was: three strokes.
+            val sketch = present(SARDINES_SKETCH.find(text)?.groupValues?.get(1))
+            val strokes = SketchSvg.read(File(maps, "${lisbon.id}/media/$sketch").readBytes())?.strokes
+            assertEquals("$release: a sketch drawn in the release reopens to draw on: $sketch", 3, strokes?.size)
+
+            // Step 13: Museums' note, with a table and a checklist whose first box was checked in the details.
+            val note = quotedNote(text, "## 🏛️ Museums")
+            assertTrue("$release: the note's table: $note", note.contains("| Museum | Opens |\n| --- | ---: |\n| Azulejo | 10:00 |\n| Gulbenkian | 10:00 |"))
+            val checked = note.lines().indexOfFirst { it.endsWith("Buy tickets online") }
+            val unchecked = note.lines().indexOfFirst { it.endsWith("Check Monday closures") }
+            assertEquals("$release: the box checked in the details: $note", true, noteBoxOn(note, checked))
+            assertEquals("$release: the box left: $note", false, noteBoxOn(note, unchecked))
+            assertEquals("$release: a box checks on its own line", note.replace("- [ ] Check Monday closures", "- [x] Check Monday closures"), withNoteBox(note, unchecked, checked = true))
         }
 
         assertEquals("$release: opening the maps wrote nothing", before, snapshot())
     }
 
-    /** What the steps leave from 0.4.0 on: a private map, study progress, sounds and a live photo, and the folder's records. */
+    /**
+     * What the steps leave from 0.4.0 on: a private map, study progress,
+     * sounds and a live photo, and the folder's records; from 0.5.0, a sketch
+     * among the kinds of file, and the records kept in the folder itself.
+     */
     private fun assertNewKindsOfData(repository: MapRepository) {
         val summaries = repository.maps.value.orEmpty()
         val lisbon = summaries.single { it.title == "🏖️ Weekend in Lisbon" }
@@ -179,8 +230,8 @@ class ReleaseDataTest(private val release: String) {
         val media = File(maps, "${kinds.id}/media").list().orEmpty().toSet()
         assertTrue("$release: a voice memo, a sound and a live photo's picture and motion: $media", media.containsAll(setOf("memo-release.mp4", "sound-release.mp3", "picture-live.jpg", "picture-live-motion.mp4")))
 
-        if (since("0.4.1")) {
-            // From the release after 0.4.0, a sketch drawn on a planet: it comes back as a sketch to draw on.
+        if (since("0.5.0")) {
+            // From 0.5.0, a sketch drawn on a planet, which the zip brings: it comes back as a sketch to draw on.
             val sketch = File(maps, "${kinds.id}/media/sketch-release.svg")
             assertNotNull("$release: a sketch is kept, and reopens: $media", sketch.takeIf { it.isFile }?.let { SketchSvg.read(it.readBytes()) })
         }
@@ -193,6 +244,69 @@ class ReleaseDataTest(private val release: String) {
         val installed = File(files, "folder-device-installed").readText().trim()
         assertTrue("$release: this device's id for the folder is kept", device.isNotBlank())
         assertEquals("$release: on the install that made it, it stays this device's id", device, keptDeviceId(device, keptInstall = installed, installed = installed))
+
+        if (since("0.5.0")) {
+            assertFolderRecords(summaries, device)
+        }
+    }
+
+    /**
+     * From 0.5.0, the records the release's install kept in the folder maps
+     * are kept in (`folder/.orbit/` beside its `files/`), as a later version
+     * reads them there: another device's, once this one is a later install.
+     */
+    private fun assertFolderRecords(summaries: List<MapSummary>, device: String) {
+        val orbit = File(releases, "$release/folder/$ORBIT_DIRECTORY")
+        val folder = TestFolder()
+        File(orbit, DEVICES_DIRECTORY).listFiles().orEmpty().forEach { folder.devices[it.name] = it.readText() }
+        assertEquals("$release: one device record, named by the install's id", setOf("$device.json"), folder.devices.keys)
+
+        // The device record: what the release opens, and how big a map's files may be there, read as its fields say
+        // (0.4.0's says nothing of sizes, and reads as 50 MB a file and 90 MB a map).
+        val fields = Json.parseToJsonElement(folder.devices.getValue("$device.json")).jsonObject
+        val record = FolderDeviceRecords(folder, mutableMapOf()).others(LATER_INSTALL, now).single()
+        assertEquals(device, record.id)
+        assertEquals(release, record.appVersion)
+        assertEquals("$release: the most a file may be there", (fields["mediaFileLimit"] as? JsonPrimitive)?.longOrNull, record.keepsFile)
+        assertEquals("$release: the most a map's files may come to there", (fields["mapMediaLimit"] as? JsonPrimitive)?.longOrNull, record.keepsMapMedia)
+        assertEquals("$release: it keeps ideas' files of every kind", true, record.ideaFiles)
+        assertTrue("$release: the kinds of file it carries, the boarding pass's and the sketches' among them: ${record.mediaTypes}", record.mediaTypes.containsAll(listOf("pdf", "svg")))
+        // So a later install in the folder, this version's, doesn't take it for a device that can't open the boarding pass.
+        val me = FolderDevice(
+            id = LATER_INSTALL,
+            name = "Tablet",
+            kind = FolderDevice.TABLET,
+            appVersion = BuildConfig.VERSION_NAME,
+            appVersionCode = record.appVersionCode + 1,
+            mapFormat = MAP_FORMAT,
+            mediaTypes = carriedMediaTypes().sorted(),
+            synced = now,
+            mediaFileLimit = MEDIA_FILE_LIMIT,
+            mapMediaLimit = MAP_MEDIA_LIMIT,
+            ideaFiles = true,
+        )
+
+        val unopened = FolderRoster.notices(me, listOf(record), present = setOf("pdf", "svg"), ideaFiles = setOf("pdf")).flatMap { notice ->
+            when (notice) {
+                is FolderNotice.Newer -> notice.unopened
+                is FolderNotice.Older -> notice.unopened
+            }
+        }
+
+        assertEquals("$release: files the release would leave out of the folder's maps", emptyList<String>(), unopened)
+
+        // The study record, kept under the install's id and named after the map's file: Calvin cycle's answers,
+        // which a later install studying the same map picks up.
+        val study = summaries.single { it.metadata.uuid == STUDY_NOTES }
+        val file = present(study.metadata.sync?.file)
+        val studied = File(orbit, STUDY_DIRECTORY).listFiles().orEmpty()
+        assertEquals("$release: study records only under the install's id", listOf(device), studied.map { it.name })
+        val records = studied.single().listFiles().orEmpty()
+        assertEquals(listOf(FolderStudy.recordName(file)), records.map { it.name })
+        val kept = (FolderStudy.read(records.single().readText()) as? StudyRead.Record)?.record
+        assertEquals("$release: the record names the map's file", file, kept?.map)
+        assertEquals("$release: the answers this install kept, as its record says them", study.metadata.study, kept?.cards)
+        assertEquals("$release: another install reads them", mapOf(device to kept?.cards), FolderStudy.elsewhere(file, LATER_INSTALL, mapOf(device to listOfNotNull(kept)), present = setOf(file)))
     }
 
     @Test
@@ -210,6 +324,36 @@ class ReleaseDataTest(private val release: String) {
             val info = ZipInputStream(zip.inputStream()).use { input -> generateSequence { input.nextEntry }.first { it.name == BUNDLE_INFO }.let { input.readBytes().decodeToString() } }
             assertTrue("$release: ${map.title}: $info", info.contains("\"compatible\":1"))
         }
+
+        if (since("0.5.0")) {
+            // Lisbon's zip carries Sardines' sketch, and Food's boarding pass, as it is, once that's chosen.
+            val lisbon = repository.lisbon()
+            val zip = ByteArrayOutputStream().also { repository.writeZip(lisbon.id, it, asTheyAre = chosenAsTheyAreIn(repository.folder(lisbon.id), BOARDING_PASS)) }.toByteArray()
+            val entries = ZipInputStream(zip.inputStream()).use { input -> generateSequence { input.nextEntry }.associate { it.name to input.readBytes() } }
+            val sketch = present(SARDINES_SKETCH.find(repository.read(lisbon.id))?.groupValues?.get(1))
+            assertTrue("$release: the boarding pass goes as it is: ${entries.keys}", entries["$MEDIA_DIRECTORY/$BOARDING_PASS"]?.contentEquals(File(maps, "${lisbon.id}/media/$BOARDING_PASS").readBytes()) == true)
+            assertNotNull("$release: the sketch goes as a sketch: ${entries.keys}", entries["$MEDIA_DIRECTORY/$sketch"]?.let(SketchSvg::read))
+        }
+    }
+
+    @Test
+    fun `a release's maps, every one in a zip, come back whole on a phone without them`() = runTest {
+        val repository = loaded()
+        val zip = ByteArrayOutputStream().also { repository.exportAll(it) }.toByteArray()
+        val other = MapRepository(File(files, "other/maps"), File(files, "other/trash"), starters, words, clock = { now }).also { it.load() }
+
+        val imported = other.importAll(ByteArrayInputStream(zip))
+
+        val listed = repository.maps.value.orEmpty()
+        assertEquals(release, ImportedMaps(added = listed.size, alreadyHere = 0), imported)
+
+        for (map in listed) {
+            val back = other.maps.value.orEmpty().single { it.metadata.uuid == map.metadata.uuid }
+            assertEquals("$release: ${map.title}", File(maps, "${map.id}/$MAP_FILE").readText(), other.read(back.id))
+            assertEquals("$release: ${map.title}", File(maps, "${map.id}/$MEDIA_DIRECTORY").list().orEmpty().toSet(), other.folder(back.id).resolve(MEDIA_DIRECTORY).list().orEmpty().toSet())
+            assertEquals("$release: ${map.title}", repository.versions(map.id), other.versions(back.id))
+            assertEquals("$release: ${map.title}", map.metadata.isPrivate, back.metadata.isPrivate)
+        }
     }
 
     @Test
@@ -218,6 +362,8 @@ class ReleaseDataTest(private val release: String) {
         val lisbon = repository.lisbon()
         val text = repository.read(lisbon.id)
         val picture = File(maps, "${lisbon.id}/media/picture-1.jpg").readBytes()
+        // Its picture and video, and from 0.5.0, Sardines' sketch and Food's boarding pass.
+        val media = File(maps, "${lisbon.id}/media").listFiles().orEmpty().associate { it.name to it.readBytes() }
         val versions = repository.versions(lisbon.id).size
         val reasons = repository.versions(lisbon.id).map { it.reason }
 
@@ -231,6 +377,9 @@ class ReleaseDataTest(private val release: String) {
         assertEquals("$release: the version kept before the change says why", VersionReason.Opened, kept.first().reason)
         assertEquals("$release: the release's own versions keep what they said, or saying nothing", reasons, kept.drop(1).map { it.reason })
         assertTrue(picture.contentEquals(File(maps, "${lisbon.id}/media/picture-1.jpg").readBytes()))
+        val after = File(maps, "${lisbon.id}/media").listFiles().orEmpty().associate { it.name to it.readBytes() }
+        assertEquals("$release: every file of the map stays", media.keys, after.keys)
+        assertTrue("$release: each as it was", media.all { (name, bytes) -> after[name]?.contentEquals(bytes) == true })
         assertFalse(again.metadata.pinned)
         assertEquals(listOf("food", "museums", "savings"), again.metadata.path)
         assertEquals(mapOf("food" to 42, "museums" to 30, "savings" to 12), again.metadata.rehearsal)
@@ -288,11 +437,67 @@ class ReleaseDataTest(private val release: String) {
             assertFalse(read.storageNoteDismissed)
         }
 
-        // Turned off in step 10 from the release after 0.4.0; on before, which had none.
-        assertEquals("$release: reminders", !since("0.4.1"), read.reminders)
+        // Turned off in step 10 from 0.5.0; on before, which had none. And Orbit asked about notifications as the
+        // first date was set, which "Not now" answered.
+        assertEquals("$release: reminders", !since("0.5.0"), read.reminders)
+        assertEquals("$release: notifications asked about", since("0.5.0"), read.notificationsAsked)
 
         settings.update { it }
         assertEquals(read, settings.settings.first())
+    }
+
+    @Test
+    fun `the reminders a release kept come at their moment once they're on`() = runTest {
+        val file = File(files, "reminders.json")
+
+        if (!since("0.5.0")) {
+            assertFalse("$release: reminders came with dates, in 0.5.0", file.exists())
+            return@runTest
+        }
+
+        val zone = ZoneId.of("America/Mexico_City")
+        var clock = now
+        var alarm: Long? = null
+        val shown = mutableListOf<String>()
+
+        val reminders = Reminders(
+            file,
+            alarms = object : ReminderAlarms {
+                override fun set(at: Long) {
+                    alarm = at
+                }
+
+                override fun cancel() {
+                    alarm = null
+                }
+            },
+            notices = object : ReminderNotices {
+                override fun post(reminder: Reminder, at: Instant) {
+                    shown += "${reminder.mapTitle}: ${reminder.idea}"
+                }
+
+                override fun keepPrivate(private: Set<String>, reminders: List<Reminder>) = Unit
+            },
+            clock = { clock },
+            zone = { zone },
+        )
+
+        val repository = loaded()
+        val maps = repository.maps.value.orEmpty()
+        val moment = MapText.dates(repository.read(repository.lisbon().id)).single { it.name == "Night markets" }.date.remindAt(zone).toEpochMilli()
+
+        // Off, as step 10 left them: nothing comes, and no alarm waits.
+        reminders.follow(maps, { repository.read(it) }, on = false)
+        assertNull("$release: no alarm while reminders are off", alarm)
+
+        // Turned on again: Night markets' reminder, which the release saw before its moment, waits for 18:30 on its
+        // day, and comes then.
+        reminders.follow(maps, { repository.read(it) }, on = true)
+        assertEquals("$release: the next alarm is Night markets'", moment, alarm)
+        assertEquals(emptyList<String>(), shown)
+        clock = moment
+        reminders.ring(on = true)
+        assertEquals("$release: the reminder the release set", listOf("Lisbon in May: Night markets"), shown)
     }
 
     @Test
@@ -308,6 +513,18 @@ class ReleaseDataTest(private val release: String) {
         assertNull(repository.delete(lisbon.id))
         assertEquals("$release: nothing was written, moved or deleted", before, snapshot())
     }
+
+    /**
+     * The note of the idea whose line in `text` is `idea`, as Orbit writes a
+     * note in a quote under it (after its picture, if it has one): its lines
+     * without their `> `.
+     */
+    private fun quotedNote(text: String, idea: String): String = text.lines()
+        .dropWhile { it != idea }
+        .drop(1)
+        .dropWhile { !it.startsWith(">") }
+        .takeWhile { it.startsWith(">") }
+        .joinToString("\n") { it.removePrefix(">").removePrefix(" ") }
 
     private fun <T> present(value: T?): T = value ?: throw AssertionError("$release: expected a value")
 }

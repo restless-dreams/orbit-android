@@ -31,6 +31,9 @@
     <!-- In the map's place, as a heading, when the page that draws the map didn't load; map_did_not_load is under it. -->
     <string name="map_did_not_load_title">The map didn\'t load</string>
     <string name="map_did_not_load">The page that draws it couldn\'t start. Your map is safe.</string>
+    <!-- In place of map_stopped and map_did_not_load while a sketch was being drawn on an idea's planet: it waits, whole, for the map to load again. -->
+    <string name="map_stopped_with_sketch">Android freed memory while it was open. Your changes are saved, and your sketch comes back with the map.</string>
+    <string name="map_did_not_load_with_sketch">The page that draws it couldn\'t start. Your map is safe, and your sketch comes back with it.</string>
     <!-- The button under map_stopped and map_did_not_load: a new page draws the map. -->
     <string name="map_load_it_again">Load it again</string>
     <string name="map_icon_for">Icon for %1$s</string>
@@ -68,6 +71,7 @@
     <string name="map_changed_elsewhere">This map changed elsewhere as you edited it. Your version is in its history, and Undo brings it back.</string>
     <!-- An edit made just before the map changed elsewhere (another device, the folder, ideas caught on the go): kept in the history, which the message's action opens. -->
     <string name="map_change_kept_in_history">This map changed elsewhere, so your last change is in its history.</string>
+    <string name="map_change_kept_in_trash">This map went to the trash as you changed it. Your last change is in its history: restore the map to get it back.</string>
     <string name="map_change_not_saved">Orbit didn\'t save that change, because it would have emptied the map. Undo takes it back.</string>
     <string name="map_deleted_idea">Deleted “%1$s”</string>
     <!-- Said once a box of a note's checklist is checked, or unchecked, with Undo. -->
@@ -81,6 +85,8 @@
     <string name="map_cut_idea">Cut “%1$s”</string>
     <string name="map_too_much_to_copy">That’s too much to copy at once</string>
     <string name="map_nothing_to_paste">There’s nothing to paste: copy some text or a picture first</string>
+    <!-- Ideas pasted from another map whose pictures took a while to copy in, as the idea pasted into was deleted. -->
+    <string name="map_paste_idea_gone">Nothing was pasted: its idea is gone</string>
     <!-- Ideas copied in another map whose pictures, videos and sounds couldn't be copied into this one, as on a full disk. -->
     <string name="map_paste_media_failed">Orbit couldn\'t copy the pictures, videos and sounds of those ideas into this map, so nothing was pasted.</string>
     <string name="map_pasted_the_picture">Pasted the picture</string>
@@ -99,6 +105,10 @@
     <string name="map_add_its_movie">Add its movie</string>
     <string name="map_made_a_live_photo">The picture is a live photo now</string>
     <string name="map_video_unreadable">That video couldn\'t be read.</string>
+    <!-- A picture, video or sound from the phone, or let go on the map, that took a while to copy in: its idea was deleted meanwhile, so it wasn't added. -->
+    <string name="map_picture_idea_gone">The picture wasn’t added: its idea is gone</string>
+    <string name="map_video_idea_gone">The video wasn’t added: its idea is gone</string>
+    <string name="map_sound_idea_gone">The sound wasn’t added: its idea is gone</string>
     <plurals name="map_added_ideas">
         <item quantity="one">Added %d idea</item>
         <item quantity="other">Added %d ideas</item>

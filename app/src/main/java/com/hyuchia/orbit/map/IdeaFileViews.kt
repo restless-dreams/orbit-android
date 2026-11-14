@@ -27,6 +27,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -47,14 +48,20 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
+import com.hyuchia.orbit.data.AsTheyAreFiles
+import com.hyuchia.orbit.data.FileChanged
+import com.hyuchia.orbit.data.FileStamp
 import com.hyuchia.orbit.data.OutgoingFile
 import com.hyuchia.orbit.data.OutgoingMedia
+import com.hyuchia.orbit.data.mapMediaFile
 import com.hyuchia.orbit.page.MapFile
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.privacy.WhenPrivateMapsLock
+import com.hyuchia.orbit.ui.AskedAgain
 import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.fileFacts
 import com.hyuchia.orbit.ui.fileKind
@@ -85,7 +92,7 @@ internal fun DetailsFiles(node: MapNode, opening: FileOpening) {
         return
     }
 
-    val missing by produceState(emptySet<String>(), node.files) { value = opening.missing(node.files) }
+    val missing = opening.rememberMissing(node.files)
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         FilesHeading()
@@ -112,7 +119,7 @@ internal fun DetailsFiles(node: MapNode, opening: FileOpening) {
 internal fun EditorFiles(model: MapViewModel, ui: MapUi, node: MapNode, opening: FileOpening, heading: Boolean = true, onAdd: () -> Unit) {
     val copy = ui.fileCopy?.takeIf { it.nodeId == node.id }
     val problem = ui.mediaProblem?.takeIf { it.nodeId == node.id && it.file }
-    val missing by produceState(emptySet<String>(), node.files) { value = opening.missing(node.files) }
+    val missing = opening.rememberMissing(node.files)
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (heading) {
@@ -239,55 +246,99 @@ private fun FileCopying(copy: FileCopy, onStop: () -> Unit) {
  */
 @Stable
 class FileOpening internal constructor(private val context: Context, private val scope: CoroutineScope, private val model: MapViewModel) {
-    /** The file waiting for the person to say whether it goes as it is. */
-    var asking by mutableStateOf<MapFile?>(null)
+    /** The file waiting for the person to say whether it goes as it is, as it was then. */
+    internal var asking by mutableStateOf<AskedFile?>(null)
         private set
+
+    /** Counts the taps on files, each of which looks for its file afresh: so do the rows ([rememberMissing]). */
+    private var taps by mutableIntStateOf(0)
 
     /** The addresses of `files` that aren't here to open: a folder's older device, or one sending from it, may not have kept them. */
     suspend fun missing(files: List<MapFile>): Set<String> = withContext(Dispatchers.IO) { files.filter { model.ideaFile(it.src)?.isFile != true }.mapTo(HashSet()) { it.src } }
 
-    fun open(file: MapFile) {
-        val local = model.ideaFile(file.src)?.takeIf { it.isFile }
+    /**
+     * [missing] for rows that show `files`, looked at again as what the map's
+     * text points at comes, from the folder maps are kept in or a zip
+     * ([MapViewModel.missingMedia]), and as one is tapped: a file that came
+     * says so without the rows being opened again.
+     */
+    @Composable
+    internal fun rememberMissing(files: List<MapFile>): Set<String> {
+        val coming by model.missingMedia.collectAsStateWithLifecycle()
+        val missing by produceState(emptySet<String>(), files, coming, taps) { value = missing(files) }
+        return missing
+    }
 
-        if (local == null) {
-            model.say(ShownText.Resource(R.string.files_missing))
-            return
-        }
+    fun open(file: MapFile) = open(file, changed = false)
+
+    /** Opens a clean copy of `file`, or asks about it as it is, saying when it `changed` after the person answered. */
+    private fun open(file: MapFile, changed: Boolean) {
+        taps++
 
         scope.launch {
-            val clean = withContext(Dispatchers.IO) { OutgoingMedia.of(local) }
+            val local = withContext(Dispatchers.IO) { local(file) }
 
-            if (clean != null) {
-                openCopy(file, local, clean)
-            } else {
-                asking = file
+            if (local == null) {
+                model.say(ShownText.Resource(R.string.files_missing))
+                return@launch
+            }
+
+            val judged = withContext(Dispatchers.IO) { OutgoingMedia.judge(local) }
+            val clean = judged?.clean
+
+            when {
+                judged == null -> model.say(ShownText.Resource(R.string.files_open_failed))
+                clean != null -> openCopy(file, local, clean)
+                else -> asking = AskedFile(file, judged.stamp, changed)
             }
         }
     }
 
     internal fun answer(open: Boolean) {
-        val file = asking ?: return
+        val asked = asking ?: return
         asking = null
 
         if (open) {
-            val local = model.ideaFile(file.src)?.takeIf { it.isFile } ?: return model.say(ShownText.Resource(R.string.files_missing))
-            scope.launch { openCopy(file, local, null) }
+            scope.launch {
+                val local = withContext(Dispatchers.IO) { local(asked.file) }
+
+                if (local == null) {
+                    model.say(ShownText.Resource(R.string.files_missing))
+                    return@launch
+                }
+
+                // The very file the person was asked about: one Orbit can clean now goes clean, and another it can't is asked about again, once.
+                val outgoing = try {
+                    withContext(Dispatchers.IO) { OutgoingMedia.of(local, AsTheyAreFiles(asked = setOf(asked.stamp), chosen = setOf(asked.stamp))) }
+                } catch (changed: FileChanged) {
+                    if (asked.changed) {
+                        model.say(ShownText.Resource(R.string.files_open_failed))
+                    } else {
+                        open(asked.file, changed = true)
+                    }
+
+                    return@launch
+                }
+
+                if (outgoing == null) {
+                    model.say(ShownText.Resource(R.string.files_missing))
+                } else {
+                    openCopy(asked.file, local, outgoing)
+                }
+            }
         }
     }
 
-    /** Hands another app a copy of `local`, clean when `clean` says how, else as it is, under the name people know it by. */
-    private suspend fun openCopy(file: MapFile, local: File, clean: OutgoingFile?) {
+    /** The idea's file here, as every way out of the phone reads it: only one in the map's media folder itself, never one a link there leads to. It reads the storage. */
+    private fun local(file: MapFile): File? = model.ideaFile(file.src)?.let { mapMediaFile(model.folder(), it.name) }
+
+    /** Hands another app a copy of `local` as `outgoing` makes it, clean or as it is, under the name people know it by. */
+    private suspend fun openCopy(file: MapFile, local: File, outgoing: OutgoingFile) {
         val opened = try {
             val copy = makeExport(context, copyName(file, local)) { output ->
                 // Not begun on a storage without room for all of it, and some to spare.
-                invoke(clean?.size ?: local.length())
-
-                if (clean != null) {
-                    clean.writeTo(output)
-                } else {
-                    local.inputStream().use { it.copyTo(output) }
-                }
-
+                invoke(outgoing.size)
+                outgoing.writeTo(output)
                 true
             } ?: return
 
@@ -314,6 +365,9 @@ class FileOpening internal constructor(private val context: Context, private val
     }
 }
 
+/** An idea's file Orbit can't clean, as it was then (`stamp`), asked about: again when it `changed` after the person answered. */
+internal class AskedFile(val file: MapFile, val stamp: FileStamp, val changed: Boolean = false)
+
 /**
  * What a copy of an idea's file is called for the app it opens in: the name
  * people know it by, without characters file systems refuse, short enough
@@ -333,7 +387,7 @@ internal fun rememberFileOpening(model: MapViewModel): FileOpening {
     val scope = rememberCoroutineScope()
     val opening = remember(model) { FileOpening(context, scope, model) }
 
-    opening.asking?.let { file -> OpenFileDialog(file, private = model.isPrivate(), onChoice = opening::answer) }
+    opening.asking?.let { asked -> OpenFileDialog(asked.file, private = model.isPrivate(), changed = asked.changed, onChoice = opening::answer) }
     // A question left unanswered as private maps lock goes with them: nothing of the map shows over its lock.
     WhenPrivateMapsLock { opening.answer(false) }
     return opening
@@ -341,11 +395,12 @@ internal fun rememberFileOpening(model: MapViewModel): FileOpening {
 
 /**
  * Asks before a file Orbit can't clean leaves for another app: it names the
- * file, and says what may go with it. Enter keeps it here: it goes only
+ * file, and says what may go with it, and first, when it asks again, that it
+ * `changed` after the person answered. Enter keeps it here: it goes only
  * when someone chooses Open.
  */
 @Composable
-private fun OpenFileDialog(file: MapFile, private: Boolean, onChoice: (open: Boolean) -> Unit) {
+private fun OpenFileDialog(file: MapFile, private: Boolean, changed: Boolean, onChoice: (open: Boolean) -> Unit) {
     AlertDialog(
         onDismissRequest = { onChoice(false) },
         icon = { Icon(fileKind(file).icon, contentDescription = null) },
@@ -353,7 +408,15 @@ private fun OpenFileDialog(file: MapFile, private: Boolean, onChoice: (open: Boo
             EscapeCloses { onChoice(false) }
             Text(stringResource(R.string.files_open_title, fileName(file)))
         },
-        text = { Text(stringResource(if (private) R.string.files_open_text_private else R.string.files_open_text)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (changed) {
+                    AskedAgain(1)
+                }
+
+                Text(stringResource(if (private) R.string.files_open_text_private else R.string.files_open_text))
+            }
+        },
         confirmButton = { TextButton(onClick = { onChoice(true) }) { Text(stringResource(R.string.files_open)) } },
         dismissButton = { TextButton(onClick = { onChoice(false) }, modifier = Modifier.focusRequester(rememberDefaultButton())) { Text(stringResource(R.string.common_cancel)) } },
     )

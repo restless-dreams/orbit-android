@@ -1,5 +1,6 @@
 package com.hyuchia.orbit.map
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,8 +27,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
@@ -49,15 +55,15 @@ enum class PageProblem {
 
 /**
  * In the map's place while its page can't draw it ([PageProblem]): what
- * happened, that the map itself is safe, and the way to load it again, as
- * Home says it has no maps yet, under a shape of Material 3 Expressive's. A
- * page that didn't load shows in the error colors. On a short screen, a
- * phone on its side, the shape stands beside the words, which keep the
- * height. Screen readers hear its title as it comes, and find it among the
- * headings.
+ * happened, that the map itself is safe, and with a `sketch` under way that
+ * it comes back with the map, and the way to load it again, as Home says it
+ * has no maps yet, under a shape of Material 3 Expressive's. A page that
+ * didn't load shows in the error colors. On a short screen, a phone on its
+ * side, the shape stands beside the words, which keep the height. Screen
+ * readers hear its title as it comes, and find it among the headings.
  */
 @Composable
-internal fun PageProblemNotice(problem: PageProblem, onLoadAgain: () -> Unit, modifier: Modifier = Modifier) {
+internal fun PageProblemNotice(problem: PageProblem, onLoadAgain: () -> Unit, modifier: Modifier = Modifier, sketch: Boolean = false) {
     val didNotLoad = problem == PageProblem.DidNotLoad
 
     BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
@@ -73,9 +79,9 @@ internal fun PageProblemNotice(problem: PageProblem, onLoadAgain: () -> Unit, mo
                 Badge(didNotLoad)
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f, fill = false)) {
-                    Words(didNotLoad, TextAlign.Start)
+                    Words(didNotLoad, sketch, TextAlign.Start)
                     Spacer(Modifier.height(4.dp))
-                    LoadAgain(onLoadAgain)
+                    LoadAgain(onLoadAgain, takesFocus = sketch)
                 }
             }
         } else {
@@ -89,9 +95,9 @@ internal fun PageProblemNotice(problem: PageProblem, onLoadAgain: () -> Unit, mo
             ) {
                 Badge(didNotLoad)
                 Spacer(Modifier.height(4.dp))
-                Words(didNotLoad, TextAlign.Center)
+                Words(didNotLoad, sketch, TextAlign.Center)
                 Spacer(Modifier.height(4.dp))
-                LoadAgain(onLoadAgain)
+                LoadAgain(onLoadAgain, takesFocus = sketch)
             }
         }
     }
@@ -118,9 +124,9 @@ private fun Badge(didNotLoad: Boolean) {
     }
 }
 
-/** What happened, as a heading screen readers hear as it comes, and that the map is safe. */
+/** What happened, as a heading screen readers hear as it comes, and that the map is safe, and the `sketch` under way too. */
 @Composable
-private fun Words(didNotLoad: Boolean, align: TextAlign) {
+private fun Words(didNotLoad: Boolean, sketch: Boolean, align: TextAlign) {
     Text(
         stringResource(if (didNotLoad) R.string.map_did_not_load_title else R.string.map_stopped_title),
         style = MaterialTheme.typography.headlineSmall,
@@ -130,17 +136,40 @@ private fun Words(didNotLoad: Boolean, align: TextAlign) {
             liveRegion = LiveRegionMode.Polite
         },
     )
+
+    val safe = when {
+        didNotLoad && sketch -> R.string.map_did_not_load_with_sketch
+        didNotLoad -> R.string.map_did_not_load
+        sketch -> R.string.map_stopped_with_sketch
+        else -> R.string.map_stopped
+    }
+
     Text(
-        stringResource(if (didNotLoad) R.string.map_did_not_load else R.string.map_stopped),
+        stringResource(safe),
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = align,
     )
 }
 
+/**
+ * The way to load the map again. With a keyboard, it takes the focus when it
+ * `takesFocus`: a sketch waiting for the map had it, and the bars, dimmed
+ * with the sketch, take nothing meanwhile.
+ */
 @Composable
-private fun LoadAgain(onLoadAgain: () -> Unit) {
-    Button(onClick = onLoadAgain, contentPadding = ButtonDefaults.ButtonWithIconContentPadding) {
+private fun LoadAgain(onLoadAgain: () -> Unit, takesFocus: Boolean) {
+    val focus = remember { FocusRequester() }
+    val configuration = LocalConfiguration.current
+    val keyboard = configuration.keyboard != Configuration.KEYBOARD_NOKEYS && configuration.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
+
+    LaunchedEffect(takesFocus, keyboard) {
+        if (takesFocus && keyboard) {
+            focus.requestFocus()
+        }
+    }
+
+    Button(onClick = onLoadAgain, contentPadding = ButtonDefaults.ButtonWithIconContentPadding, modifier = Modifier.focusRequester(focus)) {
         Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
         Spacer(Modifier.size(ButtonDefaults.IconSpacing))
         Text(stringResource(R.string.map_load_it_again))

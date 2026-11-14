@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { parseOrbit } from '@restless-dreams/orbit';
-import { mergedMedia } from './media';
+import { mergedMedia, stillOnto } from './media';
 
 /** A live photo with fields Orbit doesn't read, its motion's too, as another app or a newer Orbit writes it. */
 const LIVE_PHOTO = '# Trip\n## Lake\n<!-- orbit\nimage:\n  src: media/lake.jpg\n  motion:\n    src: media/lake-motion.mp4\n    still: 0.8\n    loop: true\n  width: 640\n  alt: The lake\n-->\n';
@@ -43,5 +43,24 @@ describe('another file', () => {
   test('is needed for a node with none: a change without one changes nothing', () => {
     expect(mergedMedia(undefined, { caption: 'Mist' })).toBeUndefined();
     expect(mergedMedia(null, { caption: 'Mist' })).toBeUndefined();
+  });
+});
+
+describe('a change made for a file', () => {
+  test('holds while the node still has that file, or none when it was made for none', () => {
+    const node = { image: lake(), audio: { src: 'media/memo.mp4' } };
+
+    expect(stillOnto(node, { image: 'media/lake.jpg' })).toBe(true);
+    expect(stillOnto(node, { image: 'media/lake.jpg', audio: 'media/memo.mp4' })).toBe(true);
+    expect(stillOnto(node, { video: null })).toBe(true);
+  });
+
+  test("doesn't once the node's file was replaced, taken off, or never there", () => {
+    const node = { image: { src: 'media/shore.jpg' } };
+
+    expect(stillOnto(node, { image: 'media/lake.jpg' })).toBe(false);
+    expect(stillOnto({}, { image: 'media/lake.jpg' })).toBe(false);
+    expect(stillOnto(null, { image: 'media/lake.jpg' })).toBe(false);
+    expect(stillOnto(node, { image: null })).toBe(false);
   });
 });

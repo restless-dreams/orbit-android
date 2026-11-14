@@ -136,6 +136,34 @@ describe('parts', () => {
     expect(followed).toEqual([SHOW]);
   });
 
+  test('of a command whose first part was lost are forgotten as the phone says hello again, so what it sends again comes whole', () => {
+    const { channel, followed } = tv();
+    // A map at Food, in parts, its first part lost on the way.
+    const lost = inParts({ ...SHOW, focus: 'food' }, 10);
+
+    for (const part of lost.slice(1)) {
+      channel.hear(part, 'phone');
+    }
+
+    // The presenter sends the presentation again: the hello first, then the map, now at Trip, as many parts long.
+    const again: AudienceCommand = { ...SHOW, focus: 'trip' };
+    expect(inParts(again, 10).length).toBe(lost.length);
+    channel.hear({ type: 'hello', protocol: RECEIVER_PROTOCOL }, 'phone');
+
+    for (const part of inParts(again, 10)) {
+      channel.hear(part, 'phone');
+    }
+
+    expect(followed).toEqual([again]);
+
+    // And the next map as many parts long comes whole too.
+    for (const part of inParts(SHOW, 10)) {
+      channel.hear(part, 'phone');
+    }
+
+    expect(followed).toEqual([again, SHOW]);
+  });
+
   test('that aren\'t parts drop the command they were in, and the next one still comes', () => {
     const { channel, followed } = tv();
     const parts = inParts(SHOW, 10);

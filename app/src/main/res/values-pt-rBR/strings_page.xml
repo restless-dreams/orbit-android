@@ -5,6 +5,8 @@
     <string name="page_stopped">A página parou</string>
     <string name="page_closed">A página fechou</string>
     <string name="page_sent_nothing_back">A página não retornou nada</string>
+    <string name="page_sent_unreadable_answer">A página retornou algo que o Orbit não consegue ler</string>
     <string name="page_did_not_answer">A página não respondeu</string>
     <string name="page_did_not_load">A página não carregou</string>
+    <string name="page_could_not_make_change">A página não conseguiu fazer a alteração</string>
 </resources>

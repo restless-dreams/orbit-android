@@ -133,8 +133,6 @@ Neutral Latin American Spanish, the way people across Latin America and the US w
 | video | video |
 | sound (an idea's: a voice memo, a file or a web address) | audio (*el audio*) |
 | voice memo | nota de voz |
-| sketch (on a planet), to sketch | desenho, desenhar |
-| pen, eraser, stroke (in a sketch) | caneta, borracha, traço |
 | sketch (on a planet), to sketch | dibujo, dibujar |
 | pen, eraser, stroke (in a sketch) | lápiz, borrador, trazo |
 | record, recording, take | grabar, grabación, toma |
@@ -309,6 +307,8 @@ Brazilian Portuguese (`pt-BR`), the way people across Brazil write to each other
 | video | vídeo |
 | sound (an idea's: a voice memo, a file or a web address) | áudio (*o áudio*) |
 | voice memo | nota de voz |
+| sketch (on a planet), to sketch | desenho, desenhar |
+| pen, eraser, stroke (in a sketch) | caneta, borracha, traço |
 | record, recording | gravar, gravação |
 | play, pause, turn the sound off/on | reproduzir, pausar, desativar/ativar o som |
 | catch (an idea, quickly) | capturar |

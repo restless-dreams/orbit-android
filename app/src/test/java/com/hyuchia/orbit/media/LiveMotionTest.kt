@@ -1,5 +1,8 @@
 package com.hyuchia.orbit.media
 
+import android.content.Context
+import android.content.Intent
+import android.media.AudioManager
 import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.compose.runtime.CompositionLocalProvider
@@ -17,6 +20,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.Size
 import androidx.media3.common.util.UnstableApi
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -26,6 +30,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 import java.io.File
 
 /**
@@ -46,8 +51,12 @@ class LiveMotionTest {
         override val lifecycle: Lifecycle get() = registry
     }
 
-    /** A player that plays nothing, but says what a player says: its texture's size, and whether it's playing. */
-    private class TestPlayer : SimpleBasePlayer(Looper.getMainLooper()) {
+    /**
+     * A player that plays nothing, but says what a player says: its texture's
+     * size, whether it's playing, and with `frames`, its first frame drawn as
+     * it starts.
+     */
+    private class TestPlayer(private val frames: Boolean = false) : SimpleBasePlayer(Looper.getMainLooper()) {
         private var state = State.Builder()
             .setAvailableCommands(Player.Commands.Builder().addAllCommands().build())
             .build()
@@ -65,7 +74,10 @@ class LiveMotionTest {
 
         override fun handlePrepare() = change { setPlaybackState(Player.STATE_READY) }
 
-        override fun handleSetPlayWhenReady(playWhenReady: Boolean) = change { setPlayWhenReady(playWhenReady, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) }
+        override fun handleSetPlayWhenReady(playWhenReady: Boolean) = change {
+            setPlayWhenReady(playWhenReady, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
+            setNewlyRenderedFirstFrame(playWhenReady && frames)
+        }
 
         override fun handleSeek(mediaItemIndex: Int, positionMs: Long, seekCommand: Int) = change {}
 
@@ -117,6 +129,88 @@ class LiveMotionTest {
 
         assertFalse(player.playWhenReady)
         assertEquals(1, ended)
+    }
+
+    @Test
+    fun `held as Orbit leaves the screen, the motion ends and its still is back, though the picture is still held`() {
+        val player = TestPlayer(frames = true)
+        var play by mutableStateOf<LivePlay?>(null)
+        var showing = false
+        var ended = 0
+        screen.registry.currentState = Lifecycle.State.RESUMED
+
+        compose.setContent {
+            CompositionLocalProvider(LocalLifecycleOwner provides screen) {
+                // Held, the picture keeps asking for its motion through its end, until the finger lifts.
+                LiveMotion(File("media/picture-ferry-motion.mp4"), play, onShowing = { showing = it }, onEnded = { ended += 1 }, newPlayer = { player })
+            }
+        }
+
+        play = LivePlay(sound = true, held = true)
+        compose.waitForIdle()
+        assertTrue(showing)
+
+        // The screen turns off with the finger still on the picture.
+        screen.registry.currentState = Lifecycle.State.CREATED
+        compose.waitForIdle()
+
+        assertFalse(player.playWhenReady)
+        assertFalse(showing)
+        assertEquals(1, ended)
+    }
+
+    @Test
+    fun `headphones coming out end a motion playing with its sound, and its still is back`() {
+        val player = TestPlayer(frames = true)
+        var play by mutableStateOf<LivePlay?>(null)
+        var showing = false
+        var ended = 0
+        screen.registry.currentState = Lifecycle.State.RESUMED
+
+        compose.setContent {
+            CompositionLocalProvider(LocalLifecycleOwner provides screen) {
+                LiveMotion(File("media/picture-ferry-motion.mp4"), play, onShowing = { showing = it }, onEnded = { ended += 1 }, newPlayer = { player })
+            }
+        }
+
+        // Held, with its sound in the headphones.
+        play = LivePlay(sound = true, held = true)
+        compose.waitForIdle()
+        assertTrue(showing)
+
+        unplugged()
+
+        assertFalse(player.playWhenReady)
+        assertFalse(showing)
+        assertEquals(1, ended)
+    }
+
+    @Test
+    fun `headphones coming out leave a motion playing without sound as it is`() {
+        val player = TestPlayer()
+        var ended = 0
+        screen.registry.currentState = Lifecycle.State.RESUMED
+
+        compose.setContent {
+            CompositionLocalProvider(LocalLifecycleOwner provides screen) {
+                LiveMotion(File("media/picture-ferry-motion.mp4"), LivePlay(sound = false), onShowing = {}, onEnded = { ended += 1 }, newPlayer = { player })
+            }
+        }
+
+        compose.waitForIdle()
+        assertTrue(player.playWhenReady)
+
+        unplugged()
+
+        assertTrue(player.playWhenReady)
+        assertEquals(0, ended)
+    }
+
+    /** Headphones come out, as Android tells apps playing sound. */
+    private fun unplugged() {
+        ApplicationProvider.getApplicationContext<Context>().sendBroadcast(Intent(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
+        shadowOf(Looper.getMainLooper()).idle()
+        compose.waitForIdle()
     }
 
     @Test

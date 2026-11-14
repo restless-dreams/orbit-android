@@ -166,7 +166,15 @@ class Talk internal constructor(private val listening: Listening) {
         onFinished(problem)
     }
 
-    internal fun close() = listening.close()
+    /**
+     * The map's screen goes: a talk going on ends at once, as [cancel] ends
+     * it, so the map still says how many ideas it brought, with Undo, and
+     * the microphone goes either way.
+     */
+    internal fun close() {
+        cancel()
+        listening.close()
+    }
 }
 
 /**

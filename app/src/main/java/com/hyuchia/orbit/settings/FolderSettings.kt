@@ -200,6 +200,10 @@ internal fun FolderSettings() {
             Note(pluralStringResource(R.plurals.settings_folder_newer_format, shown.newer.size, titles(shown.newer)))
         }
 
+        if (shown.cameInPrivate.isNotEmpty()) {
+            Note(pluralStringResource(R.plurals.settings_folder_came_in_private, shown.cameInPrivate.size, titles(shown.cameInPrivate)))
+        }
+
         if (!shown.isEmpty) {
             // Only what shows is read: while private maps hide, the notes about them stay, and their maps wait in the trash.
             TextButton(
@@ -261,7 +265,7 @@ private fun status(resources: Resources, sync: FolderSyncState, now: Long): Stri
 internal fun FolderNotes.namesPrivateMaps(private: List<String>, privateTitles: Set<String>, quoted: (String) -> String): Boolean {
     fun privateMap(title: String): Boolean = title in private || title in privateTitles
 
-    return (keptBoth + removed + restored).any(::privateMap) ||
+    return (keptBoth + removed + restored + cameInPrivate).any(::privateMap) ||
         tooBig.any { entry -> entry in private || privateTitles.any { entry.endsWith(quoted(it)) } } ||
         large.any { it in private }
 }
@@ -280,6 +284,7 @@ internal fun FolderNotes.shown(concealing: Boolean, hiddenMap: (String) -> Boole
             tooBig = tooBig.filterNot(hiddenFile),
             large = large.filterNot(hiddenLarge),
             newer = newer.filterNot(hiddenMap),
+            cameInPrivate = cameInPrivate.filterNot(hiddenMap),
         )
     } else {
         this

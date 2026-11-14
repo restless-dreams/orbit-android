@@ -27,6 +27,8 @@
 
     <string name="sketch_replace_title">Substituir a imagem por um desenho?</string>
     <string name="sketch_replace_text">O desenho fica no lugar da imagem de %1$s. Desfazer traz a imagem de volta.</string>
+    <string name="sketch_replace_new_text">%1$s ganhou uma imagem enquanto você desenhava. O desenho fica no lugar dela, e Desfazer traz a imagem de volta.</string>
+    <string name="sketch_replace">Substituir</string>
 
     <string name="sketch_discard_title">Descartar o desenho?</string>
     <string name="sketch_discard_text">O que você desenhou se perde, e a ideia fica como estava.</string>

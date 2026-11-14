@@ -46,6 +46,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.data.MapTags
+import com.hyuchia.orbit.privacy.privateSheetProperties
 import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.ListRow
@@ -97,6 +98,7 @@ fun ManageTagsSheet(tags: List<TagCount>, messages: SnackbarHostState, onRename:
     var removing by remember { mutableStateOf<TagCount?>(null) }
 
     ModalBottomSheet(
+        properties = privateSheetProperties(),
         onDismissRequest = onDismiss,
         sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)),
     ) {

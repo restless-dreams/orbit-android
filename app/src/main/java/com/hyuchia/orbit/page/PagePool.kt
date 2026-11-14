@@ -6,6 +6,7 @@ import android.os.Looper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.WeakHashMap
 
 /** How long after a map opens the pool makes the next page, once the map has settled. */
 private const val REWARM_DELAY = 2_000L
@@ -24,6 +25,9 @@ class PagePool(context: Context, private val mapsDirectory: File) {
     /** The spare page let go of while it was busy ([release]): it goes once its last job ends, unless Orbit is back first. */
     private var leaving: OrbitPage? = null
 
+    /** Every page the pool made that's still about, wherever it went: the spare, the screens' and the audiences'. */
+    private val made = WeakHashMap<OrbitPage, Unit>()
+
     /** Makes the spare page, if there isn't one. Call it when the app is idle. */
     fun warm() {
         // Back in sight: the spare stays, its work done or not.
@@ -37,6 +41,7 @@ class PagePool(context: Context, private val mapsDirectory: File) {
         spare?.destroy()
 
         return OrbitPage(application, mapsDirectory).also { page ->
+            made[page] = Unit
             spare = page
             // Posted, so the page isn't destroyed in the middle of its last job's last step.
             page.onIdle = { handler.post { leaveWhenDone(page) } }
@@ -75,6 +80,24 @@ class PagePool(context: Context, private val mapsDirectory: File) {
         }
     }
 
+    /**
+     * Lets `page` go as the spare, as one that failed a job: the next work has a new page. One still busy with
+     * other work goes once that's done.
+     */
+    fun retire(page: OrbitPage) {
+        if (spare !== page) {
+            return
+        }
+
+        spare = null
+
+        if (page.busy) {
+            page.onIdle = { handler.post { page.destroy() } }
+        } else {
+            page.destroy()
+        }
+    }
+
     /** A page for a screen to show, never one that can't be used. Give it back with [give] when the screen goes. */
     fun take(): OrbitPage {
         // A screen takes it: it's back in sight.
@@ -106,7 +129,16 @@ class PagePool(context: Context, private val mapsDirectory: File) {
     }
 
     /** A page for an audience to watch on another screen, made in that screen's context so it's sized for it. */
-    fun audiencePage(screen: Context): OrbitPage = OrbitPage(screen, mapsDirectory, AUDIENCE_URL)
+    fun audiencePage(screen: Context): OrbitPage = OrbitPage(screen, mapsDirectory, AUDIENCE_URL).also { made[it] = Unit }
+
+    /**
+     * Calls off, on every page, the jobs drawing pictures of the maps `hides`
+     * names ([OrbitPage.revokeJobs]): private maps, as they lock. On the main
+     * thread, as the pages' work is.
+     */
+    fun revokeJobs(hides: (mapId: String) -> Boolean) {
+        made.keys.toList().forEach { page -> page.revokeJobs(hides) }
+    }
 
     /** Runs work on the spare page, making one if needed. */
     suspend fun <T> work(job: suspend (OrbitPage) -> T): T = withContext(Dispatchers.Main) {

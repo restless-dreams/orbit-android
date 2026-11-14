@@ -13,6 +13,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
+import androidx.compose.ui.unit.width
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.hyuchia.orbit.page.Media
 import org.junit.Assert.assertTrue
@@ -23,8 +25,9 @@ import org.robolectric.annotation.Config
 
 /**
  * The full-screen sound's buttons ([SoundButtons]) at the widths a phone,
- * a narrow phone, a split screen and a tablet give them: each whole, and
- * none over another.
+ * a narrow phone, a split screen and a tablet give them, down to the
+ * narrowest window Android makes: each whole, none over another, and none
+ * smaller than a touch's target.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(qualifiers = "w900dp-h900dp-mdpi")
@@ -65,22 +68,27 @@ class SoundButtonsTest {
             }
         }
 
-        // A tablet's, Pixels', a 360 dp phone's (312 dp inside the page's margins), a smaller one's, and a split screen's.
-        for (shown in listOf<Dp>(420.dp, 372.dp, 345.dp, 312.dp, 300.dp, 280.dp, 260.dp)) {
+        // A tablet's, Pixels', a 360 dp phone's (312 dp inside the page's margins), a smaller one's, a split screen's,
+        // a phone on its side beside another app's (206 dp beside the art), and the narrowest window Android makes,
+        // 220 dp, inside the page's margins.
+        for (shown in listOf<Dp>(420.dp, 372.dp, 345.dp, 312.dp, 300.dp, 280.dp, 260.dp, 240.dp, 230.dp, 206.dp, 192.dp, 180.dp, 172.dp)) {
             width = shown
             compose.waitForIdle()
             val buttons = names.map(::bounds)
 
             for ((index, button) in buttons.withIndex()) {
                 assertTrue("${names[index]} is cut off at $shown: $button", button.left >= 0.dp && button.right <= shown)
+                assertTrue("${names[index]} is smaller than a touch at $shown: $button", button.width >= 48.dp && button.height >= 48.dp)
 
                 for (later in buttons.drop(index + 1)) {
-                    assertTrue("${names[index]} and another button overlap at $shown: $button, $later", button.right <= later.left || later.right <= button.left)
+                    val apart = button.right <= later.left || later.right <= button.left || button.bottom <= later.top || later.bottom <= button.top
+                    assertTrue("${names[index]} and another button overlap at $shown: $button, $later", apart)
                 }
             }
 
-            // In order, as they read: back, play, on, the switch.
-            assertTrue("The buttons are out of order at $shown", buttons.zipWithNext().all { (before, after) -> before.right <= after.left })
+            // In order, as they read: back, play, on, the switch, along a row, or on the row under it.
+            val inOrder = buttons.zipWithNext().all { (before, after) -> before.right <= after.left || before.bottom <= after.top }
+            assertTrue("The buttons are out of order at $shown", inOrder)
         }
     }
 

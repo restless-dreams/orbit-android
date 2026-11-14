@@ -47,7 +47,7 @@ Releasing for the first time on a store takes longer than the release itself: F-
 
 ## The release
 
-4. **The commit on GitHub, and its CI.** The release's code goes to GitHub's main as one commit. GitHub's CI (`.github/workflows/ci.yml`) runs on it. **Wait until its jobs, `app`, `release`, `smoke` and `pages`, have passed on that exact commit** (the Actions tab, or `gh run watch`): this is the run on the release's own commit, with Orbit from GitHub. Never tag or publish on red: fix it, and make the release's commit again.
+4. **The commit on GitHub, and its CI.** The release's code goes to GitHub's main as one commit. GitHub's CI (`.github/workflows/ci.yml`) runs on it. **Wait until its jobs, `app`, `release`, `smoke`, `oldest` and `pages`, have passed on that exact commit** (the Actions tab, or `gh run watch`): this is the run on the release's own commit, with Orbit from GitHub. Never tag or publish on red: fix it, and make the release's commit again.
 5. **The builds,** from a fresh `git clone` of GitHub at that commit, never a working copy or a worktree. Each APK records the commit it was built from (`META-INF/version-control-info.textproto`), and a worktree's build records none, so it can't match F-Droid's build of the tag, which has to match the F-Droid APK byte for byte. `-Porbit.requireUploadKey=true` stops a build that would be signed with the debug key:
 
    ```bash

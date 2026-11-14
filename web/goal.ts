@@ -134,23 +134,37 @@ const places = (value: number): number => {
   return Math.max(0, fraction - (exponent ? Number(exponent[1]) : 0));
 };
 
-/** `amount` added to `value` as decimals add, so 0.1 and 0.2 make 0.3. */
+/**
+ * `amount` added to `value` as decimals add, so 0.1 and 0.2 make 0.3: both
+ * counted in the smallest unit either is written in. Counts past the whole
+ * numbers JavaScript holds exactly would come out wrong, so numbers that
+ * large add as they are, to the nearest number there is.
+ */
 export const addAmount = (value: number, amount: number): number => {
   const scale = 10 ** Math.min(12, Math.max(places(value), places(amount)));
-  return (Math.round(value * scale) + Math.round(amount * scale)) / scale + 0;
+  const valueCount = Math.round(value * scale);
+  const amountCount = Math.round(amount * scale);
+
+  if (Math.abs(valueCount) > Number.MAX_SAFE_INTEGER / 2 || Math.abs(amountCount) > Number.MAX_SAFE_INTEGER / 2) {
+    return value + amount + 0;
+  }
+
+  return (valueCount + amountCount) / scale + 0;
 };
 
 /**
  * The goal's number once `amount` is added. Steps down stop at the low end
  * of the goal, its start, or its target when it counts down, however fast
  * they come: a count doesn't go below nothing, nor a debt below paid off.
- * Steps up may go past the target, as buying one more than needed does.
+ * Steps up may go past the target, as buying one more than needed does, but
+ * not as far as a number no reader of the map takes ([readNumber]): the
+ * goal would lose its number, so it stays where it is.
  */
 export const stepGoal = (goal: Goal, amount: number): number => {
   const stepped = addAmount(goal.current, amount);
 
   if (amount >= 0) {
-    return stepped;
+    return readNumber(stepped) === null ? goal.current : stepped;
   }
 
   return Math.max(Math.min(goal.start, goal.target ?? goal.start, goal.current), stepped);

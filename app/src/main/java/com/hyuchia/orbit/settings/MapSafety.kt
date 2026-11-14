@@ -1,6 +1,5 @@
 package com.hyuchia.orbit.settings
 
-import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
@@ -22,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -35,23 +35,14 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
-import com.hyuchia.orbit.data.Importer
 import com.hyuchia.orbit.data.MapFileTypes
-import com.hyuchia.orbit.data.RefusedZipException
 import com.hyuchia.orbit.data.TRASH_DAYS
 import com.hyuchia.orbit.privacy.conceals
-import com.hyuchia.orbit.privacy.mentionedAlreadyHere
-import com.hyuchia.orbit.privacy.mentionedFilledIn
 import com.hyuchia.orbit.privacy.rememberUnlockedForEveryMap
 import com.hyuchia.orbit.theme.LocalAppSettings
-import com.hyuchia.orbit.ui.systemReason
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.IOException
 import java.time.LocalDate
-import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Keeping maps safe: the trash, and every map in one zip to keep anywhere
@@ -68,9 +59,10 @@ internal fun MapSafety(onTrash: () -> Unit, snackbars: SnackbarHostState) {
     val maps = context.container.maps
     val backups = context.container.backups
     val words = context.container.words
-    // While private maps hide, nothing here counts them: not the trash, nor what's exported or already here.
+    val fileImporter = context.container.importer
+    val privateMaps = context.container.privateMaps
+    // While private maps hide, nothing here counts them: not the trash, nor what a backup came to, worded as it's said.
     val privacy by context.container.privateMaps.view.collectAsStateWithLifecycle()
-    val concealing = privacy.conceals(LocalAppSettings.current.hideLockedPrivateMaps)
     val allTrash by maps.trash.collectAsStateWithLifecycle()
     val trash = shownTrash(allTrash, privacy, LocalAppSettings.current.hideLockedPrivateMaps)
     val writable by maps.writable.collectAsStateWithLifecycle()
@@ -84,11 +76,13 @@ internal fun MapSafety(onTrash: () -> Unit, snackbars: SnackbarHostState) {
         }
     }
 
-    // What a backup came to, said once: as it ends, or as Settings opens again after it.
+    // What a backup came to, said once: as it ends, or as Settings opens again after it, worded as private maps are then.
+    val hiding by rememberUpdatedState(LocalAppSettings.current.hideLockedPrivateMaps)
+
     LaunchedEffect(backups) {
         backups.outcome.filterNotNull().collect { outcome ->
             backups.said(outcome)
-            say(outcome.said, outcome.problem)
+            say(outcome.said(context.container.privateMaps.view.value.conceals(hiding)), outcome.problem)
         }
     }
 
@@ -100,25 +94,10 @@ internal fun MapSafety(onTrash: () -> Unit, snackbars: SnackbarHostState) {
         }
 
         backups.start(MapBackups.Work.Exporting) {
-            try {
-                val count = application.contentResolver.openOutputStream(uri, "wt")?.use { maps.exportAll(it) } ?: throw IOException()
-                MapBackups.Outcome(
-                    if (concealing) resources.getString(R.string.private_exported_every_map) else resources.getQuantityString(R.plurals.settings_exported_maps, count, count),
-                    problem = false,
-                )
-            } catch (failed: IOException) {
-                // Half a backup isn't one: the file goes, and what's said is that it couldn't be written.
-                runCatching { DocumentsContract.deleteDocument(application.contentResolver, uri) }
-                MapBackups.Outcome(resources.getString(R.string.settings_could_not_write_file), problem = true)
-            } catch (failed: SecurityException) {
-                MapBackups.Outcome(resources.getString(R.string.settings_not_allowed_to_write), problem = true)
-            } catch (stopped: CancellationException) {
-                throw stopped
-            } catch (failed: RuntimeException) {
-                // Whatever else the app that keeps the file throws back: that file goes too.
-                runCatching { DocumentsContract.deleteDocument(application.contentResolver, uri) }
-                MapBackups.Outcome(resources.getString(R.string.settings_could_not_write_file), problem = true)
-            }
+            // Half a backup isn't one: the file goes, and what's said is why. A file Orbit couldn't open is left as it was, and so is
+            // one it never opens because a map's file can't be read.
+            val exported = exportInto(application.contentResolver, uri, check = { maps.checkExportAll() }) { maps.exportAll(it) }
+            exportOutcome(exported, maps::summary, resources)
         }
     }
 
@@ -128,44 +107,16 @@ internal fun MapSafety(onTrash: () -> Unit, snackbars: SnackbarHostState) {
         }
 
         backups.start(MapBackups.Work.Importing) {
-            try {
-                val imported = withContext(Dispatchers.IO) { application.contentResolver.openInputStream(uri)?.use { maps.importAll(it) } } ?: throw IOException()
-                val alreadyHere = mentionedAlreadyHere(imported.alreadyHere, imported.privateAlreadyHere, concealing)
-
-                val (said, problem) = when {
-                    imported.added == 0 && imported.alreadyHere == 0 -> resources.getString(R.string.settings_no_maps_in_file) to true
-                    imported.added == 0 -> resources.getString(R.string.settings_every_map_in_file_already_here) to false
-                    alreadyHere == 0 -> resources.getQuantityString(R.plurals.common_added_maps, imported.added, imported.added) to false
-                    alreadyHere == 1 ->
-                        resources.getQuantityString(R.plurals.common_added_maps_with_one_already_here, imported.added, imported.added) to false
-                    else ->
-                        resources.getQuantityString(R.plurals.common_added_maps_with_several_already_here, imported.added, imported.added, alreadyHere) to false
-                }
-
-                // Files the maps here were missing, the zip's folders without a map and files of kinds Orbit doesn't know are said after what came in.
-                val filledIn = mentionedFilledIn(imported.filledIn, imported.privateFilledIn, concealing)
-                MapBackups.Outcome((listOf(said) + Importer.zipNotes(filledIn, imported.skipped, imported.leftOut, words)).joinToString(" "), problem)
-            } catch (refused: RefusedZipException) {
-                MapBackups.Outcome(refused.message.orEmpty(), problem = true)
-            } catch (failed: IOException) {
-                // What Android or the zip says went wrong is in English: another language's sentence goes without it.
-                val reason = resources.systemReason(failed)
-
-                val problem = when {
-                    failed.message == null -> resources.getString(R.string.settings_could_not_read_file_not_zip)
-                    reason != null -> resources.getString(R.string.settings_could_not_read_file, reason)
-                    else -> resources.getString(R.string.data_file_unreadable)
-                }
-
-                MapBackups.Outcome(problem, problem = true)
-            } catch (failed: SecurityException) {
-                MapBackups.Outcome(resources.getString(R.string.common_not_allowed_to_read_that_file), problem = true)
-            } catch (stopped: CancellationException) {
-                throw stopped
-            } catch (failed: RuntimeException) {
-                // Whatever else the app that gave it throws back, or a zip whose names aren't text.
-                MapBackups.Outcome(resources.getString(R.string.data_file_unreadable), problem = true)
-            }
+            // Maps from other apps come in as Open a file brings them; anything else is read as a zip of every map, a locked
+            // private map found by its identity alone, so a zip of text someone guessed tells nothing of it.
+            importInto(
+                application.contentResolver,
+                uri,
+                words,
+                resources,
+                fromOtherApp = { fileImporter.importFromOtherAppFile(uri, application.contentResolver) },
+                importAll = { input -> maps.importAll(input, locked = privateMaps::hides) },
+            )
         }
     }
 

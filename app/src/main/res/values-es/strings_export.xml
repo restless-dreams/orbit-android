@@ -21,7 +21,7 @@
     <string name="export_yaml_description">El mapa como datos, para apps y scripts</string>
     <string name="export_opml_description">El esquema, para otras apps de esquemas y mapas mentales</string>
     <string name="export_zip">Archivo zip</string>
-    <string name="export_zip_description">El markdown con las imágenes, los videos y los audios que tiene</string>
+    <string name="export_zip_description">El markdown con las imágenes, los videos, los audios y los archivos que tiene</string>
 
     <!-- Cada forma de exportar como la nombra una oración, tras Guardar, Compartir o Copiar: “Guardar la página web”. -->
     <string name="export_web_page_named">la página web</string>
@@ -43,6 +43,11 @@
     <string name="export_copied">Copiado</string>
 
     <string name="export_print_failed">No se pudo preparar el mapa para imprimir</string>
+    <plurals name="export_print_without_pictures">
+        <item quantity="one">No se pudo cargar %d imagen, así que no aparece en la impresión</item>
+        <item quantity="many">No se pudieron cargar %d imágenes, así que no aparecen en la impresión</item>
+        <item quantity="other">No se pudieron cargar %d imágenes, así que no aparecen en la impresión</item>
+    </plurals>
 
     <string name="export_could_not_make">Orbit no pudo crear este archivo. Vuelve a intentarlo en un momento.</string>
     <string name="export_no_room">Orbit no pudo crear este archivo. ¿Está lleno el almacenamiento de este dispositivo?</string>

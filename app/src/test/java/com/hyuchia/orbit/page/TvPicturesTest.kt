@@ -1,6 +1,8 @@
 package com.hyuchia.orbit.page
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.hyuchia.orbit.data.chosenAsTheyAreIn
+import com.hyuchia.orbit.data.writeAtomically
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -53,5 +55,33 @@ class TvPicturesTest {
         val sent = inlinePictures(markdown, folder, maxSide = 1280, most = 1024 * 1024)
         assertTrue(sent, sent.contains("![Loop](media/loop.gif)"))
         assertEquals(1, pictures(sent))
+    }
+
+    @Test
+    fun aTvGetsAPictureChosenToGoAsItIsOnlyWhileItsThatVeryFile() {
+        // A picture of no kind Orbit knows, which can't go clean: the presenter chose to show it as it is.
+        val beach = File(media, "beach.png").apply { writeText("a picture as it is, with where it was taken") }
+        val markdown = "# Trip\n![Beach](media/beach.png)\n"
+        val answers = chosenAsTheyAreIn(folder, "beach.png")
+        assertEquals(0, pictures(inlinePictures(markdown, folder, maxSide = 1280)))
+        assertEquals(1, pictures(inlinePictures(markdown, folder, maxSide = 1280, asTheyAre = answers)))
+
+        // Another picture in its place under its name: the TV can't be asked, so it stays on the phone.
+        writeAtomically(beach, "another picture, with where it was taken")
+        val sent = inlinePictures(markdown, folder, maxSide = 1280, asTheyAre = answers)
+        assertEquals(0, pictures(sent))
+        assertTrue(sent, sent.contains("![Beach](media/beach.png)"))
+    }
+
+    @Test
+    fun aTvNeverGetsAPictureTheMapNamesOnlyInCode() {
+        File(media, "secret.png").writeBytes(picture())
+        File(media, "beach.png").writeBytes(picture())
+        // A note shows the first as words, as it does a title's code: only the second is a picture on the map.
+        val markdown = "# Trip\n## Notes\nThe file is `![](media/secret.png)` here.\n## Beach\n![Beach](media/beach.png)\n"
+
+        val sent = inlinePictures(markdown, folder, maxSide = 1280)
+        assertEquals(1, pictures(sent))
+        assertTrue(sent, sent.contains("`![](media/secret.png)`"))
     }
 }

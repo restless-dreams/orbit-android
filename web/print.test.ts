@@ -3,7 +3,8 @@ import { materialTheme, parseOrbit, PRINT_THEMES, themeTokens } from '@restless-
 import type { OrbitRendererTheme } from '@restless-dreams/orbit';
 import type { AppTheme } from './look';
 import { goalRing, knownStyle, progressRing } from './look';
-import { lightTheme, printColors, printNodeTypes, printOptions, ringLine } from './print';
+import { pageAt } from './page-for-tests';
+import { lightTheme, printColors, printNodeTypes, printOptions, ringLine, withoutPicturesLeftOut } from './print';
 
 const SEED = '#4F5B92';
 const LIGHT: AppTheme = { dark: false, seed: SEED, tokens: { surface: '#FBF8FF', text: '#1B1B21', 'chip-background': '#DEE1F9' } };
@@ -78,5 +79,61 @@ describe('printColors', () => {
     // A map in its own dark style prints in its light counterpart, chips and links included.
     const counterpart = themeTokens(PRINT_THEMES.night);
     expect(printColors('night')).toEqual({ '--orbit-print-chip-background': counterpart['chip-background'], '--orbit-print-link-text': counterpart['link-text'] });
+  });
+});
+
+describe('withoutPicturesLeftOut', () => {
+  test('takes out the pictures left out of the page on purpose, as the map leaves them off its planets', () => {
+    // A layout for paper as Orbit lays it out, with the map's pictures where the app put them: inside the page (a data:
+    // URL), kept on the phone (still in the map's folder, which names nothing on the page's host) or on the web.
+    const layout = document.createElement('div');
+    layout.innerHTML = [
+      '<figure class="orbit-print__media"><img class="orbit-print__image" src="data:image/png;base64,iVBORw0KGgo=" alt=""><figcaption>The tower</figcaption></figure>',
+      '<figure class="orbit-print__media"><img class="orbit-print__image" src="media/street.heic" alt="The street"><figcaption>The street</figcaption></figure>',
+      '<figure class="orbit-print__media orbit-print__media--video"><img class="orbit-print__image" src="media/tram.jpg" alt=""><figcaption>media/tram.mp4</figcaption></figure>',
+      '<div class="orbit-print__note"><p>By the river <img src="./media/river.jpg" alt="The river"> at dusk.</p></div>',
+      '<figure class="orbit-print__media"><img class="orbit-print__image" src="https://example.com/tram.jpg" alt=""><figcaption>Tram 28</figcaption></figure>',
+    ].join('');
+
+    withoutPicturesLeftOut(layout);
+
+    expect(Array.from(layout.querySelectorAll('img')).map((image) => image.getAttribute('src'))).toEqual(['data:image/png;base64,iVBORw0KGgo=', 'https://example.com/tram.jpg']);
+    // An idea's picture goes with its caption; a video keeps its name without its poster, and a note its words.
+    expect(layout.textContent).not.toContain('The street');
+    expect(layout.querySelector('.orbit-print__media--video')?.textContent).toBe('media/tram.mp4');
+    expect(layout.querySelector('.orbit-print__note')?.textContent).toBe('By the river  at dusk.');
+    expect(layout.textContent).toContain('The tower');
+    expect(layout.textContent).toContain('Tram 28');
+  });
+
+  test('keeps the pictures inside a page saved and opened from its file, which has no origin of its own in Firefox', () => {
+    // A page opened from its file has the origin `null` there, as every data: URL has, and its map's folder is on no host.
+    pageAt('file:///storage/emulated/0/Download/Trip.html');
+
+    try {
+      expect(location.origin).toBe('null');
+      const layout = document.createElement('div');
+      layout.innerHTML = [
+        '<figure class="orbit-print__media"><img class="orbit-print__image" src="data:image/png;base64,iVBORw0KGgo=" alt=""><figcaption>The tower</figcaption></figure>',
+        '<div class="orbit-print__note"><p>By the river <img src="data:image/jpeg;base64,/9j/4AAQ" alt="The river"> at dusk.</p></div>',
+        '<figure class="orbit-print__media"><img class="orbit-print__image" src="media/street.heic" alt="The street"><figcaption>The street</figcaption></figure>',
+        '<figure class="orbit-print__media"><img class="orbit-print__image" src="https://example.com/tram.jpg" alt=""><figcaption>Tram 28</figcaption></figure>',
+        // Another file beside the page, outside the map's folder: not one the map left out.
+        '<figure class="orbit-print__media"><img class="orbit-print__image" src="cover.png" alt=""><figcaption>The cover</figcaption></figure>',
+      ].join('');
+
+      withoutPicturesLeftOut(layout);
+
+      expect(Array.from(layout.querySelectorAll('img')).map((image) => image.getAttribute('src'))).toEqual([
+        'data:image/png;base64,iVBORw0KGgo=',
+        'data:image/jpeg;base64,/9j/4AAQ',
+        'https://example.com/tram.jpg',
+        'cover.png',
+      ]);
+      expect(layout.textContent).toContain('The tower');
+      expect(layout.textContent).not.toContain('The street');
+    } finally {
+      pageAt('http://localhost');
+    }
   });
 });

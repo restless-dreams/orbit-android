@@ -123,6 +123,12 @@ const SHOW: AudienceCommand = {
 
 const waitingSays = (): string => document.querySelector('.audience__waiting')?.textContent ?? '';
 
+/** What the page says over the map about the connection, while it says anything: the waiting screen is under the map. */
+const statusSays = (): string => {
+  const status = document.querySelector<HTMLElement>('.audience__status');
+  return status && !status.hidden ? status.textContent ?? '' : '';
+};
+
 const showing = (): boolean => document.body.classList.contains('audience--showing');
 
 const caption = (): string => document.querySelector('.audience__title')?.textContent ?? '';
@@ -162,8 +168,12 @@ describe('a browser in the room', () => {
 
   test('says it\'s looking for the phone while the connection is down, and waits for the presenter once it\'s back', async () => {
     const stream = await join();
+    expect(statusSays()).toBe('');
     stream.drop();
     expect(waitingSays()).toBe(SPANISH.looking);
+    // The map stays on screen, over the waiting screen: the page says it over the map.
+    expect(showing()).toBe(true);
+    expect(statusSays()).toBe(SPANISH.looking);
 
     // The browser tries the same stream again by itself: no new one, and nothing asked of the phone.
     clock.advance(30_000);
@@ -172,6 +182,7 @@ describe('a browser in the room', () => {
 
     stream.open();
     expect(waitingSays()).toBe(SPANISH.waiting);
+    expect(statusSays()).toBe('');
     // What was on screen stayed while the phone was away.
     expect(caption()).toBe('Belém');
   });
@@ -210,6 +221,7 @@ describe('a browser in the room', () => {
     refused.refuse();
     await eventually(() => clock.waiting === 1);
     expect(waitingSays()).toBe(SPANISH.looking);
+    expect(statusSays()).toBe(SPANISH.looking);
     expect(asked.length).toBe(1);
 
     clock.advance(10_000);
@@ -225,6 +237,7 @@ describe('a browser in the room', () => {
     expect(latest()).not.toBe(refused);
     await catchUp(latest());
     expect(waitingSays()).toBe(SPANISH.waiting);
+    expect(statusSays()).toBe('');
   });
 
   test('stops at once when the presenter removes it, says so, and asks nothing more', async () => {
@@ -247,6 +260,8 @@ describe('a browser in the room', () => {
       await eventually(() => waitingSays() === SPANISH[state]);
 
       expect(showing()).toBe(false);
+      // Said in the middle of the screen, where the map was: nothing over it says it's still looking.
+      expect(statusSays()).toBe('');
       clock.advance(60_000);
       expect(asked).toEqual(['/314159/status']);
       expect(latest()).toBe(refused);

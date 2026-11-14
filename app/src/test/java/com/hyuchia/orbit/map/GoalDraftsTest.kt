@@ -42,6 +42,13 @@ class GoalDraftsTest {
             node = node.copy(attrs = JsonObject((node.attrs.orEmpty() + made).filterValues { it !is JsonNull }))
         }
 
+        /** A change to the idea by its id, as the editor sends it: one to an id the map no longer has changes nothing. */
+        fun change(id: String, made: Map<String, JsonElement>) {
+            if (id == node.id) {
+                change(made)
+            }
+        }
+
         val goal: Goal get() = Goal.read(node.attrs)
     }
 
@@ -58,7 +65,7 @@ class GoalDraftsTest {
     fun `a number typed a moment before the goal counts another way is what it turns around from`() {
         val idea = goal(GOAL_TARGET to 3000, GOAL_CURRENT to 1250, GOAL_UNIT to "USD")
         val drafts = FieldDrafts()
-        compose.setContent { OrbitTheme(dark = false) { GoalSection(idea.node, Rollup(), drafts, idea::change) } }
+        compose.setContent { OrbitTheme(dark = false) { GoalSection(idea.node, Rollup(), drafts, opened = 1, onChange = idea::change) } }
         compose.waitForIdle()
         compose.mainClock.autoAdvance = false
 
@@ -78,7 +85,7 @@ class GoalDraftsTest {
     fun `a word typed a moment before counting turns into money doesn't take the money back`() {
         val idea = goal(GOAL_TARGET to 10, GOAL_CURRENT to 3, GOAL_UNIT to "apples")
         val drafts = FieldDrafts()
-        compose.setContent { OrbitTheme(dark = false) { GoalSection(idea.node, Rollup(), drafts, idea::change) } }
+        compose.setContent { OrbitTheme(dark = false) { GoalSection(idea.node, Rollup(), drafts, opened = 1, onChange = idea::change) } }
         compose.waitForIdle()
         compose.mainClock.autoAdvance = false
 
@@ -100,7 +107,7 @@ class GoalDraftsTest {
         compose.setContent {
             OrbitTheme(dark = false) {
                 if (isGoal) {
-                    GoalSection(idea.node, Rollup(), drafts, idea::change)
+                    GoalSection(idea.node, Rollup(), drafts, opened = 1, onChange = idea::change)
                 }
             }
         }
@@ -117,5 +124,73 @@ class GoalDraftsTest {
 
         assertEquals(Goal.removed + ("type" to JsonPrimitive("milestone")), idea.changes.last())
         assertFalse(idea.node.attrs.orEmpty().keys.any { it in GOAL_ATTRIBUTES })
+    }
+
+    @Test
+    fun `a number typed a moment before the idea's new name gives it a new id saves on it, and stays in its field`() {
+        val idea = goal(GOAL_TARGET to 3000, GOAL_CURRENT to 1250, GOAL_UNIT to "USD")
+        val drafts = FieldDrafts()
+
+        compose.setContent {
+            OrbitTheme(dark = false) {
+                val node = idea.node
+                GoalSection(node, Rollup(), drafts, opened = 1) { changes -> idea.change(node.id, changes) }
+            }
+        }
+
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithText("Target").performTextReplacement("4000")
+
+        // The name typed in the editor a moment before is saved, and the page says it gave the idea a new id.
+        idea.node = idea.node.copy(id = "rainy-day-savings", text = "Rainy day savings")
+        frames()
+        compose.mainClock.advanceTimeBy(701)
+        frames()
+
+        assertEquals(0, BigDecimal(4000).compareTo(idea.goal.target))
+        compose.onNodeWithText("4000").assertExists()
+    }
+
+    @Test
+    fun `a pristine number doesn't save its rounded display after the typing wait`() {
+        val commits = mutableListOf<BigDecimal?>()
+        compose.mainClock.autoAdvance = false
+
+        compose.setContent {
+            OrbitTheme(dark = false) {
+                NumberField("target", BigDecimal("0.123456789"), "Target", commits::add)
+            }
+        }
+
+        frames()
+
+        compose.mainClock.advanceTimeBy(701)
+        frames()
+
+        assertEquals(emptyList<BigDecimal?>(), commits)
+    }
+
+    @Test
+    fun `a pristine number doesn't save its rounded display as it leaves the screen`() {
+        val commits = mutableListOf<BigDecimal?>()
+        val showing = mutableStateOf(true)
+
+        compose.setContent {
+            OrbitTheme(dark = false) {
+                if (showing.value) {
+                    NumberField("target", BigDecimal("0.123456789"), "Target", commits::add)
+                }
+            }
+        }
+
+        compose.waitForIdle()
+        assertEquals(emptyList<BigDecimal?>(), commits)
+
+        compose.runOnIdle { showing.value = false }
+        compose.waitForIdle()
+        compose.onNodeWithText("Target").assertDoesNotExist()
+
+        assertEquals(emptyList<BigDecimal?>(), commits)
     }
 }

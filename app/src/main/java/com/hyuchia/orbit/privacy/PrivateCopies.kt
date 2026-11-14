@@ -1,6 +1,7 @@
 package com.hyuchia.orbit.privacy
 
 import com.hyuchia.orbit.ui.forgetExport
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -12,14 +13,27 @@ import java.io.File
  * opens in one: each is deleted as private maps lock (`newlyLocked`), so
  * nothing of a locked map stays where another app can read it. A copy's
  * folder is marked as a private map's, so one Orbit stopped before it was
- * locked goes as Orbit starts again, locked, too.
+ * locked goes as Orbit starts again, locked, too. So does every copy a
+ * presentation's browsers were served of a file as it is (`servedAsTheyAre`),
+ * which no presentation outlives.
  */
-class PrivateCopies(private val scope: CoroutineScope, newlyLocked: Flow<Unit>, private val exports: File) {
+class PrivateCopies(
+    private val scope: CoroutineScope,
+    newlyLocked: Flow<Unit>,
+    private val exports: File,
+
+    /** The copies of files as they are a presentation's browsers were served, if Orbit stopped before it ended. */
+    private val servedAsTheyAre: File? = null,
+
+    /** Where copies are deleted: off the main thread, or a test's own. */
+    private val io: CoroutineDispatcher = Dispatchers.IO,
+) {
     private val kept = mutableSetOf<File>()
 
     init {
-        scope.launch(Dispatchers.IO) {
+        scope.launch(io) {
             exports.listFiles().orEmpty().filter { File(it, MARK).isFile }.forEach { it.deleteRecursively() }
+            servedAsTheyAre?.deleteRecursively()
         }
 
         scope.launch {
@@ -41,7 +55,7 @@ class PrivateCopies(private val scope: CoroutineScope, newlyLocked: Flow<Unit>, 
         val copies = synchronized(kept) { kept.toList().also { kept.clear() } }
 
         if (copies.isNotEmpty()) {
-            scope.launch(Dispatchers.IO) { copies.forEach(::forgetExport) }
+            scope.launch(io) { copies.forEach(::forgetExport) }
         }
     }
 

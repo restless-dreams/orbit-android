@@ -204,6 +204,7 @@ fun PrivateMapGate(id: String, onBack: () -> Unit, content: @Composable () -> Un
 
     PrivateOnScreen(private && !locked)
     val focus = LocalFocusManager.current
+    val windows = remember(id) { WindowsOverMap() }
 
     // Locked while open: whatever had the keyboard's focus on the map lets it go.
     LaunchedEffect(locked) {
@@ -217,32 +218,60 @@ fun PrivateMapGate(id: String, onBack: () -> Unit, content: @Composable () -> Un
             // Under the lock's cover, nothing of the map reaches screen readers or other accessibility services, and
             // the keyboard's focus doesn't go into it.
             Box(if (locked) Modifier.clearAndSetSemantics {}.focusProperties { onEnter = { cancelFocusChange() } }.focusGroup() else Modifier) {
-                CompositionLocalProvider(LocalMapLocked provides locked) {
+                CompositionLocalProvider(LocalMapLocked provides locked, LocalWindowsOverMap provides windows) {
                     content()
                 }
             }
         }
 
         AnimatedVisibility(locked, enter = EnterTransition.None, exit = fadeOut(tween(FADING_MILLISECONDS, delayMillis = OPENING_MILLISECONDS.toInt()))) {
-            // Over the map in its own window, the first frame back already shows the lock: the window above follows,
-            // and asks. Locked from Orbit's own button, this is the only cover, and asks once it's tapped.
+            // Over the map in its own window, the first frame back already shows the lock: the window above follows.
             PrivateMapCover(onBack, open = !locked, ask = !shown, cover = cover, look = look)
         }
 
-        // Locked while Orbit was away, the sheets, menus and pictures open over the map are covered too.
+        // The sheets, dialogs and pictures open over the map are covered too, however it locked: a phone's sheet, under the
+        // keyboard's Ctrl+L, as much as one left open while Orbit was away. With none open, the lock in the map's place is
+        // enough, and a tablet's list of maps stays beside it.
         if (shown) {
-            LockedWindow(locked && view.lockedAway, onBack, cover, look)
+            val window = lockedWindow(locked, view.lockedAway, windowsOpen = windows.open > 0)
+            LockedWindow(window != LockWindow.None, ask = window == LockWindow.Asking, onBack, cover, look)
         }
     }
+}
+
+/** The window of its own a map that was open shows as it locks, over its sheets, dialogs and pictures. */
+internal enum class LockWindow {
+    /** None: the map's open, or its lock in its place is enough, with no window over it. */
+    None,
+
+    /** Locked from Orbit's own lock, the menu's or Ctrl+L, with a window over the map: it asks for the screen lock once it's tapped. */
+    Waiting,
+
+    /** Locked while Orbit was away, or the screen was off: it asks as Orbit comes back. */
+    Asking,
+}
+
+/**
+ * The window a map that was open shows, `locked` or not: locked while Orbit
+ * was away (`lockedAway`), always, as anything may have been left open over
+ * it; from Orbit's own lock, only while a window of its own is open over it
+ * (`windowsOpen`, [WindowsOverMap]), so a tablet keeps its list of maps.
+ */
+internal fun lockedWindow(locked: Boolean, lockedAway: Boolean, windowsOpen: Boolean): LockWindow = when {
+    !locked -> LockWindow.None
+    lockedAway -> LockWindow.Asking
+    windowsOpen -> LockWindow.Waiting
+    else -> LockWindow.None
 }
 
 /**
  * Over everything the app shows while a map that was open locks: the sheets,
  * menus and pictures over the map are windows of their own, which this one
- * covers. It fades as the map unlocks.
+ * covers. It asks for the screen lock as it shows when it's to `ask`, and
+ * otherwise once it's tapped. It fades as the map unlocks.
  */
 @Composable
-private fun LockedWindow(locked: Boolean, onBack: () -> Unit, cover: LockedCover?, look: LockedLook) {
+private fun LockedWindow(locked: Boolean, ask: Boolean, onBack: () -> Unit, cover: LockedCover?, look: LockedLook) {
     var showing by remember { mutableStateOf(locked) }
     val shown = remember { Animatable(if (locked) 1f else 0f) }
 
@@ -273,7 +302,7 @@ private fun LockedWindow(locked: Boolean, onBack: () -> Unit, cover: LockedCover
         }
 
         Box(Modifier.fillMaxSize().graphicsLayer { alpha = shown.value }) {
-            PrivateMapCover(onBack, open = !locked, ask = true, cover = cover, look = look)
+            PrivateMapCover(onBack, open = !locked, ask = ask, cover = cover, look = look)
         }
     }
 }

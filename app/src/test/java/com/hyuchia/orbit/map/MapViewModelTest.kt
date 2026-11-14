@@ -6,7 +6,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.hyuchia.orbit.FileWords
+import com.hyuchia.orbit.PendingShares
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.SharedFiles
 import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.data.FolderSync
 import com.hyuchia.orbit.data.Importer
@@ -17,13 +19,19 @@ import com.hyuchia.orbit.data.MapText
 import com.hyuchia.orbit.data.SettingsRepository
 import com.hyuchia.orbit.data.StarterMap
 import com.hyuchia.orbit.data.StarterMaps
+import com.hyuchia.orbit.data.TRASHED_HISTORY
 import com.hyuchia.orbit.data.TrashedMap
 import com.hyuchia.orbit.data.VersionReason
 import com.hyuchia.orbit.data.WriteResult
 import com.hyuchia.orbit.data.settingsStoreIn
 import com.hyuchia.orbit.media.SoundPlayback
+import com.hyuchia.orbit.nearby.BrowserPresenting
+import com.hyuchia.orbit.nearby.JoiningOptions
+import com.hyuchia.orbit.nearby.anyone
 import com.hyuchia.orbit.page.AppTheme
+import com.hyuchia.orbit.page.AudienceCommand
 import com.hyuchia.orbit.page.CheckedMap
+import com.hyuchia.orbit.page.CopiedIdea
 import com.hyuchia.orbit.page.EditedMap
 import com.hyuchia.orbit.page.MapCommand
 import com.hyuchia.orbit.page.MapInsets
@@ -37,7 +45,11 @@ import com.hyuchia.orbit.page.Media
 import com.hyuchia.orbit.page.PageException
 import com.hyuchia.orbit.page.PastedIdeas
 import com.hyuchia.orbit.page.Renamed
+import com.hyuchia.orbit.page.ViewMode
+import com.hyuchia.orbit.page.mapBaseUrl
 import com.hyuchia.orbit.page.protocolJson
+import com.hyuchia.orbit.present.Audience
+import com.hyuchia.orbit.present.ScreenTrouble
 import com.hyuchia.orbit.privacy.PrivateLock
 import com.hyuchia.orbit.reminders.IdeaToShow
 import com.hyuchia.orbit.sketch.InkSample
@@ -49,13 +61,16 @@ import com.hyuchia.orbit.sketch.SketchTouch
 import com.hyuchia.orbit.sketch.StrokeOutline
 import com.hyuchia.orbit.sketch.StrokePoint
 import com.hyuchia.orbit.sketch.TouchTool
+import com.hyuchia.orbit.study.AnswersUnsaved
 import com.hyuchia.orbit.study.StudyCard
+import com.hyuchia.orbit.study.StudyWrites
 import com.hyuchia.orbit.ui.NoteCheck
 import com.hyuchia.orbit.ui.TimeWords
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
@@ -67,6 +82,9 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.takeWhile
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -83,23 +101,33 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeFalse
 import org.junit.Before
 import org.junit.Test
 import java.io.File
+import java.net.Socket
 import java.nio.file.Files
 import java.util.Locale
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /** How long a test waits for the view model to do what it should, before it fails. */
 private const val WAIT_MILLISECONDS = 10_000L
 
 /** YAML, as the test page's conversions write it: the markdown with this in front. */
 private const val YAML = "yaml: "
+
+/** A map presented along its path, and the same map once its second idea has a new name, so a new id. */
+private const val TRIP = "# Trip\n## Old\n## Next\n"
+private const val RENAMED_TRIP = "# Trip\n## Renamed\n## Next\n"
 
 /**
  * The map's view model, made through its seam: real maps and settings on
@@ -120,13 +148,16 @@ class MapViewModelTest {
     /** A storage that's slow when the test says, to hold a write as it's made. */
     private val slow = SlowStorage()
 
-    private val maps = MapRepository(File(root, "maps"), File(root, "trash"), starters, words, clockTrusted = slow::clockTrusted)
+    /** Holds a paste's copy of pictures into a map while the test does something else meanwhile (see [pasteWhile]). */
+    private val copies = CopyGate()
+
+    private val maps = MapRepository(File(root, "maps"), File(root, "trash"), starters, words, room = { copies.room() }, clockTrusted = slow::clockTrusted)
     private val settings = SettingsRepository(settingsStoreIn(File(root, "settings.preferences_pb")))
 
     /** The main thread, as Android has one: the view model's work runs on it, one piece at a time. */
     private val main = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
 
-    private val app = TestApp(words)
+    private val app = TestApp(words, maps)
 
     /** The view models the test made: each one's work ends before the test does. */
     private val models = mutableListOf<MapViewModel>()
@@ -233,8 +264,13 @@ class MapViewModelTest {
     /** The view model's screen state, read on the main thread. */
     private suspend fun ui(opened: Opened): MapUi = withContext(Dispatchers.Main) { opened.model.ui.value }
 
-    /** What the screen hears, from now on, until `hearing` stops. */
-    private fun CoroutineScope.hear(opened: Opened, effects: MutableList<MapEvent>) = launch(Dispatchers.Main) { opened.model.effects.collect { effects += it } }
+    /**
+     * What the screen hears, from now on, until `hearing` stops. It's heard on
+     * the main thread and read on the test's, so `effects` is a list each read
+     * takes as it stands ([CopyOnWriteArrayList]): a plain one can throw as an
+     * effect comes in while `until` goes through it.
+     */
+    private fun CoroutineScope.hear(opened: Opened, effects: CopyOnWriteArrayList<MapEvent>) = launch(Dispatchers.Main) { opened.model.effects.collect { effects += it } }
 
     @Test
     fun `a map opened is drawn from its text, and is ready once its page says so`() = runBlocking {
@@ -280,6 +316,199 @@ class MapViewModelTest {
     }
 
     @Test
+    fun `a page given up on says nothing more to the screen, so its map stays hidden and nothing it saves is written`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Tokyo\n")
+        val opened = open(id, ready = false)
+
+        withContext(Dispatchers.Main) {
+            opened.page.say(MapMessage.DidNotLoad)
+            // The map ready after all, and an edit on it, from a page that no longer takes the screen's commands.
+            opened.page.say(ready)
+            opened.page.say(saved("# Trip to Japan\n\n- Tokyo\n- Kyoto\n", opened.load.revision))
+        }
+
+        assertEquals(PageProblem.DidNotLoad, opened.model.ui.value.pageProblem)
+        assertFalse(opened.model.ui.value.ready)
+        assertNull(opened.model.ui.value.map)
+        delay(500)
+        assertEquals("# Trip to Japan\n\n- Tokyo\n", maps.read(id))
+    }
+
+    @Test
+    fun `a page that stops during a presentation is loaded again presenting, at the idea on screen`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Tokyo\n- Kyoto\n")
+        val opened = open(id)
+
+        withContext(Dispatchers.Main) {
+            opened.model.startPresentation(seconds = 0, fromStart = true)
+            opened.model.step(1)
+        }
+
+        val current = ui(opened).presentation!!.current
+        withContext(Dispatchers.Main) { opened.page.say(MapMessage.Stopped) }
+        assertEquals(PageProblem.Stopped, ui(opened).pageProblem)
+        // The presentation goes on: the page's problem shows over it, with the way to load the map again.
+        assertNotNull(ui(opened).presentation)
+
+        withContext(Dispatchers.Main) { opened.model.reload() }
+
+        val again = app.pages.last()
+        assertTrue(again !== opened.page)
+
+        val sent = withTimeout(WAIT_MILLISECONDS) {
+            again.commands.receiveAsFlow().takeWhile { it != MapCommand.Focus(current) }.toList()
+        }
+
+        assertTrue(sent.toString(), sent.any { it is MapCommand.Load })
+        assertTrue(sent.toString(), MapCommand.Present(true) in sent)
+        assertTrue(sent.toString(), MapCommand.View(ViewMode.FOCUS) in sent)
+        assertEquals(current, ui(opened).presentation?.current)
+    }
+
+    /** The map a presentation follows, with its second idea called Old, or, once its name changed, Renamed: a new id. */
+    private fun trip(renamed: Boolean): MapState = MapState(
+        "Trip",
+        listOf(
+            MapNode("trip", "Trip", childCount = 2),
+            MapNode(if (renamed) "renamed" else "old", if (renamed) "Renamed" else "Old", parentId = "trip", depth = 1),
+            MapNode("next", "Next", parentId = "trip", depth = 1, index = 1),
+        ),
+        path = listOf("trip"),
+    )
+
+    /** Opens the trip along its path, Trip, Old, Next, and presents it from the start on `screen`. */
+    private suspend fun presentTrip(screen: Audience): Pair<String, Opened> {
+        maps.load()
+        val id = maps.add(TRIP)
+        maps.savePath(id, listOf("trip", "old", "next"))
+        val opened = open(id, ready = false)
+
+        withContext(Dispatchers.Main) {
+            opened.page.say(MapMessage.Ready(trip(renamed = false)))
+            opened.model.setAudience(screen)
+            opened.model.startPresentation(seconds = 0, fromStart = true)
+        }
+
+        assertEquals(listOf(TRIP), screen.shown())
+        return id to opened
+    }
+
+    @Test
+    fun `Load it again on the phone loads the second screen again too, when its page stopped with the map's`() = runBlocking {
+        val screen = TestScreen()
+        val (_, opened) = presentTrip(screen)
+        withContext(Dispatchers.Main) { opened.model.step(1) }
+
+        // Android stops the process the app's pages share: the map's and the second screen's go together.
+        withContext(Dispatchers.Main) {
+            screen.trouble.value = ScreenTrouble.Stopped
+            opened.page.say(MapMessage.Stopped)
+            opened.model.reload()
+        }
+
+        assertEquals(1, screen.loadedAgain)
+        assertNull(screen.trouble.value)
+        // Its new page gets the map, at the idea on screen.
+        assertEquals(listOf(TRIP, TRIP), screen.shown())
+        assertEquals(AudienceCommand.Step("old", 1, 3), screen.heard.last())
+
+        // A second screen that's well isn't loaded again with the map's page.
+        withContext(Dispatchers.Main) {
+            app.pages.last().say(MapMessage.Stopped)
+            opened.model.reload()
+        }
+
+        assertEquals(1, screen.loadedAgain)
+    }
+
+    @Test
+    fun `a save that crosses the presentation's start reaches the audience, and the presentation follows its new ids`() = runBlocking {
+        val screen = TestScreen()
+        val (_, opened) = presentTrip(screen)
+
+        // Old was renamed on the map as the presentation started: its save comes after.
+        withContext(Dispatchers.Main) {
+            opened.page.say(MapMessage.Saved(kind = "update", markdown = RENAMED_TRIP, state = trip(renamed = true), renamed = Renamed("old", "renamed"), revision = opened.load.revision))
+        }
+
+        assertEquals(listOf(TRIP, RENAMED_TRIP), screen.shown())
+        assertEquals(listOf("trip", "renamed", "next"), ui(opened).presentation?.order)
+        assertEquals(listOf("trip", "renamed", "next"), ui(opened).presentPath)
+
+        withContext(Dispatchers.Main) { opened.model.step(1) }
+        assertEquals(AudienceCommand.Step("renamed", 1, 3), screen.heard.last())
+        assertTrue(MapCommand.Focus("renamed") in sentSince(opened))
+    }
+
+    @Test
+    fun `a change from elsewhere during a presentation reaches the audience, and the presentation follows its new ids`() = runBlocking {
+        val screen = TestScreen()
+        val (id, opened) = presentTrip(screen)
+
+        // The folder brings a version where Old has a new name, as another device wrote it.
+        assertEquals(WriteResult.Written, maps.change(id, RENAMED_TRIP, base = TRIP, renamed = mapOf("old" to "renamed")))
+        val restored = withTimeout(WAIT_MILLISECONDS) { opened.page.commands.receiveAsFlow().filterIsInstance<MapCommand.Restore>().first() }
+        assertEquals(RENAMED_TRIP, restored.markdown)
+        // The page draws it, and says what the map is now.
+        withContext(Dispatchers.Main) { opened.page.say(MapMessage.State(trip(renamed = true))) }
+
+        assertEquals(listOf(TRIP, RENAMED_TRIP), screen.shown())
+        assertEquals(listOf("trip", "renamed", "next"), ui(opened).presentation?.order)
+
+        withContext(Dispatchers.Main) { opened.model.step(1) }
+        assertEquals(AudienceCommand.Step("renamed", 1, 3), screen.heard.last())
+    }
+
+    @Test
+    fun `an idea on screen renamed on another device is still the one presented, and a removed one gives way to the next step`() = runBlocking {
+        val screen = TestScreen()
+        val (id, opened) = presentTrip(screen)
+        withContext(Dispatchers.Main) { opened.model.step(1) }
+        assertEquals("old", ui(opened).presentation?.current)
+
+        // A laptop renames Old: the folder brings the new text, with no word of the rename.
+        assertEquals(WriteResult.Written, maps.change(id, RENAMED_TRIP, base = TRIP))
+        withTimeout(WAIT_MILLISECONDS) { opened.page.commands.receiveAsFlow().filterIsInstance<MapCommand.Restore>().first() }
+        withContext(Dispatchers.Main) { opened.page.say(MapMessage.State(trip(renamed = true))) }
+
+        assertEquals(listOf("trip", "renamed", "next"), ui(opened).presentation?.order)
+        assertEquals("renamed", ui(opened).presentation?.current)
+        assertEquals(listOf("trip", "renamed", "next"), ui(opened).presentPath)
+        assertEquals(listOf(AudienceCommand.Show(RENAMED_TRIP, AppTheme(dark = false, tokens = emptyMap()), mapBaseUrl(id), "renamed"), AudienceCommand.Step("renamed", 1, 3)), screen.heard.takeLast(2))
+        assertTrue(MapCommand.Focus("renamed") in sentSince(opened))
+
+        // Then it's removed there: the presentation goes on from the step in its place.
+        assertEquals(WriteResult.Written, maps.change(id, "# Trip\n## Next\n", base = RENAMED_TRIP))
+        withTimeout(WAIT_MILLISECONDS) { opened.page.commands.receiveAsFlow().filterIsInstance<MapCommand.Restore>().first() }
+        val shorter = trip(renamed = true).let { state -> state.copy(nodes = listOf(state.nodes[0].copy(childCount = 1), state.nodes[2].copy(index = 0))) }
+        withContext(Dispatchers.Main) { opened.page.say(MapMessage.State(shorter)) }
+
+        assertEquals(listOf("trip", "next"), ui(opened).presentation?.order)
+        assertEquals("next", ui(opened).presentation?.current)
+        assertEquals(AudienceCommand.Step("next", 1, 2), screen.heard.last())
+    }
+
+    @Test
+    fun `the presentation's room in browsers is the map's, not its screen's, and stops with the presentation`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Tokyo\n")
+        val opened = open(id)
+        withContext(Dispatchers.Main) { opened.model.startPresentation(seconds = 0) }
+
+        val room = BrowserPresenting({ name -> File("src/main/assets/map/$name").readText() }, words, maps.folder(id), app.applicationScope, JoiningOptions(), preferredPort = 0, policy = anyone, listenOn = { null })
+        withContext(Dispatchers.Main) { opened.model.browserRoom.start { room } }
+        assertSame(room, opened.model.browserRoom.presenting.value)
+        val port = room.port
+
+        withContext(Dispatchers.Main) { opened.model.stopPresentation() }
+
+        assertNull(opened.model.browserRoom.presenting.value)
+        assertTrue(runCatching { Socket("127.0.0.1", port).close() }.isFailure)
+    }
+
+    @Test
     fun `an edit the page saves is written to the map's file, and undo brings the map as it was back`() = runBlocking {
         maps.load()
         val id = maps.add("# Trip to Japan\n\n- Tokio\n")
@@ -304,7 +533,7 @@ class MapViewModelTest {
         maps.load()
         val id = maps.add("# Trip to Japan\n\n- Tokio\n")
         val opened = open(id)
-        val effects = mutableListOf<MapEvent>()
+        val effects = CopyOnWriteArrayList<MapEvent>()
         val hearing = launch(Dispatchers.Main) { opened.model.effects.collect { effects += it } }
 
         try {
@@ -314,6 +543,311 @@ class MapViewModelTest {
 
             assertEquals("# Trip to Japan\n\n- Tokio\n", maps.read(id))
             assertTrue(maps.versions(id).any { maps.readVersion(id, it.time) == "# Trip to Japan\n\n- Kyoto\n" })
+        } finally {
+            hearing.cancel()
+        }
+    }
+
+    @Test
+    fun `an idea typed on the map as a newer or unreadable version arrives from elsewhere goes into its history, never over the version`() = runBlocking {
+        maps.load()
+        val original = "# Trip\n- Tokio\n"
+        val newer = "---\nschemaVersion: 999\n---\n# Trip\n- Kyoto\n"
+        val unreadable = "---\ntheme: [night\n---\n# Trip\n- Kyoto\n"
+
+        // A new idea typed under the map's center, or an idea renamed, each as a version a newer Orbit wrote, or one Orbit
+        // can't read all of, arrives: the page saves what was typed on the map as it was before it draws the version.
+        val typings = listOf(
+            MapMessage.EditorOpen(parentId = "trip") to saved("# Trip\n- Tokio\n- Kyoto draft\n", null).copy(kind = "add", added = "kyoto-draft"),
+            MapMessage.EditorOpen(id = "tokio") to saved("# Trip\n- Tokyo draft\n", null).copy(kind = "update", renamed = Renamed("tokio", "tokyo-draft")),
+        )
+
+        for ((editing, typed) in typings) {
+            for ((incoming, lock) in listOf(newer to ReadOnly.Newer, unreadable to ReadOnly.Unreadable)) {
+                val case = "${typed.kind} as a version that's $lock arrives"
+                val id = maps.add(original)
+                val opened = open(id)
+                val effects = CopyOnWriteArrayList<MapEvent>()
+                val hearing = hear(opened, effects)
+
+                try {
+                    withContext(Dispatchers.Main) { opened.page.say(editing) }
+                    assertTrue(case, ui(opened).editing)
+
+                    assertEquals(case, WriteResult.Written, maps.change(id, incoming, base = original, reason = VersionReason.Elsewhere))
+                    val restore = withTimeout(WAIT_MILLISECONDS) { opened.page.commands.receiveAsFlow().filterIsInstance<MapCommand.Restore>().first() }
+                    assertEquals(case, incoming, restore.markdown)
+                    assertEquals(case, opened.load.revision + 1, restore.revision)
+
+                    withContext(Dispatchers.Main) {
+                        opened.page.say(typed.copy(revision = opened.load.revision))
+                        opened.page.say(MapMessage.EditorClose)
+                        opened.page.say(MapMessage.State(ready.state.copy(readOnly = lock.name.lowercase())))
+                    }
+
+                    until { withContext(Dispatchers.Main) { MapEvent.KeptInHistory in effects } }
+                    until { inHistory(id, typed.markdown) }
+                    assertEquals(case, incoming, maps.read(id))
+                    assertEquals(case, lock, ui(opened).readOnly)
+                    assertFalse(case, ui(opened).editing)
+                    assertEquals(case, incoming, withContext(Dispatchers.Main) { opened.model.currentMarkdown() })
+                    // The map before the change waits on undo's stack, but a map that can only be looked at offers no Undo.
+                    assertTrue(case, ui(opened).canUndo)
+                    assertFalse(case, ui(opened).undoable)
+                } finally {
+                    hearing.cancel()
+                    close(opened)
+                }
+            }
+        }
+    }
+
+    /** The commands sent from now on, up to the first `Restore`, which is the last of them. */
+    private suspend fun sentUntilRestore(opened: Opened): List<MapCommand> =
+        withTimeout(WAIT_MILLISECONDS) { opened.page.commands.receiveAsFlow().transformWhile { emit(it); it !is MapCommand.Restore }.toList() }
+
+    /**
+     * Opens a field on the map, as the page says it did, whose typing the page
+     * saves as `typed` when the app closes it, at the revision the screen is
+     * on (`revision`), then says it closed.
+     */
+    private suspend fun typing(opened: Opened, editing: MapMessage.EditorOpen, typed: MapMessage.Saved) {
+        opened.page.stopping = { save ->
+            if (save) {
+                opened.page.say(typed)
+            }
+
+            opened.page.say(MapMessage.EditorClose)
+            opened.page.stopping = null
+        }
+
+        withContext(Dispatchers.Main) { opened.page.say(editing) }
+        sentSince(opened)
+    }
+
+    @Test
+    fun `an idea typed on the map as it goes to the trash is in the history it took there, which restoring it brings back`() = runBlocking {
+        maps.load()
+        val original = "# Trip\n- Tokio\n"
+        val typed = "# Trip\n- Tokio\n- Kyoto\n"
+        val id = maps.add(original)
+        val opened = open(id)
+        val effects = CopyOnWriteArrayList<MapEvent>()
+        val hearing = hear(opened, effects)
+
+        try {
+            withContext(Dispatchers.Main) { opened.page.say(MapMessage.EditorOpen(parentId = "trip")) }
+
+            // Deleted from the list beside it, or by the folder, as a new idea is typed: the page is locked, and says the
+            // save of what was typed first, as it does.
+            assertNotNull(maps.delete(id))
+            assertEquals(MapCommand.Lock("deleted"), nextSent<MapCommand.Lock>(opened))
+
+            withContext(Dispatchers.Main) {
+                opened.page.say(saved(typed, opened.load.revision).copy(kind = "add", added = "kyoto"))
+                opened.page.say(MapMessage.EditorClose)
+                opened.page.say(MapMessage.State(ready.state.copy(readOnly = "deleted")))
+            }
+
+            until { withContext(Dispatchers.Main) { MapEvent.Snackbar(ShownText.Resource(R.string.map_change_kept_in_trash)) in effects } }
+
+            // Restored, the map is as it was, and its history holds what was typed.
+            assertEquals(id, maps.restore(maps.trash.value.single { it.id == id }))
+            assertEquals(original, maps.read(id))
+            assertTrue(inHistory(id, typed))
+        } finally {
+            hearing.cancel()
+        }
+    }
+
+    @Test
+    fun `an idea typed on the map as a newer Orbit takes the storage stays on the screen, unsaved, and is written once it can be`() = runBlocking {
+        maps.load()
+        val original = "# Trip\n- Tokio\n"
+        val typed = "# Trip\n- Tokyo\n"
+        val id = maps.add(original)
+        val opened = open(id)
+        val effects = CopyOnWriteArrayList<MapEvent>()
+        val hearing = hear(opened, effects)
+        val layout = File(root, "maps/.layout.json")
+        val before = layout.readText()
+
+        try {
+            withContext(Dispatchers.Main) { opened.page.say(MapMessage.EditorOpen(id = "tokio")) }
+
+            // The storage's layout as a newer Orbit left it, read as Orbit starts again: its maps are only shown now. The
+            // page is locked, and says the save of what was typed first.
+            layout.writeText("{ a newer Orbit's layout")
+            maps.load()
+            assertEquals(MapCommand.Lock("storage"), nextSent<MapCommand.Lock>(opened))
+
+            withContext(Dispatchers.Main) {
+                opened.page.say(saved(typed, opened.load.revision).copy(kind = "update", renamed = Renamed("tokio", "tokyo")))
+                opened.page.say(MapMessage.EditorClose)
+                opened.page.say(MapMessage.State(ready.state.copy(readOnly = "storage")))
+            }
+
+            // Not taken for text that would empty the map: it stays on the screen, which says it isn't saved yet.
+            until { ui(opened).unsaved }
+            assertEquals(typed, withContext(Dispatchers.Main) { opened.model.currentMarkdown() })
+            assertEquals(original, maps.read(id))
+            assertFalse(withContext(Dispatchers.Main) { MapEvent.Snackbar(ShownText.Resource(R.string.map_change_not_saved)) in effects })
+
+            // The storage Orbit's own again, tried again, it's written.
+            layout.writeText(before)
+            maps.load()
+            withContext(Dispatchers.Main) { opened.model.saveAgain() }
+            until { maps.read(id) == typed }
+        } finally {
+            hearing.cancel()
+            layout.writeText(before)
+        }
+    }
+
+    @Test
+    fun `an Undo as an idea is renamed on the map keeps the typing first, and takes it back, which Redo brings again`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip\n- Tokio\n")
+        val opened = open(id)
+        withContext(Dispatchers.Main) { opened.page.say(saved("# Trip\n- Tokyo\n", opened.load.revision)) }
+        until { maps.read(id) == "# Trip\n- Tokyo\n" }
+
+        // Tokyo renamed on the map, which the map Undo goes back to doesn't have: drawn with the field open, it would
+        // close it and keep nothing.
+        val typed = "# Trip\n- Tokyo Tower\n"
+        typing(opened, MapMessage.EditorOpen(id = "tokyo"), saved(typed, opened.load.revision).copy(kind = "update", renamed = Renamed("tokyo", "tokyo-tower")))
+        withContext(Dispatchers.Main) { opened.model.undo() }
+
+        // The field closes first, its typing saved, and Undo takes that back.
+        val sent = sentUntilRestore(opened)
+        assertEquals(sent.toString(), MapCommand.StopEditing(true), sent.first())
+        assertEquals("# Trip\n- Tokyo\n", (sent.last() as MapCommand.Restore).markdown)
+        until { maps.read(id) == "# Trip\n- Tokyo\n" }
+
+        withContext(Dispatchers.Main) { opened.model.redo() }
+        assertEquals(typed, nextSent<MapCommand.Restore>(opened).markdown)
+        until { maps.read(id) == typed }
+    }
+
+    @Test
+    fun `an Undo to text Orbit can't read all of, as an idea is typed on the map, keeps the typing first, and takes it back`() = runBlocking {
+        maps.load()
+        val original = "# Trip\n- Tokio\n"
+        val unreadable = "---\ntheme: [night\n---\n# Trip\n- Kyoto\n"
+        val fixed = "# Trip\n- Kyoto\n"
+        val id = maps.add(original)
+        val opened = open(id)
+
+        // Text Orbit can't read all of arrived from elsewhere, then text it can: Undo goes back to the first.
+        assertEquals(WriteResult.Written, maps.change(id, unreadable, base = original, reason = VersionReason.Elsewhere))
+        assertEquals(unreadable, nextSent<MapCommand.Restore>(opened).markdown)
+        assertEquals(WriteResult.Written, maps.change(id, fixed, base = unreadable, reason = VersionReason.Elsewhere))
+        val caughtUp = nextSent<MapCommand.Restore>(opened)
+        assertEquals(fixed, caughtUp.markdown)
+
+        // A new idea typed under the map's center: drawn with the field open, text that can't be changed would close
+        // it, and keep nothing.
+        val typed = "# Trip\n- Kyoto\n- Nara\n"
+        typing(opened, MapMessage.EditorOpen(parentId = "trip"), saved(typed, caughtUp.revision).copy(kind = "add", added = "nara"))
+        withContext(Dispatchers.Main) { opened.model.undo() }
+
+        // The typing is saved, and Undo takes that back first; the text Orbit can't read is the next step back.
+        val sent = sentUntilRestore(opened)
+        assertEquals(sent.toString(), MapCommand.StopEditing(true), sent.first())
+        assertEquals(fixed, (sent.last() as MapCommand.Restore).markdown)
+        until { maps.read(id) == fixed }
+
+        withContext(Dispatchers.Main) { opened.model.undo() }
+        assertEquals(unreadable, nextSent<MapCommand.Restore>(opened).markdown)
+
+        // Nothing typed is lost: Redo brings it back.
+        withContext(Dispatchers.Main) {
+            opened.model.redo()
+            opened.model.redo()
+        }
+
+        until { maps.read(id) == typed }
+    }
+
+    @Test
+    fun `a Redo as an idea is typed on the map keeps the typing as the map's latest change, with nothing left to redo`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip\n- Tokio\n")
+        val opened = open(id)
+        withContext(Dispatchers.Main) { opened.page.say(saved("# Trip\n- Tokio\n- Kyoto\n", opened.load.revision)) }
+        until { maps.read(id) == "# Trip\n- Tokio\n- Kyoto\n" }
+        withContext(Dispatchers.Main) { opened.model.undo() }
+        assertEquals("# Trip\n- Tokio\n", nextSent<MapCommand.Restore>(opened).markdown)
+        until { maps.read(id) == "# Trip\n- Tokio\n" }
+
+        // A new idea typed under the map's center, then Redo: the typing is a change of its own, made after the undo.
+        val typed = "# Trip\n- Tokio\n- Nara\n"
+        typing(opened, MapMessage.EditorOpen(parentId = "trip"), saved(typed, opened.load.revision).copy(kind = "add", added = "nara"))
+        withContext(Dispatchers.Main) { opened.model.redo() }
+
+        until { maps.read(id) == typed }
+        assertFalse(ui(opened).canRedo)
+        assertEquals(listOf(MapCommand.StopEditing(true)), sentSince(opened).filter { it is MapCommand.StopEditing || it is MapCommand.Restore })
+    }
+
+    @Test
+    fun `an Undo as an idea is typed on a page too busy to answer in time isn't made, and the typing it saves late stays the map's`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip\n- Tokio\n")
+        val opened = open(id)
+        withContext(Dispatchers.Main) { opened.page.say(saved("# Trip\n- Tokyo\n", opened.load.revision)) }
+        until { maps.read(id) == "# Trip\n- Tokyo\n" }
+
+        // Tokyo renamed on a page busy for longer than the app waits: it doesn't answer the check, and saves the typing
+        // only after, at the revision an undo keeps, so over it.
+        opened.page.checksHang = true
+        withContext(Dispatchers.Main) { opened.page.say(MapMessage.EditorOpen(id = "tokyo")) }
+        sentSince(opened)
+        withContext(Dispatchers.Main) { opened.model.undo() }
+        withTimeout(WAIT_MILLISECONDS) { opened.page.checksGivenUp.receive() }
+
+        val typed = "# Trip\n- Tokyo Tower\n"
+
+        withContext(Dispatchers.Main) {
+            opened.page.say(saved(typed, opened.load.revision).copy(kind = "update", renamed = Renamed("tokyo", "tokyo-tower")))
+            opened.page.say(MapMessage.EditorClose)
+        }
+
+        // No undo was drawn: the page, the screen and the file all have the typing, and Undo takes it back now.
+        until { maps.read(id) == typed }
+        assertEquals(listOf(MapCommand.StopEditing(true)), sentSince(opened).filter { it is MapCommand.StopEditing || it is MapCommand.Restore })
+        assertEquals(typed, withContext(Dispatchers.Main) { opened.model.currentMarkdown() })
+        opened.page.checksHang = false
+        withContext(Dispatchers.Main) { opened.model.undo() }
+        assertEquals("# Trip\n- Tokyo\n", nextSent<MapCommand.Restore>(opened).markdown)
+        until { maps.read(id) == "# Trip\n- Tokyo\n" }
+    }
+
+    @Test
+    fun `a save that finds the map gone keeps nothing in an older map in the trash that had its id`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip\n- Kyoto\n")
+
+        // An older map in the trash with this one's id, deleted before the screen opened, as a map whose id was taken
+        // again after it went might leave one.
+        val other = requireNotNull(maps.delete(maps.add("# Plans\n- Someday\n")))
+        val trashed = File(other.folder.parentFile, "$id-${other.deleted}")
+        assertTrue(other.folder.renameTo(trashed))
+        maps.load()
+        assertEquals(trashed, maps.trash.value.single { it.id == id }.folder)
+        val opened = open(id)
+        val effects = CopyOnWriteArrayList<MapEvent>()
+        val hearing = hear(opened, effects)
+
+        try {
+            // Its folder gone without going to the trash, as storage taken away can leave it: a save finds it missing.
+            assertTrue(maps.folder(id).deleteRecursively())
+            withContext(Dispatchers.Main) { opened.page.say(saved("# Trip\n- Kyoto\n- Nara\n", opened.load.revision)) }
+            assertEquals(MapCommand.Lock("deleted"), nextSent<MapCommand.Lock>(opened))
+
+            // The map deleted before the screen opened is another one: it keeps nothing of this one, and nothing says so.
+            assertFalse(withContext(Dispatchers.Main) { MapEvent.Snackbar(ShownText.Resource(R.string.map_change_kept_in_trash)) in effects })
+            assertTrue(File(trashed, TRASHED_HISTORY).listFiles().orEmpty().none { "Nara" in it.readText() })
         } finally {
             hearing.cancel()
         }
@@ -523,6 +1057,247 @@ class MapViewModelTest {
     }
 
     @Test
+    fun `a read-only version preview doesn't lose the current map's last edit on close`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Tokio\n")
+        val opened = open(id)
+        val last = "# Trip to Japan\n\n- Tokyo\n- Kyoto\n"
+        slow.arm()
+        withContext(Dispatchers.Main) { opened.page.say(saved("# Trip to Japan\n\n- Tokyo\n", opened.load.revision)) }
+        slow.awaitStopped()
+
+        withContext(Dispatchers.Main) {
+            opened.page.say(saved(last, opened.load.revision))
+            opened.model.openHistory()
+        }
+
+        until { ui(opened).history?.versions?.size == 1 }
+        val version = ui(opened).history!!.versions!!.single().time
+
+        withContext(Dispatchers.Main) { opened.model.showVersion(version) }
+        until { ui(opened).showingVersion }
+        withContext(Dispatchers.Main) { opened.page.say(MapMessage.State(newerReady.state)) }
+        assertEquals(ReadOnly.Newer, ui(opened).readOnly)
+
+        close(opened)
+        slow.release()
+
+        until { maps.read(id) == last }
+    }
+
+    @Test
+    fun `a map opened again as its last edit is still being written catches up with it, and its next edit lands on it`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Tokio\n")
+        val first = open(id)
+        val last = "# Trip to Japan\n\n- Tokyo\n"
+        slow.arm()
+        withContext(Dispatchers.Main) { first.page.say(saved(last, first.load.revision)) }
+        slow.awaitStopped()
+
+        // Closed and opened again at once, as the last edit is still being written: the map is read as it was.
+        close(first)
+        val again = open(id)
+        assertEquals("# Trip to Japan\n\n- Tokio\n", again.load.markdown)
+        slow.release()
+
+        // The write lands: the screen opened again draws the map as it left it.
+        val restored = withTimeout(WAIT_MILLISECONDS) { again.page.commands.receiveAsFlow().filterIsInstance<MapCommand.Restore>().first() }
+        assertEquals(last, restored.markdown)
+        until { maps.read(id) == last }
+
+        withContext(Dispatchers.Main) { again.page.say(saved("$last- Kyoto\n", restored.revision)) }
+        until { maps.read(id) == "$last- Kyoto\n" }
+        assertFalse(inHistory(id, "# Trip to Japan\n\n- Tokio\n- Kyoto\n"))
+    }
+
+    @Test
+    fun `a save that would empty the map isn't written, and the screen shows the map as it is, kept before the next edit`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Tokio\n")
+        val opened = open(id)
+        val effects = CopyOnWriteArrayList<MapEvent>()
+        val hearing = hear(opened, effects)
+
+        try {
+            // Every idea taken off, as typing over the text by hand can: the map stays as it was, and so does the screen.
+            withContext(Dispatchers.Main) { opened.page.say(saved("# \n", opened.load.revision)) }
+            val restored = withTimeout(WAIT_MILLISECONDS) { opened.page.commands.receiveAsFlow().filterIsInstance<MapCommand.Restore>().first() }
+            assertEquals("# Trip to Japan\n\n- Tokio\n", restored.markdown)
+            until { withContext(Dispatchers.Main) { MapEvent.Snackbar(ShownText.Resource(R.string.map_change_not_saved)) in effects } }
+            assertEquals("# Trip to Japan\n\n- Tokio\n", maps.read(id))
+
+            // The next edit, on the map as it shows again, keeps the map as it was in its history first.
+            withContext(Dispatchers.Main) { opened.page.say(saved("# Trip to Japan\n\n- Tokyo\n", restored.revision)) }
+            until { maps.read(id) == "# Trip to Japan\n\n- Tokyo\n" }
+            assertTrue(inHistory(id, "# Trip to Japan\n\n- Tokio\n"))
+        } finally {
+            hearing.cancel()
+        }
+    }
+
+    @Test
+    fun `a closing screen's last edit that finds the map saved by another screen goes into the history, and that screen says so`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Tokio\n")
+        val closing = open(id)
+        val showing = open(id)
+        val effects = CopyOnWriteArrayList<MapEvent>()
+        val hearing = hear(showing, effects)
+
+        try {
+            // The screen that stays saves first, as one opened again at once may while the other's last word is slow.
+            withContext(Dispatchers.Main) { showing.page.say(saved("# Trip to Japan\n\n- Tokio\n- Osaka\n", showing.load.revision)) }
+            until { maps.read(id) == "# Trip to Japan\n\n- Tokio\n- Osaka\n" }
+
+            // The other closes with an edit made on the map as it was: written as it closes, it can't go over the first.
+            withContext(Dispatchers.Main) {
+                closing.page.say(saved("# Trip to Japan\n\n- Tokyo\n", closing.load.revision))
+                closing.store.clear()
+            }
+
+            until { inHistory(id, "# Trip to Japan\n\n- Tokyo\n") }
+            until { withContext(Dispatchers.Main) { MapEvent.KeptInHistory in effects } }
+            assertEquals("# Trip to Japan\n\n- Tokio\n- Osaka\n", maps.read(id))
+        } finally {
+            hearing.cancel()
+        }
+    }
+
+    @Test
+    fun `a read begun before the screen's own save landed is read again, rather than taken for a change from elsewhere`() = runBlocking {
+        var written = "# Trip to Japan\n\n- Tokio\n"
+        val reads = mutableListOf<String>()
+
+        // The screen's save lands as the file is read: the read has the text before it.
+        val settled = readSettled({
+            reads += written
+            val text = if (reads.size == 1) "# Trip to Japan\n\n- Tokio\n" else "# Trip to Japan\n\n- Tokyo\n"
+
+            if (reads.size == 1) {
+                written = "# Trip to Japan\n\n- Tokyo\n"
+            }
+
+            text
+        }, { written })
+
+        assertEquals("# Trip to Japan\n\n- Tokyo\n", settled)
+        assertEquals(2, reads.size)
+
+        // Read while nothing of the screen's landed, once is enough.
+        reads.clear()
+        assertEquals("# Trip to Japan\n\n- Tokyo\n", readSettled({ reads += written; written }, { written }))
+        assertEquals(1, reads.size)
+        assertNull(readSettled({ null }, { written }))
+    }
+
+    @Test
+    fun `a version restored as the source editor is open shows in it, and what's typed next is typed on it`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Tokio\n")
+        val opened = open(id)
+        withContext(Dispatchers.Main) { opened.page.say(saved("# Trip to Japan\n\n- Tokyo\n", opened.load.revision)) }
+        until { maps.read(id) == "# Trip to Japan\n\n- Tokyo\n" }
+        editAsText(opened)
+        withContext(Dispatchers.Main) { opened.model.openHistory() }
+        until { ui(opened).history?.versions?.size == 1 }
+        val version = ui(opened).history!!.versions!!.single().time
+
+        withContext(Dispatchers.Main) { opened.model.restoreVersion(version) }
+        until { maps.read(id) == "# Trip to Japan\n\n- Tokio\n" }
+        until { ui(opened).source?.text == "# Trip to Japan\n\n- Tokio\n" }
+
+        // Typed on the version brought back: the restore stays, with what was typed.
+        withContext(Dispatchers.Main) { opened.model.editSource("# Trip to Japan\n\n- Tokio\n- Kyoto\n") }
+        until { maps.read(id) == "# Trip to Japan\n\n- Tokio\n- Kyoto\n" }
+    }
+
+    @Test
+    fun `a version restored again once it's the map changes nothing more, and leaves one step to undo`() = runBlocking {
+        maps.load()
+        val original = "# Trip to Japan\n\n- Tokio\n"
+        val current = "# Trip to Japan\n\n- Tokyo\n"
+        val id = maps.add(original)
+        val opened = open(id)
+        withContext(Dispatchers.Main) { opened.page.say(saved(current, opened.load.revision)) }
+        until { maps.read(id) == current }
+        withContext(Dispatchers.Main) { opened.model.openHistory() }
+        until { ui(opened).history?.versions?.size == 1 }
+        val version = ui(opened).history!!.versions!!.single().time
+        withContext(Dispatchers.Main) { opened.model.restoreVersion(version) }
+        assertEquals(original, nextSent<MapCommand.Restore>(opened).markdown)
+        until { maps.read(id) == original }
+
+        // Restore tapped again, as a second tap lands: that version is on show, and it's the map already.
+        withContext(Dispatchers.Main) { opened.model.openHistory() }
+        until { ui(opened).history?.versions?.any { it.time == version } == true }
+        withContext(Dispatchers.Main) { opened.model.showVersion(version) }
+        until { ui(opened).showingVersion }
+        sentSince(opened)
+        withContext(Dispatchers.Main) { opened.model.restoreVersion(version) }
+        until { ui(opened).history == null }
+
+        // The page shows the map as it is now again, which takes changes, and nothing else changes.
+        assertEquals(listOf(MapCommand.Preview(original, editable = true)), sentSince(opened))
+        assertNull(ui(opened).panel)
+
+        // One undo takes the restore back.
+        withContext(Dispatchers.Main) { opened.model.undo() }
+        assertEquals(current, nextSent<MapCommand.Restore>(opened).markdown)
+        until { maps.read(id) == current }
+    }
+
+    @Test
+    fun `text typed in the source editor as an earlier version is on show is drawn on the map as it is now, which takes it`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Tokio\n")
+        val opened = open(id)
+        withContext(Dispatchers.Main) { opened.page.say(saved("# Trip to Japan\n\n- Tokyo\n", opened.load.revision)) }
+        until { maps.read(id) == "# Trip to Japan\n\n- Tokyo\n" }
+        editAsText(opened)
+        withContext(Dispatchers.Main) { opened.model.openHistory() }
+        until { ui(opened).history?.versions?.size == 1 }
+        withContext(Dispatchers.Main) { opened.model.showVersion(ui(opened).history!!.versions!!.single().time) }
+        until { ui(opened).showingVersion }
+        sentSince(opened)
+
+        withContext(Dispatchers.Main) { opened.model.editSource("# Trip to Japan\n\n- Tokyo\n- Kyoto\n") }
+
+        // The map as it is now comes back first, as before any change, and the typing is drawn on it.
+        val sent = withTimeout(WAIT_MILLISECONDS) { opened.page.commands.receiveAsFlow().takeWhile { it !is MapCommand.Source }.toList() }
+        assertEquals(listOf(MapCommand.Preview("# Trip to Japan\n\n- Tokyo\n", editable = true)), sent)
+        assertFalse(ui(opened).showingVersion)
+        assertNotNull(ui(opened).history)
+        until { maps.read(id) == "# Trip to Japan\n\n- Tokyo\n- Kyoto\n" }
+    }
+
+    @Test
+    fun `text typed in the source editor right before a version is restored goes into the history, and Undo brings it back`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Tokio\n")
+        val opened = open(id)
+        withContext(Dispatchers.Main) { opened.page.say(saved("# Trip to Japan\n\n- Tokyo\n", opened.load.revision)) }
+        until { maps.read(id) == "# Trip to Japan\n\n- Tokyo\n" }
+        editAsText(opened)
+        withContext(Dispatchers.Main) { opened.model.openHistory() }
+        until { ui(opened).history?.versions?.size == 1 }
+        val version = ui(opened).history!!.versions!!.single().time
+
+        // Typed, and the version restored before the typing's pause was over.
+        withContext(Dispatchers.Main) {
+            opened.model.editSource("# Trip to Japan\n\n- Tokyo\n- Osaka\n")
+            opened.model.restoreVersion(version)
+        }
+
+        until { maps.read(id) == "# Trip to Japan\n\n- Tokio\n" }
+        until { ui(opened).source?.text == "# Trip to Japan\n\n- Tokio\n" }
+        assertTrue(inHistory(id, "# Trip to Japan\n\n- Tokyo\n- Osaka\n"))
+
+        withContext(Dispatchers.Main) { opened.model.undo() }
+        until { maps.read(id) == "# Trip to Japan\n\n- Tokyo\n- Osaka\n" }
+    }
+
+    @Test
     fun `a map changed elsewhere as it waits to be drawn is drawn as it is then, and its first edit lands on that`() = runBlocking {
         maps.load()
         val id = maps.add("# Trip to Japan\n\n- Tokio\n")
@@ -665,6 +1440,35 @@ class MapViewModelTest {
     }
 
     @Test
+    fun `undoing a rename takes the path and the rehearsal back to the idea's old id, and redo takes them on again`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Tokio\n- Kyoto\n")
+        maps.savePath(id, listOf("trip-to-japan", "tokio", "kyoto"))
+        maps.saveRehearsal(id, mapOf("trip-to-japan" to 11, "tokio" to 22, "kyoto" to 33))
+        val opened = open(id)
+        until { ui(opened).presentPath == listOf("trip-to-japan", "tokio", "kyoto") }
+
+        // Typed on the map: the new text gives the idea a new id, and its place on the path and in the rehearsal follow it.
+        withContext(Dispatchers.Main) { opened.page.say(saved("# Trip to Japan\n\n- Tokyo\n- Kyoto\n", opened.load.revision).copy(renamed = Renamed("tokio", "tokyo"))) }
+        until { maps.summary(id)?.metadata?.path == listOf("trip-to-japan", "tokyo", "kyoto") }
+        sentSince(opened)
+
+        // Undo: the old text, and with it the old id, for the path and the rehearsal too.
+        withContext(Dispatchers.Main) { opened.model.undo() }
+        assertEquals("# Trip to Japan\n\n- Tokio\n- Kyoto\n", nextSent<MapCommand.Restore>(opened).markdown)
+        until { maps.summary(id)?.metadata?.path == listOf("trip-to-japan", "tokio", "kyoto") }
+        assertEquals(listOf("trip-to-japan", "tokio", "kyoto"), ui(opened).presentPath)
+        until { maps.summary(id)?.metadata?.rehearsal == mapOf("trip-to-japan" to 11, "tokio" to 22, "kyoto" to 33) }
+
+        // Redo: the new text again, and its id.
+        withContext(Dispatchers.Main) { opened.model.redo() }
+        assertEquals("# Trip to Japan\n\n- Tokyo\n- Kyoto\n", nextSent<MapCommand.Restore>(opened).markdown)
+        until { maps.summary(id)?.metadata?.path == listOf("trip-to-japan", "tokyo", "kyoto") }
+        assertEquals(listOf("trip-to-japan", "tokyo", "kyoto"), ui(opened).presentPath)
+        until { maps.summary(id)?.metadata?.rehearsal == mapOf("trip-to-japan" to 11, "tokyo" to 22, "kyoto" to 33) }
+    }
+
+    @Test
     fun `text typed as the source editor switches to markdown, after an edit on the map, lands on that edit`() = runBlocking {
         maps.load()
         val id = maps.add("# Trip to Japan\n\n- Tokio\n")
@@ -696,7 +1500,7 @@ class MapViewModelTest {
         val id = maps.add("# Trip to Japan\n\n- Tokio\n")
         val opened = open(id)
         editAsText(opened)
-        val effects = mutableListOf<MapEvent>()
+        val effects = CopyOnWriteArrayList<MapEvent>()
         val hearing = hear(opened, effects)
 
         try {
@@ -746,6 +1550,53 @@ class MapViewModelTest {
     }
 
     @Test
+    fun `an answer the storage can't take says so, and is written with Try again once there's room`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Verbs\n\n## Ser\n\n- soy\n\n## Estar\n\n- estoy\n")
+        val opened = open(id, ready = false)
+        withContext(Dispatchers.Main) { opened.page.say(MapMessage.Ready(verbs)) }
+        // Where the map's details go there's a folder: nothing can be written there, as on a full disk.
+        val details = File(maps.folder(id), "meta.json")
+        details.delete()
+        File(details, "full").apply { parentFile!!.mkdirs() }.writeText("")
+
+        withContext(Dispatchers.Main) {
+            opened.model.startStudy(fromTop = true)
+            opened.model.revealCard()
+            opened.model.answerCard(knew = true)
+        }
+
+        until { ui(opened).answersUnsaved == AnswersUnsaved.Storage }
+        assertNull(maps.summary(id)?.metadata?.study)
+
+        // Room again: Try again writes it at once, and the note goes.
+        details.deleteRecursively()
+        withContext(Dispatchers.Main) { opened.model.tryAnswersAgain() }
+        until { maps.summary(id)?.metadata?.study?.keys == setOf("ser") }
+        until { ui(opened).answersUnsaved == null }
+    }
+
+    @Test
+    fun `answers given while a newer Orbit keeps the maps say why they wait, rather than seeming kept`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Verbs\n\n## Ser\n\n- soy\n\n## Estar\n\n- estoy\n")
+        File(root, "maps/.layout.json").writeText("""{"version":999,"compatible":999}""")
+        maps.load()
+        assertFalse(maps.writable.value)
+        val opened = open(id, ready = false)
+
+        withContext(Dispatchers.Main) {
+            opened.page.say(MapMessage.Ready(verbs))
+            opened.model.startStudy(fromTop = true)
+            opened.model.revealCard()
+            opened.model.answerCard(knew = true)
+        }
+
+        until { ui(opened).answersUnsaved == AnswersUnsaved.Newer }
+        assertNull(maps.summary(id)?.metadata?.study)
+    }
+
+    @Test
     fun `a studied map, as its page reads it, says which ideas with answers aren't cards, which Home doesn't count`() = runBlocking {
         maps.load()
         val id = maps.add("# Verbs\n\n## Ser\n\n- soy\n\n## Estar\n\n- estoy\n")
@@ -789,7 +1640,7 @@ class MapViewModelTest {
         val id = maps.add("# Diary\n\n- Monday\n", isPrivate = true)
         withContext(Dispatchers.Main) { app.privateLock.unlock() }
         val opened = open(id)
-        val effects = mutableListOf<MapEvent>()
+        val effects = CopyOnWriteArrayList<MapEvent>()
         val hearing = launch(Dispatchers.Main) { opened.model.effects.collect { effects += it } }
 
         try {
@@ -820,6 +1671,33 @@ class MapViewModelTest {
     }
 
     @Test
+    fun `an idea copied from a private map that locks meanwhile goes on no clipboard, however quickly it's unlocked`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Diary\n\n- Monday\n", isPrivate = true)
+        withContext(Dispatchers.Main) { app.privateLock.unlock() }
+        val opened = open(id)
+        val sun = withContext(Dispatchers.Main) { opened.model.ui.value.sun!!.id }
+
+        // The page writes the idea out as the screen turns off, and the phone's owner unlocks Orbit again.
+        withContext(Dispatchers.Main) { opened.model.copy(sun) }
+        val writing = withTimeout(WAIT_MILLISECONDS) { opened.page.copying.receive() }
+
+        withContext(Dispatchers.Main) {
+            app.privateLock.screenOff()
+            app.privateLock.unlock()
+        }
+
+        writing.complete(CopiedIdea("# Diary while it locked", "Diary"))
+
+        // Copied again, unlocked all along, it goes.
+        withContext(Dispatchers.Main) { opened.model.copy(sun) }
+        withTimeout(WAIT_MILLISECONDS) { opened.page.copying.receive() }.complete(CopiedIdea("# Diary", "Diary"))
+        until { app.clipboard.copied.isNotEmpty() }
+
+        assertEquals(listOf("# Diary"), app.clipboard.copied.toList())
+    }
+
+    @Test
     fun `opening the recorder ends a talk, and nothing said after it joins the map`() = runBlocking {
         maps.load()
         val id = maps.add("# Trip to Japan\n\n- Tokyo\n")
@@ -843,7 +1721,7 @@ class MapViewModelTest {
         maps.load()
         val id = maps.add("# Trip to Japan\n\n- Tokyo\n")
         val opened = open(id)
-        val effects = mutableListOf<MapEvent>()
+        val effects = CopyOnWriteArrayList<MapEvent>()
         val hearing = launch(Dispatchers.Main) { opened.model.effects.collect { effects += it } }
 
         try {
@@ -884,7 +1762,7 @@ class MapViewModelTest {
         maps.load()
         val id = maps.add("# Trip to Japan\n\n- Tokyo\n")
         val opened = open(id)
-        val effects = mutableListOf<MapEvent>()
+        val effects = CopyOnWriteArrayList<MapEvent>()
         val hearing = launch(Dispatchers.Main) { opened.model.effects.collect { effects += it } }
 
         try {
@@ -919,7 +1797,7 @@ class MapViewModelTest {
         val after = "# Trip to Japan\n\n- Tokyo\n  > - [x] Pack\n  > - [ ] Book\n"
         val id = maps.add(before)
         val opened = open(id)
-        val effects = mutableListOf<MapEvent>()
+        val effects = CopyOnWriteArrayList<MapEvent>()
         val hearing = hear(opened, effects)
 
         try {
@@ -955,7 +1833,7 @@ class MapViewModelTest {
         maps.load()
         val id = maps.add("# Trip to Japan\n\n- Tokyo\n  > - [ ] Pack\n")
         val opened = open(id)
-        val effects = mutableListOf<MapEvent>()
+        val effects = CopyOnWriteArrayList<MapEvent>()
         val hearing = hear(opened, effects)
 
         try {
@@ -1022,7 +1900,7 @@ class MapViewModelTest {
         // Where this map's media folder goes there's a file: nothing can be copied into it, as on a full disk.
         val media = File(maps.folder(id), "media").apply { writeText("") }
         val opened = open(id)
-        val effects = mutableListOf<MapEvent>()
+        val effects = CopyOnWriteArrayList<MapEvent>()
         val hearing = launch(Dispatchers.Main) { opened.model.effects.collect { effects += it } }
         val copied = Clip.Ideas("- Kyoto\n\n  ![](media/temple.jpg)\n", sourceMap = from)
 
@@ -1046,6 +1924,251 @@ class MapViewModelTest {
         }
     }
 
+    @Test
+    fun `pictures copied in for a paste the page didn't answer take none of the map's room, and stay for the page's late paste`() = runBlocking {
+        maps.load()
+        val from = maps.add("# Trip to Japan\n\n- Kyoto\n\n  ![](media/temple.jpg)\n")
+        File(maps.folder(from), "media").mkdirs()
+        File(maps.folder(from), "media/temple.jpg").writeBytes(ByteArray(1_000) { 1 })
+        val id = maps.add("# Plans\n\n- Autumn\n")
+        val opened = open(id)
+        val effects = CopyOnWriteArrayList<MapEvent>()
+        val hearing = hear(opened, effects)
+
+        try {
+            val target = withContext(Dispatchers.Main) { opened.model.ui.value.sun!!.id }
+            opened.page.pastesFail = true
+            withContext(Dispatchers.Main) { opened.model.pasteIdeas(target, Clip.Ideas("- Kyoto\n\n  ![](media/temple.jpg)\n", sourceMap = from)) }
+            until { withContext(Dispatchers.Main) { effects.any { it is MapEvent.Snackbar } } }
+
+            // The copy stays, should the page paste it late, but the map's room is as it was.
+            assertEquals(1_000L, File(maps.folder(id), "media/temple.jpg").length())
+            assertEquals(0L, maps.mediaSizeNow(id))
+        } finally {
+            hearing.cancel()
+        }
+    }
+
+    /**
+     * Pastes `clip` under the idea in focus, and while its files are being
+     * copied, off the main thread, does `meanwhile` on it: the paste's work
+     * is given back, to wait for.
+     */
+    private suspend fun pasteWhile(opened: Opened, clip: Clip.Ideas, meanwhile: () -> Unit): Job {
+        val copy = copies.hold()
+
+        val paste = withContext(Dispatchers.Main) {
+            val scope = opened.model.viewModelScope.coroutineContext.job
+            val target = opened.model.ui.value.sun!!.id
+            val before = scope.children.toSet()
+            opened.model.pasteIdeas(target, clip)
+            (scope.children.toSet() - before).single()
+        }
+
+        // The copy is under way off the main thread, held before its first file: however fast the disk, it's not back yet.
+        copy.awaitReached()
+        withContext(Dispatchers.Main) { meanwhile() }
+        copy.release()
+        return paste
+    }
+
+    /** Map `id`, from Trip to Japan's Kyoto, which shows its temple, and that idea as copied, ready to paste. */
+    private suspend fun temple(isPrivate: Boolean = false): Pair<String, Clip.Ideas> {
+        val from = maps.add("# Trip to Japan\n\n- Kyoto\n\n  ![](media/temple.jpg)\n", isPrivate = isPrivate)
+        File(maps.folder(from), "media").mkdirs()
+        File(maps.folder(from), "media/temple.jpg").writeBytes(ByteArray(1_000) { 1 })
+        return from to Clip.Ideas("- Kyoto\n\n  ![](media/temple.jpg)\n", sourceMap = from)
+    }
+
+    @Test
+    fun `ideas from a private map that locks while their pictures are copied paste as text, and none of its pictures stay in this one`() = runBlocking {
+        maps.load()
+        val (_, copied) = temple(isPrivate = true)
+        val id = maps.add("# Plans\n\n- Autumn\n")
+        withContext(Dispatchers.Main) { app.privateLock.unlock() }
+        val opened = open(id)
+        sentSince(opened)
+        // The page saves the map with what it pasted before it answers, as the real one does: the text points at temple.jpg by
+        // the name its copy would have, before the paste is done.
+        var fileWhenPasted: Boolean? = null
+
+        opened.page.pasting = { paste ->
+            fileWhenPasted = File(maps.folder(id), "media/temple.jpg").exists()
+            maps.write(id, maps.read(id) + "\n" + paste.text)
+        }
+
+        val paste = pasteWhile(opened, copied) { app.privateLock.lock() }
+        withTimeout(WAIT_MILLISECONDS) { paste.join() }
+
+        // As when the private map was locked to begin with: its text, and none of its files, gone before the text landed.
+        assertEquals(copied.text, sentSince(opened).filterIsInstance<MapCommand.Paste>().single().text)
+        assertEquals(false, fileWhenPasted)
+        assertFalse(File(maps.folder(id), "media/temple.jpg").exists())
+        assertEquals(0L, maps.mediaSizeNow(id))
+    }
+
+    @Test
+    fun `a private map that locks while pasted pictures are copied into it takes nothing, and keeps none of them`() = runBlocking {
+        maps.load()
+        val (_, copied) = temple()
+        val id = maps.add("# Secret plans\n\n- Autumn\n", isPrivate = true)
+        withContext(Dispatchers.Main) { app.privateLock.unlock() }
+        val opened = open(id)
+        sentSince(opened)
+
+        val paste = pasteWhile(opened, copied) { app.privateLock.lock() }
+        withTimeout(WAIT_MILLISECONDS) { paste.join() }
+
+        assertTrue(sentSince(opened).none { it is MapCommand.Paste })
+        assertFalse(File(maps.folder(id), "media/temple.jpg").exists())
+        assertEquals(0L, maps.mediaSizeNow(id))
+        assertEquals("# Secret plans\n\n- Autumn\n", maps.read(id))
+    }
+
+    @Test
+    fun `pictures copied for a paste the page never had, as its process stopped, go again, but stay for one it may yet make`() = runBlocking {
+        maps.load()
+        val (_, copied) = temple(isPrivate = true)
+        val id = maps.add("# Plans\n\n- Autumn\n")
+        withContext(Dispatchers.Main) { app.privateLock.unlock() }
+        val opened = open(id)
+        sentSince(opened)
+
+        for (kind in listOf(PageException.Kind.Stopped, PageException.Kind.DidNotLoad, PageException.Kind.TooOld)) {
+            opened.page.pasteUnsent = kind
+            val paste = pasteWhile(opened, copied) {}
+            withTimeout(WAIT_MILLISECONDS) { paste.join() }
+
+            assertTrue(sentSince(opened).none { it is MapCommand.Paste })
+            assertFalse(kind.name, File(maps.folder(id), "media/temple.jpg").exists())
+            assertEquals(kind.name, 0L, maps.mediaSizeNow(id))
+        }
+    }
+
+    @Test
+    fun `pictures copied for a paste whose map closes before it lands go again`() = runBlocking {
+        maps.load()
+        val (_, copied) = temple()
+        val id = maps.add("# Plans\n\n- Autumn\n")
+        val opened = open(id)
+        sentSince(opened)
+
+        val paste = pasteWhile(opened, copied) { opened.store.clear() }
+        withTimeout(WAIT_MILLISECONDS) { paste.join() }
+
+        assertTrue(sentSince(opened).none { it is MapCommand.Paste })
+        assertFalse(File(maps.folder(id), "media/temple.jpg").exists())
+        assertEquals(0L, maps.mediaSizeNow(id))
+    }
+
+    /** The page's save of a change to the example's map: its ideas given by `nodes` (id to text), `renamed` if one was. */
+    private fun savedWith(opened: Opened, kind: String, nodes: List<Pair<String, String>>, renamed: Renamed? = null): MapMessage.Saved {
+        val example = saved("# Trip to Japan\n\n" + nodes.drop(1).joinToString("") { "- ${it.second}\n" }, opened.load.revision)
+        val ideas = nodes.mapIndexed { index, (id, text) -> MapNode(id, text, parentId = "trip-to-japan".takeIf { index > 0 }, depth = if (index == 0) 0 else 1, index = maxOf(index - 1, 0)) }
+        return example.copy(kind = kind, state = example.state.copy(nodes = ideas), renamed = renamed)
+    }
+
+    @Test
+    fun `ideas pasted with pictures that take a while go under their idea renamed meanwhile, and under no other that takes its id after it's removed`() = runBlocking {
+        maps.load()
+        val from = maps.add("# Trip to Japan\n\n- Kyoto\n\n  ![](media/temple.jpg)\n")
+        File(maps.folder(from), "media").mkdirs()
+        File(maps.folder(from), "media/temple.jpg").writeBytes(ByteArray(1_000) { 1 })
+        val id = maps.add("# Trip to Japan\n\n- Tokyo\n- Someday\n")
+        val opened = open(id)
+        val effects = CopyOnWriteArrayList<MapEvent>()
+        val hearing = hear(opened, effects)
+        val copied = Clip.Ideas("- Kyoto\n\n  ![](media/temple.jpg)\n", sourceMap = from)
+
+        try {
+            sentSince(opened)
+
+            // Pasted into Someday, which is renamed as its picture is copied in: the ideas go under it, by its new id.
+            withContext(Dispatchers.Main) {
+                opened.model.pasteIdeas("someday", copied)
+                opened.page.say(savedWith(opened, "update", listOf("trip-to-japan" to "Trip to Japan", "tokyo" to "Tokyo", "soon" to "Soon"), Renamed("someday", "soon")))
+            }
+
+            assertEquals("soon", nextSent<MapCommand.Paste>(opened).parentId)
+
+            // Pasted into Soon, which is removed, and Tokyo renamed Soon after it: the ideas go nowhere, and that's said.
+            withContext(Dispatchers.Main) {
+                opened.model.pasteIdeas("soon", copied)
+                opened.page.say(savedWith(opened, "remove", listOf("trip-to-japan" to "Trip to Japan", "tokyo" to "Tokyo")))
+                opened.page.say(savedWith(opened, "update", listOf("trip-to-japan" to "Trip to Japan", "soon" to "Soon"), Renamed("tokyo", "soon")))
+            }
+
+            until { effects.any { it is MapEvent.Snackbar && it.message == ShownText.Resource(R.string.map_paste_idea_gone) } }
+            assertTrue(sentSince(opened).none { it is MapCommand.Paste })
+            assertTrue(effects.none { it is MapEvent.Snackbar && it.message is ShownText.Plain })
+        } finally {
+            hearing.cancel()
+        }
+    }
+
+    @Test
+    fun `ideas pasted into an idea that Undo takes away while their pictures copy in go nowhere, and say so`() = runBlocking {
+        maps.load()
+        val from = maps.add("# Trip to Japan\n\n- Kyoto\n\n  ![](media/temple.jpg)\n")
+        File(maps.folder(from), "media").mkdirs()
+        File(maps.folder(from), "media/temple.jpg").writeBytes(ByteArray(1_000) { 1 })
+        val id = maps.add("# Trip to Japan\n\n- Tokyo\n")
+        val opened = open(id)
+        val effects = CopyOnWriteArrayList<MapEvent>()
+        val hearing = hear(opened, effects)
+        val tokyo = listOf("trip-to-japan" to "Trip to Japan", "tokyo" to "Tokyo")
+
+        try {
+            // Soon is added, then pasted into; Undo takes Soon away as the pasted ideas' picture copies in.
+            withContext(Dispatchers.Main) { opened.page.say(savedWith(opened, "add", tokyo + ("soon" to "Soon"))) }
+            sentSince(opened)
+
+            withContext(Dispatchers.Main) {
+                opened.model.pasteIdeas("soon", Clip.Ideas("- Kyoto\n\n  ![](media/temple.jpg)\n", sourceMap = from))
+                opened.model.undo()
+                opened.page.say(MapMessage.State(savedWith(opened, "update", tokyo).state))
+            }
+
+            until { effects.any { it is MapEvent.Snackbar && it.message == ShownText.Resource(R.string.map_paste_idea_gone) } }
+            assertTrue(sentSince(opened).none { it is MapCommand.Paste })
+        } finally {
+            hearing.cancel()
+        }
+    }
+
+    @Test
+    fun `ideas pasted into an idea that a change from elsewhere takes away while their pictures copy in go nowhere, and say so`() = runBlocking {
+        maps.load()
+        val from = maps.add("# Trip to Japan\n\n- Kyoto\n\n  ![](media/temple.jpg)\n")
+        File(maps.folder(from), "media").mkdirs()
+        File(maps.folder(from), "media/temple.jpg").writeBytes(ByteArray(1_000) { 1 })
+        val id = maps.add("# Trip to Japan\n\n- Tokyo\n- Soon\n")
+        val opened = open(id)
+        val effects = CopyOnWriteArrayList<MapEvent>()
+        val hearing = hear(opened, effects)
+
+        try {
+            withContext(Dispatchers.Main) { opened.page.say(savedWith(opened, "update", listOf("trip-to-japan" to "Trip to Japan", "tokyo" to "Tokyo", "soon" to "Soon"))) }
+            until { maps.read(id) == "# Trip to Japan\n\n- Tokyo\n- Soon\n" }
+            sentSince(opened)
+
+            // Another device takes Soon away: the page is told to draw the map as it is now.
+            assertEquals(WriteResult.Written, maps.change(id, "# Trip to Japan\n\n- Tokyo\n", base = "# Trip to Japan\n\n- Tokyo\n- Soon\n"))
+            assertEquals("# Trip to Japan\n\n- Tokyo\n", nextSent<MapCommand.Restore>(opened).markdown)
+
+            // Pasted into Soon just before the page has drawn it anew, without Soon, as the picture copies in.
+            withContext(Dispatchers.Main) {
+                opened.model.pasteIdeas("soon", Clip.Ideas("- Kyoto\n\n  ![](media/temple.jpg)\n", sourceMap = from))
+                opened.page.say(MapMessage.State(savedWith(opened, "update", listOf("trip-to-japan" to "Trip to Japan", "tokyo" to "Tokyo")).state))
+            }
+
+            until { effects.any { it is MapEvent.Snackbar && it.message == ShownText.Resource(R.string.map_paste_idea_gone) } }
+            assertTrue(sentSince(opened).none { it is MapCommand.Paste })
+        } finally {
+            hearing.cancel()
+        }
+    }
+
     /** The map as the page reads it, with idea `id`'s picture `image`: the example's, which can be changed. */
     private fun withPicture(id: String, image: Media?): MapMessage.Ready =
         ready.copy(state = ready.state.copy(nodes = ready.state.nodes.map { if (it.id == id) it.copy(image = image) else it }))
@@ -1060,6 +2183,77 @@ class MapViewModelTest {
     /** Waits for the next command of `type` the page is sent. */
     private suspend inline fun <reified Type : MapCommand> nextSent(opened: Opened): Type =
         withTimeout(WAIT_MILLISECONDS) { opened.page.commands.receiveAsFlow().filterIsInstance<Type>().first() }
+
+    @Test
+    fun `text shared to an idea joins the one in focus as ideas, with Undo, and a map that can't change takes none`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Tokyo\n")
+        val opened = open(id)
+        val effects = CopyOnWriteArrayList<MapEvent>()
+        val hearing = hear(opened, effects)
+
+        try {
+            withContext(Dispatchers.Main) { opened.page.say(MapMessage.Focus(listOf("trip-to-japan", "tokyo"), "focus")) }
+            sentSince(opened)
+
+            // Shared from a browser to "Attach to an Orbit idea": its page's title, and its address.
+            withContext(Dispatchers.Main) { opened.model.addSharedText("Ramen in Shinjuku\nhttps://example.com/ramen") }
+            val pasted = nextSent<MapCommand.Paste>(opened)
+            assertEquals("tokyo", pasted.parentId)
+            assertEquals("Ramen in Shinjuku\nhttps://example.com/ramen", pasted.text)
+            until { effects.any { it is MapEvent.Snackbar } }
+            val said = effects.filterIsInstance<MapEvent.Snackbar>().single()
+            assertEquals(ShownText.Plural(R.plurals.drop_added_ideas, 1, listOf(1, "🗼 Tokyo")), said.message)
+            assertTrue(said.undo)
+
+            // Only looked at, as a map from a newer Orbit is: nothing's pasted, and that's said.
+            withContext(Dispatchers.Main) { opened.page.say(newerReady) }
+            withContext(Dispatchers.Main) { opened.model.addSharedText("Ramen in Shinjuku") }
+            until { effects.filterIsInstance<MapEvent.Snackbar>().size == 2 }
+            assertEquals(ShownText.Resource(R.string.drop_not_added_now), effects.filterIsInstance<MapEvent.Snackbar>().last().message)
+            assertTrue(sentSince(opened).none { it is MapCommand.Paste })
+        } finally {
+            hearing.cancel()
+        }
+    }
+
+    @Test
+    fun `text shared to a map before it's ready waits for it, and joins it once, as what's shared to it later does`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Tokyo\n")
+        val shares = PendingShares()
+        // Shared as Android brings Orbit back with it: before the map's screen takes anything, and before its page is ready.
+        shares.offer(SharedFiles(id, emptyList(), text = "Ramen in Shinjuku"))
+        shares.offer(SharedFiles("another-map", emptyList(), text = "Not for this map"))
+        val opened = open(id, ready = false)
+        val taking = launch(Dispatchers.Main) { opened.model.takeShares(shares) { error("No files are shared here") } }
+
+        try {
+            delay(200)
+            assertTrue(sentSince(opened).none { it is MapCommand.Paste })
+            assertEquals(2, shares.waiting.value.size)
+
+            withContext(Dispatchers.Main) { opened.page.say(ready) }
+            assertEquals("Ramen in Shinjuku", nextSent<MapCommand.Paste>(opened).text)
+            assertEquals(listOf("another-map"), shares.waiting.value.map { it.mapId })
+
+            shares.offer(SharedFiles(id, emptyList(), text = "Sushi in Ginza"))
+            assertEquals("Sushi in Ginza", nextSent<MapCommand.Paste>(opened).text)
+
+            // The same again, at once, as the one before is being taken: it joins too.
+            withContext(Dispatchers.Main) {
+                shares.offer(SharedFiles(id, emptyList(), text = "Sushi in Ginza"))
+                shares.offer(SharedFiles(id, emptyList(), text = "Sushi in Ginza"))
+            }
+
+            assertEquals("Sushi in Ginza", nextSent<MapCommand.Paste>(opened).text)
+            assertEquals("Sushi in Ginza", nextSent<MapCommand.Paste>(opened).text)
+            delay(200)
+            assertTrue(sentSince(opened).none { it is MapCommand.Paste })
+        } finally {
+            taking.cancel()
+        }
+    }
 
     @Test
     fun `a sketch brings its planet up close, keeps the drawing as the idea's picture in one change, and lets the planet go once it shows`() = runBlocking {
@@ -1187,7 +2381,7 @@ class MapViewModelTest {
         maps.load()
         val id = maps.add("# Trip to Japan\n\n- Tokyo\n")
         val opened = open(id)
-        val effects = mutableListOf<MapEvent>()
+        val effects = CopyOnWriteArrayList<MapEvent>()
         val hearing = hear(opened, effects)
 
         try {
@@ -1281,6 +2475,336 @@ class MapViewModelTest {
     }
 
     @Test
+    fun `a stroke still being drawn as Done is tapped is kept, and once back to drawing the next one draws`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Someday\n")
+        val opened = open(id)
+        withContext(Dispatchers.Main) { opened.page.say(withPicture("someday", null)) }
+        withContext(Dispatchers.Main) { opened.model.sketch("someday") }
+        nextSent<MapCommand.Spotlight>(opened)
+        withContext(Dispatchers.Main) { opened.page.say(MapMessage.Spotlight("someday", "rest", 206f, 300f, 177f)) }
+        val session = withContext(Dispatchers.Main) { opened.model.sketchSession.value!! }
+
+        // A finger still drawing as another taps Done: what it drew is the sketch, to describe.
+        withContext(Dispatchers.Main) {
+            session.touch(SketchTouch.Down(0, TouchTool.Finger, InkSample(200f, 500f, null, 0f, 0)))
+            session.touch(SketchTouch.Move(0, (1..10).map { step -> InkSample(200f + step * 60f, 500f, null, 0f, step * 8L) }))
+            opened.model.finishSketch()
+        }
+
+        assertEquals(SketchPhase.Describing, ui(opened).sketch?.phase)
+        assertEquals(1, session.strokes.size)
+
+        // Back to drawing from the description: that finger draws nothing more, and the next stroke draws.
+        withContext(Dispatchers.Main) {
+            session.touch(SketchTouch.Up(0, InkSample(900f, 500f, null, 0f, 200)))
+            opened.model.keepSketching()
+            session.stroke(200f, 800f, at = 700f, time = 1_000)
+        }
+
+        assertEquals(2, session.strokes.size)
+        withContext(Dispatchers.Main) { opened.model.saveSketch("Two lines") }
+        val src = nextSent<MapCommand.Update>(opened).changes.getValue("image").jsonObject.getValue("src").jsonPrimitive.content
+        assertEquals(2, SketchSvg.read(File(maps.folder(id), src).readBytes())!!.strokes.size)
+    }
+
+    @Test
+    fun `closing a sketch while its first stroke is still being drawn asks first`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Someday\n")
+        val opened = open(id)
+        withContext(Dispatchers.Main) { opened.page.say(withPicture("someday", null)) }
+        withContext(Dispatchers.Main) { opened.model.sketch("someday") }
+        nextSent<MapCommand.Spotlight>(opened)
+
+        withContext(Dispatchers.Main) {
+            opened.page.say(MapMessage.Spotlight("someday", "rest", 206f, 300f, 177f))
+            val session = opened.model.sketchSession.value!!
+            session.touch(SketchTouch.Down(0, TouchTool.Finger, InkSample(200f, 500f, null, 0f, 0)))
+            session.touch(SketchTouch.Move(0, (1..10).map { step -> InkSample(200f + step * 60f, 500f, null, 0f, step * 8L) }))
+            opened.model.cancelSketch()
+        }
+
+        assertTrue(ui(opened).sketch!!.discarding)
+        assertEquals(1, withContext(Dispatchers.Main) { opened.model.sketchSession.value!!.strokes.size })
+    }
+
+    @Test
+    fun `a sketch the page can't show stays off its idea, back to drawing, and leaves no file behind`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Someday\n")
+        val opened = open(id)
+        val effects = CopyOnWriteArrayList<MapEvent>()
+        val hearing = hear(opened, effects)
+
+        try {
+            withContext(Dispatchers.Main) { opened.page.say(withPicture("someday", null)) }
+            withContext(Dispatchers.Main) { opened.model.sketch("someday") }
+            nextSent<MapCommand.Spotlight>(opened)
+            withContext(Dispatchers.Main) { opened.page.say(MapMessage.Spotlight("someday", "rest", 206f, 300f, 177f)) }
+            sentSince(opened)
+
+            // The page can't load the sketch's file.
+            opened.page.picturesShow = false
+
+            withContext(Dispatchers.Main) {
+                opened.model.sketchSession.value!!.stroke(200f, 800f)
+                opened.model.finishSketch()
+                opened.model.saveSketch("A line")
+            }
+
+            nextSent<MapCommand.PictureShown>(opened)
+            until { ui(opened).sketch?.phase == SketchPhase.Drawing }
+            until { effects.any { it is MapEvent.Snackbar } }
+            assertEquals(ShownText.Resource(R.string.sketch_not_kept), effects.filterIsInstance<MapEvent.Snackbar>().single().message)
+            assertTrue(sentSince(opened).none { it is MapCommand.Update || it is MapCommand.EndSpotlight })
+            assertEquals(emptyList<String>(), File(maps.folder(id), "media").list().orEmpty().toList())
+
+            // Once it can, Done keeps the same drawing.
+            opened.page.picturesShow = true
+            withContext(Dispatchers.Main) { opened.model.saveSketch("A line") }
+            assertEquals("someday", nextSent<MapCommand.Update>(opened).id)
+        } finally {
+            hearing.cancel()
+        }
+    }
+
+    @Test
+    fun `a sketch whose picture the page doesn't answer about in time still joins its idea`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Someday\n")
+        val opened = open(id)
+        withContext(Dispatchers.Main) { opened.page.say(withPicture("someday", null)) }
+        withContext(Dispatchers.Main) { opened.model.sketch("someday") }
+        nextSent<MapCommand.Spotlight>(opened)
+        withContext(Dispatchers.Main) { opened.page.say(MapMessage.Spotlight("someday", "rest", 206f, 300f, 177f)) }
+
+        // A page off screen draws no frames, so it answers late, or not at all: that's no picture it can't show.
+        opened.page.picturesShow = null
+
+        withContext(Dispatchers.Main) {
+            opened.model.sketchSession.value!!.stroke(200f, 800f)
+            opened.model.finishSketch()
+            opened.model.saveSketch("A line")
+        }
+
+        val src = nextSent<MapCommand.Update>(opened).changes.getValue("image").jsonObject.getValue("src").jsonPrimitive.content
+        assertTrue(File(maps.folder(id), src).isFile)
+    }
+
+    /** Opens a sketch on idea `someday`, which has no picture, up close, with a stroke drawn: what's on the canvas. */
+    private suspend fun sketchedOn(opened: Opened): SketchSession {
+        withContext(Dispatchers.Main) { opened.page.say(withPicture("someday", null)) }
+        withContext(Dispatchers.Main) { opened.model.sketch("someday") }
+        nextSent<MapCommand.Spotlight>(opened)
+        withContext(Dispatchers.Main) { opened.page.say(MapMessage.Spotlight("someday", "rest", 206f, 300f, 177f)) }
+        val session = withContext(Dispatchers.Main) { opened.model.sketchSession.value!! }
+        withContext(Dispatchers.Main) { session.stroke(200f, 800f) }
+        sentSince(opened)
+        return session
+    }
+
+    @Test
+    fun `a sketch under way waits, whole, while the page is stopped, and Load again puts it back on its planet to keep`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Someday\n")
+        val opened = open(id)
+        val session = sketchedOn(opened)
+
+        withContext(Dispatchers.Main) { opened.model.finishSketch() }
+        assertEquals(SketchPhase.Describing, ui(opened).sketch?.phase)
+
+        // Android stops the page as the sketch is described: the planet goes with it, the drawing waits.
+        withContext(Dispatchers.Main) { opened.page.say(MapMessage.Stopped) }
+        val waiting = ui(opened).sketch!!
+        assertEquals(PageProblem.Stopped, ui(opened).pageProblem)
+        assertTrue(waiting.held)
+        assertEquals(SketchPhase.Opening, waiting.phase)
+        assertNull(waiting.circle)
+        assertSame(session, withContext(Dispatchers.Main) { opened.model.sketchSession.value })
+        assertEquals(1, session.strokes.size)
+
+        // Load again: a new page draws the map, and brings the planet up close again, in the room the toolbar leaves.
+        withContext(Dispatchers.Main) {
+            opened.model.sketchRoom(MapInsets(bottom = 112f))
+            opened.model.reload()
+        }
+
+        val again = app.pages.last()
+        assertTrue(again !== opened.page)
+        val reopened = Opened(opened.model, again, opened.load, opened.store)
+        nextSent<MapCommand.Load>(reopened)
+        assertTrue(ui(opened).sketch!!.held)
+        withContext(Dispatchers.Main) { again.say(withPicture("someday", null)) }
+        assertEquals(MapCommand.Spotlight("someday", MapInsets(bottom = 112f)), nextSent<MapCommand.Spotlight>(reopened))
+        withContext(Dispatchers.Main) { again.say(MapMessage.Spotlight("someday", "rest", 206f, 300f, 177f)) }
+
+        assertEquals(SketchPhase.Drawing, ui(opened).sketch?.phase)
+        assertFalse(ui(opened).sketch!!.held)
+        assertSame(session, withContext(Dispatchers.Main) { opened.model.sketchSession.value })
+
+        // Done keeps it on the new page, as on the first.
+        withContext(Dispatchers.Main) { opened.model.saveSketch("A line") }
+        val update = nextSent<MapCommand.Update>(reopened)
+        assertEquals("someday", update.id)
+        assertNotNull(update.job)
+        val src = update.changes.getValue("image").jsonObject.getValue("src").jsonPrimitive.content
+        assertEquals(1, SketchSvg.read(File(maps.folder(id), src).readBytes())!!.strokes.size)
+        assertEquals(MapCommand.EndSpotlight, nextSent<MapCommand.EndSpotlight>(reopened))
+    }
+
+    @Test
+    fun `Load again after the sketched idea went ends the sketch, saying so`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Someday\n")
+        val opened = open(id)
+        val effects = CopyOnWriteArrayList<MapEvent>()
+        val hearing = hear(opened, effects)
+
+        try {
+            sketchedOn(opened)
+
+            withContext(Dispatchers.Main) {
+                opened.page.say(MapMessage.Stopped)
+                opened.model.reload()
+            }
+
+            val again = app.pages.last()
+            withContext(Dispatchers.Main) { again.say(ready.copy(state = ready.state.copy(nodes = ready.state.nodes.filter { it.id != "someday" }))) }
+
+            assertNull(ui(opened).sketch)
+            assertNull(withContext(Dispatchers.Main) { opened.model.sketchSession.value })
+            until { effects.any { it is MapEvent.Snackbar } }
+            assertEquals(ShownText.Resource(R.string.sketch_lost), effects.filterIsInstance<MapEvent.Snackbar>().single().message)
+            assertTrue(generateSequence { again.commands.tryReceive().getOrNull() }.none { it is MapCommand.Spotlight })
+        } finally {
+            hearing.cancel()
+        }
+    }
+
+    @Test
+    fun `a drawing brought back to a page too slow to hold it yet waits, and comes up close once the page can`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Someday\n")
+        val opened = open(id)
+        val session = sketchedOn(opened)
+
+        withContext(Dispatchers.Main) {
+            opened.page.say(MapMessage.Stopped)
+            opened.model.reload()
+        }
+
+        val again = app.pages.last()
+        val reopened = Opened(opened.model, again, opened.load, opened.store)
+        withContext(Dispatchers.Main) { again.say(withPicture("someday", null)) }
+        nextSent<MapCommand.Spotlight>(reopened)
+
+        // Not laid out yet, the page can't bring the planet up close, and says so at once: the idea is there, so the drawing waits.
+        withContext(Dispatchers.Main) { again.say(MapMessage.Spotlight("someday", "end")) }
+        assertSame(session, withContext(Dispatchers.Main) { opened.model.sketchSession.value })
+        assertEquals(SketchPhase.Opening, ui(opened).sketch?.phase)
+
+        // Back meanwhile asks before its strokes go, however long bringing it back takes; kept, it comes back.
+        withContext(Dispatchers.Main) { opened.model.cancelSketch() }
+        assertTrue(ui(opened).sketch!!.discarding)
+        withContext(Dispatchers.Main) { opened.model.keepSketching() }
+        assertSame(session, withContext(Dispatchers.Main) { opened.model.sketchSession.value })
+
+        // A moment later it's brought up again, and this time the page holds it.
+        assertEquals(MapCommand.Spotlight("someday", MapInsets()), nextSent<MapCommand.Spotlight>(reopened))
+        withContext(Dispatchers.Main) { again.say(MapMessage.Spotlight("someday", "rest", 206f, 300f, 177f)) }
+        assertEquals(SketchPhase.Drawing, ui(opened).sketch?.phase)
+        assertEquals(1, session.strokes.size)
+    }
+
+    @Test
+    fun `closing a sketch that waits for the map asks first, as on its planet`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Someday\n")
+        val opened = open(id)
+        sketchedOn(opened)
+
+        withContext(Dispatchers.Main) {
+            opened.page.say(MapMessage.Stopped)
+            opened.model.cancelSketch()
+        }
+
+        assertTrue(ui(opened).sketch!!.discarding)
+        withContext(Dispatchers.Main) { opened.model.keepSketching() }
+        assertTrue(ui(opened).sketch!!.held)
+        assertFalse(ui(opened).sketch!!.discarding)
+
+        // Let go, it ends at once: there's no planet up close to fly back from.
+        withContext(Dispatchers.Main) { opened.model.cancelSketch(letGo = true) }
+        assertNull(ui(opened).sketch)
+        assertNull(withContext(Dispatchers.Main) { opened.model.sketchSession.value })
+    }
+
+    @Test
+    fun `Done on a page that stopped keeps the canvas, its drawing whole, and leaves no file behind`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Someday\n")
+        val opened = open(id)
+        val effects = CopyOnWriteArrayList<MapEvent>()
+        val hearing = hear(opened, effects)
+
+        try {
+            val session = sketchedOn(opened)
+
+            // The page's process is gone, before Android has said so.
+            opened.page.stopped = true
+            withContext(Dispatchers.Main) { opened.model.saveSketch("A line") }
+
+            until { ui(opened).sketch?.phase == SketchPhase.Drawing }
+            until { effects.any { it is MapEvent.Snackbar } }
+            assertEquals(ShownText.Resource(R.string.sketch_not_kept), effects.filterIsInstance<MapEvent.Snackbar>().single().message)
+            assertSame(session, withContext(Dispatchers.Main) { opened.model.sketchSession.value })
+            assertTrue(sentSince(opened).none { it is MapCommand.Update || it is MapCommand.EndSpotlight })
+            assertEquals(emptyList<String>(), File(maps.folder(id), "media").list().orEmpty().toList())
+        } finally {
+            hearing.cancel()
+        }
+    }
+
+    @Test
+    fun `a sketch the page doesn't say it took stays on the canvas, to keep again`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip to Japan\n\n- Someday\n")
+        val opened = open(id)
+        val effects = CopyOnWriteArrayList<MapEvent>()
+        val hearing = hear(opened, effects)
+
+        try {
+            val session = sketchedOn(opened)
+
+            // The page loads the picture, then doesn't answer whether the idea took it.
+            opened.page.changesTaken = null
+            withContext(Dispatchers.Main) { opened.model.saveSketch("A line") }
+
+            assertEquals("someday", nextSent<MapCommand.Update>(opened).id)
+            until { ui(opened).sketch?.phase == SketchPhase.Drawing }
+            until { effects.any { it is MapEvent.Snackbar } }
+            assertEquals(ShownText.Resource(R.string.sketch_not_kept), effects.filterIsInstance<MapEvent.Snackbar>().single().message)
+            assertSame(session, withContext(Dispatchers.Main) { opened.model.sketchSession.value })
+            assertTrue(sentSince(opened).none { it is MapCommand.EndSpotlight })
+
+            // The idea's gone from the page meanwhile: its file goes, nothing points at it.
+            opened.page.changesTaken = false
+            withContext(Dispatchers.Main) { opened.model.saveSketch("A line") }
+            val src = nextSent<MapCommand.Update>(opened).changes.getValue("image").jsonObject.getValue("src").jsonPrimitive.content
+            until { ui(opened).sketch?.phase == SketchPhase.Drawing && !File(maps.folder(id), src).exists() }
+            assertTrue(sentSince(opened).none { it is MapCommand.EndSpotlight })
+
+            // Once the page takes it, the canvas lifts.
+            opened.page.changesTaken = true
+            withContext(Dispatchers.Main) { opened.model.saveSketch("A line") }
+            assertEquals(MapCommand.EndSpotlight, nextSent<MapCommand.EndSpotlight>(opened))
+        } finally {
+            hearing.cancel()
+        }
+    }
+
+    @Test
     fun `a new sketch left blank, or one the page can't bring up close, leaves nothing behind`() = runBlocking {
         maps.load()
         val id = maps.add("# Trip to Japan\n\n- Someday\n")
@@ -1307,6 +2831,34 @@ class MapViewModelTest {
         withContext(Dispatchers.Main) { opened.page.say(MapMessage.Spotlight("someday", "end")) }
         assertNull(ui(opened).sketch)
     }
+
+    @Test
+    fun `a map deleted while open that can't come back from the trash stays there, and its screen says so`() = runBlocking {
+        maps.load()
+        val id = maps.add("# Trip\n- Beach\n")
+        val opened = open(id)
+        val effects = CopyOnWriteArrayList<MapEvent>()
+        val hearing = hear(opened, effects)
+        val trashed = maps.delete(id)!!
+        // Its details can't be read now: it waits in the trash rather than have them written over.
+        val details = File(trashed.folder, "meta.json")
+        assertTrue(details.isFile)
+        details.setReadable(false)
+        assumeFalse(details.canRead())
+
+        try {
+            withContext(Dispatchers.Main) { opened.model.restoreFromTrash() }
+            until { withContext(Dispatchers.Main) { MapEvent.Snackbar(ShownText.Resource(R.string.settings_could_not_restore, listOf("Trip"))) in effects } }
+            assertFalse(maps.exists(id))
+            assertTrue(maps.trash.value.any { it.folder == trashed.folder })
+        } finally {
+            details.setReadable(true)
+            hearing.cancel()
+        }
+
+        withContext(Dispatchers.Main) { opened.model.restoreFromTrash() }
+        until { maps.exists(id) }
+    }
 }
 
 /**
@@ -1314,6 +2866,40 @@ class MapViewModelTest {
  * version stops inside the repository, as its history is thinned (where it
  * asks whether the clock can be trusted), until the test lets it go.
  */
+/**
+ * Holds the next copy into a map as it asks for room for its files, before
+ * the first is copied, until the test lets it through ([Held.release]): a
+ * copy that takes a while, for what happens meanwhile. Any other copy has
+ * all the room it wants.
+ */
+private class CopyGate {
+    class Held {
+        private val reached = CountDownLatch(1)
+        private val released = CountDownLatch(1)
+
+        /** Waits for the copy to get here. */
+        fun awaitReached() = assertTrue("No copy began", reached.await(WAIT_MILLISECONDS, TimeUnit.MILLISECONDS))
+
+        /** Lets the copy go on. */
+        fun release() = released.countDown()
+
+        fun pass() {
+            reached.countDown()
+            released.await(WAIT_MILLISECONDS, TimeUnit.MILLISECONDS)
+        }
+    }
+
+    private val next = AtomicReference<Held?>(null)
+
+    /** Holds the next copy. */
+    fun hold(): Held = Held().also { next.set(it) }
+
+    fun room(): Long {
+        next.getAndSet(null)?.pass()
+        return Long.MAX_VALUE
+    }
+}
+
 private class SlowStorage {
     private val armed = AtomicBoolean(false)
     private val stopped = CountDownLatch(1)
@@ -1367,10 +2953,59 @@ private class TestPage : MapPage {
      */
     val adding = Channel<Pair<MapCommand.AddNodes, CompletableDeferred<Int>>>(Channel.UNLIMITED)
 
+    /** The ideas the map asks the page to write out for the clipboard, each waiting for the test to answer with it. */
+    val copying = Channel<CompletableDeferred<CopiedIdea>>(Channel.UNLIMITED)
+
+    /** Whether the pictures the map asks about load and show, as the real page says ([MapCommand.PictureShown]); null answers nothing in time. */
+    @Volatile
+    var picturesShow: Boolean? = true
+
+    /** Whether the page fails to paste, as one that doesn't answer in time. */
+    @Volatile
+    var pastesFail = false
+
+    /** What the page does with ideas it pastes before it answers, as the real page saves the map first. */
+    @Volatile
+    var pasting: (suspend (MapCommand.Paste) -> Unit)? = null
+
+    /** Why the page fails a paste before it has it, as one whose process stopped does; null: it has it. */
+    @Volatile
+    var pasteUnsent: PageException.Kind? = null
+
+    /**
+     * Whether the ideas the map changes and waits to hear about take the
+     * change, as the real page says once it has posted the change's save
+     * ([MapCommand.Update] with a job): false for an idea the map no longer
+     * has; null answers nothing in time.
+     */
+    @Volatile
+    var changesTaken: Boolean? = true
+
+    /** Whether the page's process stopped: it answers no job, as the real one, whose jobs end as it stops. */
+    @Volatile
+    var stopped = false
+
     private var jobs = 0
+
+    /**
+     * What the page says as the app closes the field open on the map, as the
+     * real one says the save of what was typed in it (`save`) and that the
+     * field closed: none when no field is open.
+     */
+    var stopping: ((save: Boolean) -> Unit)? = null
+
+    /** While true, the page is too busy to answer a check: it never does, and says so in [checksGivenUp] once the app stops waiting. */
+    @Volatile
+    var checksHang = false
+
+    val checksGivenUp = Channel<Unit>(Channel.UNLIMITED)
 
     override fun send(command: MapCommand) {
         commands.trySend(command)
+
+        if (command is MapCommand.StopEditing) {
+            stopping?.invoke(command.save)
+        }
     }
 
     override suspend fun <T> request(answer: DeserializationStrategy<T>, command: (job: Int) -> MapCommand): T {
@@ -1378,10 +3013,26 @@ private class TestPage : MapPage {
             throw PageException("The page went back")
         }
 
+        if (stopped) {
+            throw PageException("The page stopped", PageException.Kind.Stopped)
+        }
+
         val sent = command(++jobs)
+
+        if (sent is MapCommand.Paste) {
+            pasteUnsent?.let { kind -> throw PageException("The page stopped", kind) }
+        }
 
         if (sent is MapCommand.Convert && holding) {
             CompletableDeferred<Unit>().also { held.trySend(it) }.await()
+        }
+
+        if (sent is MapCommand.Check && checksHang) {
+            try {
+                CompletableDeferred<Unit>().await()
+            } finally {
+                checksGivenUp.trySend(Unit)
+            }
         }
 
         val value = when (sent) {
@@ -1391,14 +3042,26 @@ private class TestPage : MapPage {
                 val count = CompletableDeferred<Int>().also { adding.trySend(sent to it) }.await()
                 protocolJson.encodeToJsonElement(PastedIdeas.serializer(), PastedIdeas(count))
             }
+            is MapCommand.Copy -> protocolJson.encodeToJsonElement(CopiedIdea.serializer(), CompletableDeferred<CopiedIdea>().also { copying.trySend(it) }.await())
             is MapCommand.Paste -> {
                 commands.trySend(sent)
+
+                if (pastesFail) {
+                    throw PageException("The page didn't answer")
+                }
+
+                pasting?.invoke(sent)
+
                 protocolJson.encodeToJsonElement(PastedIdeas.serializer(), PastedIdeas(1))
             }
-            // A sketch's picture shows on the planet, as the real page says once it has loaded it.
+            // A sketch's picture shows on the planet, as the real page says once it has loaded it, unless the test says it can't.
             is MapCommand.PictureShown -> {
                 commands.trySend(sent)
-                JsonPrimitive(true)
+                JsonPrimitive(picturesShow ?: throw PageException("The page didn't answer"))
+            }
+            is MapCommand.Update -> {
+                commands.trySend(sent)
+                JsonPrimitive(changesTaken ?: throw PageException("The page didn't answer", PageException.Kind.DidNotAnswer))
             }
             else -> error("This test's page answers no ${sent::class.simpleName} jobs")
         }
@@ -1414,8 +3077,51 @@ private class TestPage : MapPage {
     }
 }
 
-/** The rest of the app, as far as a test's map reaches for it: pages, words and the private maps' lock. */
-private class TestApp(override val words: Words) : MapApp {
+/** A clipboard that keeps the ideas copied onto it, by their markdown, and fails a test that reads it: nothing is pasted in these tests. */
+private class TestClipboard : IdeasClipboard {
+    val copied: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
+
+    override val resolver: android.content.ContentResolver get() = error("Nothing is pasted in these tests")
+
+    override fun pasteable(): Pasteable? = error("Nothing is pasted in these tests")
+
+    override fun read(): Clip? = error("Nothing is pasted in these tests")
+
+    override fun copy(label: String, text: String, markdown: String, mapId: String, sensitive: Boolean): Boolean {
+        copied += markdown
+        return true
+    }
+}
+
+/** A second screen that keeps what it's told, and goes wrong when a test says, as one whose page stopped. */
+private class TestScreen : Audience {
+    override val name = "HDMI screen"
+
+    /** Everything it was told, in order. */
+    val heard = mutableListOf<AudienceCommand>()
+
+    override val trouble = MutableStateFlow<ScreenTrouble?>(null)
+
+    /** How many times it was loaded again. */
+    var loadedAgain = 0
+
+    override fun send(command: AudienceCommand) {
+        heard += command
+    }
+
+    override fun loadAgain() {
+        loadedAgain += 1
+        trouble.value = null
+    }
+
+    override fun close() = Unit
+}
+
+/** The maps an audience was shown, in order. */
+private fun Audience.shown(): List<String> = (this as TestScreen).heard.filterIsInstance<AudienceCommand.Show>().map { it.markdown }
+
+/** The rest of the app, as far as a test's map reaches for it: pages, words, the private maps' lock and study mode's answers on their way to `maps`. */
+private class TestApp(override val words: Words, maps: MapRepository) : MapApp {
     /** The pages the view model took, in order. */
     val pages = mutableListOf<TestPage>()
 
@@ -1424,9 +3130,14 @@ private class TestApp(override val words: Words) : MapApp {
     /** The test's own: what's started in it ends with the test (see cleanUp). */
     override val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    override val studyWrites = StudyWrites(applicationScope, maps::changeStudy) { if (maps.writable.value) AnswersUnsaved.Storage else AnswersUnsaved.Newer }
+
     override val deletedMaps = Channel<TrashedMap>(Channel.CONFLATED)
 
     override val ideaToShow = MutableStateFlow<IdeaToShow?>(null)
+
+    /** The test's clock for a presentation's times: Android's isn't there on the JVM. */
+    override fun elapsedRealtime(): Long = System.nanoTime() / 1_000_000
 
     override fun takePage(): MapPage = TestPage().also { pages += it }
 
@@ -1436,9 +3147,9 @@ private class TestApp(override val words: Words) : MapApp {
 
     override fun soundPlayback(scope: CoroutineScope, resolve: (String) -> Any?) = SoundPlayback(scope, resolve) { error("No sound plays in these tests") }
 
-    override fun timeWords(): TimeWords = error("No version is restored in these tests")
+    override fun timeWords(): TimeWords = TimeWords(Locale.US, is24Hour = false)
 
-    override val clipboard: MapClipboard get() = error("Nothing is copied in these tests")
+    override val clipboard = TestClipboard()
     override val pictures: MapPictures get() = error("No picture is drawn in these tests")
     override val importer: Importer get() = error("No file is let go on the map in these tests")
     override val folderSync: FolderSync get() = error("No folder syncs in these tests")

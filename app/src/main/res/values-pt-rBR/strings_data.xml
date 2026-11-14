@@ -38,6 +38,7 @@
     <string name="data_yaml_unreadable">O Orbit não conseguiu ler todo esse YAML, então não fez um mapa com ele: %1$s</string>
     <string name="data_yaml_unreadable_at_line">O Orbit não conseguiu ler todo esse YAML, então não fez um mapa com ele: %1$s (linha %2$d)</string>
     <string name="data_newer_version_keeps_maps">Uma versão mais recente do Orbit guarda estes mapas: atualize o Orbit para alterá-los.</string>
+    <string name="data_map_changed_since_answered">Este mapa mudou depois que você respondeu, então não foi atualizado. Responda de novo.</string>
     <string name="data_could_not_add_map">O Orbit não conseguiu adicionar o mapa. O armazenamento deste dispositivo está cheio?</string>
     <string name="data_could_not_change_map">O Orbit não conseguiu alterar o mapa.</string>
     <string name="data_could_not_save_change">O Orbit não conseguiu salvar essa alteração. O armazenamento deste dispositivo está cheio?</string>
@@ -59,6 +60,16 @@
         <item quantity="one">%1$d pasta desse arquivo zip não tinha nenhum mapa, então ficou de fora.</item>
         <item quantity="many">%1$d pastas desse arquivo zip não tinham nenhum mapa, então ficaram de fora.</item>
         <item quantity="other">%1$d pastas desse arquivo zip não tinham nenhum mapa, então ficaram de fora.</item>
+    </plurals>
+    <plurals name="data_zip_files_past_map_room">
+        <item quantity="one">%1$d arquivo faria o mapa dele passar dos %2$s que um mapa pode levar, então ficou no arquivo zip.</item>
+        <item quantity="many">%1$d arquivos fariam os mapas deles passarem dos %2$s que um mapa pode levar, então ficaram no arquivo zip.</item>
+        <item quantity="other">%1$d arquivos fariam os mapas deles passarem dos %2$s que um mapa pode levar, então ficaram no arquivo zip.</item>
+    </plurals>
+    <plurals name="data_zip_files_stayed_private">
+        <item quantity="one">%1$d versão ou arquivo ficou no arquivo zip: é de um mapa que lá é privado e aqui não.</item>
+        <item quantity="many">%1$d versões ou arquivos ficaram no arquivo zip: são de mapas que lá são privados e aqui não.</item>
+        <item quantity="other">%1$d versões ou arquivos ficaram no arquivo zip: são de mapas que lá são privados e aqui não.</item>
     </plurals>
 
     <!-- Imagens e vídeos que um mapa não aceita -->

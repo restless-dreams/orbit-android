@@ -1,13 +1,21 @@
 package com.hyuchia.orbit.data
 
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -213,5 +221,79 @@ class UpdatesTest {
 
         assertFalse(none.failed)
         assertNull(none.latest)
+    }
+
+    @Test
+    fun `looks that overlap ask once, as two windows showing the home screen at once do`() = runTest {
+        // The looks run on the test's clock: each waits its turn where it would go off to ask.
+        val io = StandardTestDispatcher(testScheduler)
+        var asks = 0
+        val updates = Updates(MemoryStore(), enabled = { true }, address = "https://releases", current = "0.1.1", clock = { now }, io = io, fetch = { asks++; release("v0.1.2") })
+
+        val first = launch { updates.checkIfDue() }
+        val second = launch { updates.checkIfDue() }
+        first.join()
+        second.join()
+
+        assertEquals(1, asks)
+        assertEquals("0.1.2", updates.state.first().latest?.version)
+    }
+
+    @Test
+    fun `a look from About whose storage fails says what it found, and never throws`() = runTest {
+        val store = MemoryStore().apply { failing = true }
+        var asks = 0
+        var answer: () -> String? = { release("v0.1.2") }
+        val updates = Updates(store, enabled = { true }, address = "https://releases", current = "0.1.1", clock = { now }, io = Dispatchers.Unconfined, fetch = { asks++; answer() })
+
+        val found = updates.check()
+
+        assertEquals(UpdateState(Release("0.1.2", "https://github.com/restless-dreams/orbit-android/releases/tag/v0.1.2"), checkedAt = now), found)
+        assertEquals(found, updates.state.first())
+        assertEquals("0.1.2", updates.announced(found)?.version)
+
+        // It counts as the day's look while Orbit runs.
+        updates.checkIfDue()
+
+        assertEquals(1, asks)
+
+        // One that can't reach the releases says so, and keeps what the last one found.
+        answer = { throw IOException("No connection") }
+        val failed = updates.check()
+
+        assertTrue(failed.failed)
+        assertEquals("0.1.2", failed.latest?.version)
+
+        // Once the storage works again, a look is kept, and what's kept is what shows.
+        store.failing = false
+        answer = { release("v0.1.3") }
+        now += 1_000
+        val kept = updates.check()
+
+        assertEquals(UpdateState(Release("0.1.3", "https://github.com/restless-dreams/orbit-android/releases/tag/v0.1.3"), checkedAt = now), kept)
+        assertEquals(kept, updates.state.first())
+        assertEquals(1, store.writes)
+    }
+}
+
+/** Updates' storage in memory, which fails to write while `failing`, as a full phone's does. */
+private class MemoryStore : DataStore<Preferences> {
+    private val preferences = MutableStateFlow(emptyPreferences())
+
+    @Volatile
+    var failing = false
+
+    /** How many writes were kept. */
+    var writes = 0
+
+    override val data: Flow<Preferences> = preferences
+
+    override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+        if (failing) {
+            throw IOException("No space left on device")
+        }
+
+        writes++
+        return transform(preferences.value).also { preferences.value = it }
     }
 }

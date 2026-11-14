@@ -72,13 +72,14 @@ import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.container
+import com.hyuchia.orbit.data.AsTheyAreFiles
+import com.hyuchia.orbit.data.FileChanged
 import com.hyuchia.orbit.data.MediaSummary
-import com.hyuchia.orbit.data.OutputFailed
 import com.hyuchia.orbit.data.Uncleaned
 import com.hyuchia.orbit.data.readableSize
 import com.hyuchia.orbit.data.requireRoom
-import com.hyuchia.orbit.data.watched
 import com.hyuchia.orbit.present.QrCode
+import com.hyuchia.orbit.privacy.privateSheetProperties
 import com.hyuchia.orbit.rememberWords
 import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.theme.mapTheme
@@ -93,14 +94,9 @@ import com.hyuchia.orbit.ui.shareMapExport
 import com.hyuchia.orbit.ui.thisDeviceIcon
 import com.hyuchia.orbit.ui.uncleanedLines
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
-
-/** How old a map left in the sending folder is before it's cleared away: older than any send takes. */
-private const val STALE_MILLISECONDS = 60 * 60 * 1000L
 
 /**
  * Sends a map to another device: to a nearby one with Orbit open on the
@@ -114,57 +110,45 @@ fun SendSheet(mapId: String, title: String, onDismiss: () -> Unit) {
     val host = container.nearby
     val scope = rememberCoroutineScope()
     val devices = rememberNearbyDevices(host.selfId)
-    val states = remember { mutableStateMapOf<String, SendState>() }
+    // One send at a time to each device, from the tap on.
+    val sends = remember(scope) { Sends(scope) }
+    val states = sends.states
     // What the person sending says about the codes, by device, while both show one: the map goes only once they match.
     val checks = remember { mutableStateMapOf<String, Pair<String, CompletableDeferred<Boolean>>>() }
     // Devices reached by their address, for networks where they can't find each other.
     val typed = remember { mutableStateListOf<String>() }
     var typingAddress by remember { mutableStateOf(false) }
     // While the map is open on a computer: those of its files that can't go clean that go as they are.
-    var computer by remember { mutableStateOf<Set<String>?>(null) }
+    var computer by remember { mutableStateOf<AsTheyAreFiles?>(null) }
     var sharingFailed by remember { mutableStateOf(false) }
     val words = rememberWords()
     val thisDevice = thisDeviceIcon()
     // Files that can't go clean stay on this device unless the person chooses, as the first way to send starts, to send them as they are.
     val asTheyAre = rememberAsTheyAre()
-    val chosen = asTheyAre.chosen
     // What goes with the map, for each way to send it to say.
     val uncleaned by produceState(Uncleaned(), mapId) { value = container.maps.uncleaned(mapId) }
+    // Those chosen to go as they are, each as it is now: one that changed since was chosen as it was, and stays.
+    val chosen = asTheyAre.chosen.chosenIn(uncleaned)
     val media by produceState(MediaSummary(), mapId, uncleaned, chosen) { value = container.maps.mediaSummary(mapId, leavingOut = uncleaned.names - chosen) }
     val keptInFolder = LocalAppSettings.current.syncFolder != null
     val pastOlderZips by produceState(false, mapId) { value = container.maps.pastOlderZips(mapId) }
 
-    /** Sends the map to `device`, with those of its files that can't go clean in `names` as they are. */
-    fun sendTo(device: NearbyDevice, names: Set<String>) {
+    /**
+     * Sends the map to `device`, with those of its files that can't go clean
+     * in `files` as they are. One of them that changed since the person
+     * answered about it is asked about again, once, as it is now.
+     */
+    fun sendTo(device: NearbyDevice, files: AsTheyAreFiles, again: Boolean = false) {
         val address = device.address
+        // The map goes from a file, so even a big one is never in memory whole: made only once there's room for all of it.
+        val folder = File(context.cacheDir, "sending")
+        val askAgain = if (again) null else suspend { asTheyAre.askAgain(container.maps.uncleaned(mapId)) { now -> sendTo(device, now, again = true) } }
 
-        scope.launch {
-            // The map goes from a file, so even a big one is never in memory whole: made only once there's room for all of it.
-            val bundle = try {
-                withContext(Dispatchers.IO) {
-                    val folder = File(context.cacheDir, "sending")
-                    folder.mkdirs()
-                    // Left by a send that never finished, when Orbit was stopped halfway.
-                    folder.listFiles().orEmpty().filter { it.lastModified() < System.currentTimeMillis() - STALE_MILLISECONDS }.forEach { it.delete() }
-                    val file = File.createTempFile("map", ".zip", folder)
-
-                    try {
-                        file.outputStream().watched().use { container.maps.writeZip(mapId, it, names) { size -> requireRoom(folder, size) } }
-                    } catch (failed: IOException) {
-                        file.delete()
-                        throw failed
-                    }
-
-                    file
-                }
-            } catch (full: OutputFailed) {
-                states[address] = SendState.Failed(R.string.nearby_send_no_room_here)
-                return@launch
-            } catch (failed: IOException) {
-                states[address] = SendState.Failed(R.string.nearby_send_could_not_get_the_map_ready)
-                return@launch
-            }
-
+        sends.sendBundle(
+            address,
+            prepare = { preparedBundle(folder) { output -> container.maps.writeZip(mapId, output, files) { size -> requireRoom(folder, size) } } },
+            askAgain = askAgain,
+        ) { bundle, onState ->
             val confirm: suspend (String) -> Boolean = { check ->
                 val answer = CompletableDeferred<Boolean>()
                 checks[address] = device.name to answer
@@ -176,23 +160,41 @@ fun SendSheet(mapId: String, title: String, onDismiss: () -> Unit) {
                 }
             }
 
+            sendMap(address, device.key, device.version, host.name, bundle, confirm, onState = onState)
+        }
+    }
+
+    /**
+     * Shares the map as a zip through any app, with those of its files that
+     * can't go clean in `files` as they are. One of them that changed since
+     * the person answered about it is asked about again, once, as it is now.
+     */
+    fun shareAsFile(files: AsTheyAreFiles, again: Boolean = false) {
+        scope.launch {
+            sharingFailed = false
+
+            // The zip waits in the phone's storage for the app it goes to, and the phone may be out of room.
+            // A private map that locks while it's written opens nothing.
             try {
-                sendMap(address, device.key, device.version, host.name, bundle, confirm) { sent -> states[address] = sent }
-            } finally {
-                bundle.delete()
+                shareMapExport(context, mapId, exportName(context, title, "zip"), "application/zip", title) { container.maps.writeZip(mapId, it, files, room = this) }
+            } catch (changed: FileChanged) {
+                if (again) {
+                    sharingFailed = true
+                } else {
+                    asTheyAre.askAgain(container.maps.uncleaned(mapId)) { now -> shareAsFile(now, again = true) }
+                }
+            } catch (failed: IOException) {
+                sharingFailed = true
             }
         }
     }
 
     fun send(device: NearbyDevice) {
-        val address = device.address
-        val state = states[address]
-
-        if (state is SendState.Sending || state is SendState.Confirming || state is SendState.Waiting) {
+        if (sends.underWay(device.address)) {
             return
         }
 
-        asTheyAre.then(uncleaned) { names -> sendTo(device, names) }
+        asTheyAre.then(uncleaned) { files -> sendTo(device, files) }
     }
 
     val state = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded))
@@ -200,7 +202,7 @@ fun SendSheet(mapId: String, title: String, onDismiss: () -> Unit) {
     val forward = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
 
     // Every way to send fits on the screen at once, so it opens all the way; on a phone on its side, it scrolls.
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state) {
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state, properties = privateSheetProperties()) {
         // From the computer's step, Escape and Back go back to the ways to send; from those, they close the sheet.
         EscapeCloses { if (computer != null) computer = null else onDismiss() }
         BackHandler(enabled = computer != null) { computer = null }
@@ -215,13 +217,13 @@ fun SendSheet(mapId: String, title: String, onDismiss: () -> Unit) {
                 (slideInHorizontally { width -> side * width / 4 } + fadeIn()) togetherWith (slideOutHorizontally { width -> -side * width / 4 } + fadeOut())
             },
             label = "send step",
-        ) { names ->
-            if (names != null) {
+        ) { files ->
+            if (files != null) {
                 ComputerStep(
                     mapId,
                     media,
                     uncleaned,
-                    names,
+                    files,
                     onBack = { computer = null },
                     onDone = { scope.launch { state.hide() }.invokeOnCompletion { onDismiss() } },
                 )
@@ -327,21 +329,7 @@ fun SendSheet(mapId: String, title: String, onDismiss: () -> Unit) {
                         },
                         leadingContent = { Icon(Icons.Outlined.Share, contentDescription = null) },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        modifier = Modifier.clickable {
-                            asTheyAre.then(uncleaned) { names ->
-                                scope.launch {
-                                    sharingFailed = false
-
-                                    // The zip waits in the phone's storage for the app it goes to, and the phone may be out of room.
-                                    // A private map that locks while it's written opens nothing.
-                                    try {
-                                        shareMapExport(context, mapId, exportName(context, title, "zip"), "application/zip", title) { container.maps.writeZip(mapId, it, names, room = this) }
-                                    } catch (failed: IOException) {
-                                        sharingFailed = true
-                                    }
-                                }
-                            }
-                        },
+                        modifier = Modifier.clickable { asTheyAre.then(uncleaned) { files -> shareAsFile(files) } },
                     )
                     ListItem(
                         headlineContent = { Text(stringResource(R.string.nearby_open_on_a_computer)) },
@@ -349,7 +337,7 @@ fun SendSheet(mapId: String, title: String, onDismiss: () -> Unit) {
                         leadingContent = { Icon(Icons.Outlined.Computer, contentDescription = null) },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         // The computer's browser gets what the person chose for the files that can't go clean, asked here before it opens.
-                        modifier = Modifier.clickable { asTheyAre.then(uncleaned) { names -> computer = names } },
+                        modifier = Modifier.clickable { asTheyAre.then(uncleaned) { files -> computer = files } },
                     )
                 }
             }
@@ -518,7 +506,7 @@ private fun AddressDialog(onSend: (String) -> Unit, onDismiss: () -> Unit) {
  * the ways to send, and `onDone` closes the sheet.
  */
 @Composable
-private fun ComputerStep(mapId: String, media: MediaSummary, uncleaned: Uncleaned, asTheyAre: Set<String>, onBack: () -> Unit, onDone: () -> Unit) {
+private fun ComputerStep(mapId: String, media: MediaSummary, uncleaned: Uncleaned, asTheyAre: AsTheyAreFiles, onBack: () -> Unit, onDone: () -> Unit) {
     val context = LocalContext.current
     val words = rememberWords()
     val device = thisDeviceIcon()
@@ -528,7 +516,8 @@ private fun ComputerStep(mapId: String, media: MediaSummary, uncleaned: Uncleane
     val settings = LocalAppSettings.current
 
     val shared = remember(mapId) {
-        host.share(mapId, theme, JoiningOptions(askNames = false, requirePin = settings.shareRequirePin, limit = settings.shareLimit), asTheyAre)
+        // The computer's browser can't be asked: a file that changes while it's open stays here, unless it goes clean.
+        host.share(mapId, theme, JoiningOptions(askNames = false, requirePin = settings.shareRequirePin, limit = settings.shareLimit), asTheyAre.lasting())
     }
 
     DisposableEffect(shared) { onDispose { host.unshare(shared.code) } }
@@ -565,7 +554,7 @@ private fun ComputerStep(mapId: String, media: MediaSummary, uncleaned: Uncleane
                 )
             }
 
-            uncleanedLines(uncleaned, asTheyAre, words, device).forEach { line ->
+            uncleanedLines(uncleaned, asTheyAre.chosenIn(uncleaned), words, device).forEach { line ->
                 WhatGoes(line.text, line.icon, line.goes, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall)
             }
 

@@ -70,10 +70,10 @@ class StudyAnswersTest {
         ui = ui,
         send = {},
         progress = { maps.summary(id)?.metadata?.study.orEmpty() },
-        keep = { change ->
+        answers = StudyWriting(backgroundScope, { change ->
             holding?.await()
             maps.changeStudy(id, change)
-        },
+        }),
         today = { today },
         elsewhere = { maps.summary(id)?.metadata?.studyElsewhere.orEmpty() },
         newADay = { newADay },
@@ -107,6 +107,31 @@ class StudyAnswersTest {
         // As Orbit reads the maps again.
         val again = MapRepository(File(root, "maps"), File(root, "trash"), starters, words).also { it.load() }
         assertEquals(kept, again.summary(id)?.metadata?.study)
+    }
+
+    @Test
+    fun `leaving the folder while an answer is on its way keeps a newer answer to the same card`() = runTest {
+        maps.load()
+        val id = maps.add("# Spanish verbs\n\n## Ser\n\n- soy\n\n## Estar\n\n- estoy\n")
+        maps.saveStudy(id, mapOf("ser" to StudyCard(box = 1, due = today, first = today - 9, at = now - 2 * DAY)))
+        val control = studying(id)
+        control.start("verbs")
+        assertEquals("ser", study.current)
+
+        holding = CompletableDeferred()
+        control.reveal()
+        control.answer(knew = true)
+        runCurrent()
+
+        val tablet = StudyCard(box = 5, due = today + 30, first = today - 10, at = now + 1)
+        maps.saveStudyElsewhere(id, mapOf("tablet" to mapOf("ser" to tablet)))
+        maps.keepStudyHere()
+        holding!!.complete(Unit)
+        control.written()
+
+        assertEquals(mapOf("ser" to tablet), maps.summary(id)?.metadata?.study)
+        val again = MapRepository(File(root, "maps"), File(root, "trash"), starters, words).also { it.load() }
+        assertEquals(mapOf("ser" to tablet), again.summary(id)?.metadata?.study)
     }
 
     @Test

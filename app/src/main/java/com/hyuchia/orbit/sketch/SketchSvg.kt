@@ -103,8 +103,22 @@ object SketchSvg {
     /** Whether `bytes` start as Orbit's sketches do, without a document type, whose entities could put anything anywhere. */
     private fun looksLikeSketch(bytes: ByteArray): Boolean {
         val text = String(bytes, Charsets.UTF_8)
-        return "class=\"$SKETCH\"" in text.take(512) && !text.contains("<!DOCTYPE", ignoreCase = true) && !text.contains("<!ENTITY", ignoreCase = true)
+        return startsAsSketch(text.take(START)) && !text.contains("<!DOCTYPE", ignoreCase = true) && !text.contains("<!ENTITY", ignoreCase = true)
     }
+
+    /** How much of a file tells one of Orbit's sketches from anything else: as far as its drawing's own class. */
+    const val START = 512
+
+    /**
+     * Whether `start`, a file's first [START] characters, is the start of one
+     * of Orbit's sketches: an SVG drawing whose own element carries the class
+     * `orbit-sketch`, after nothing but an XML declaration (as the outgoing
+     * cleaner writes one) and comments. A picture of another kind that merely
+     * holds those words, in a PNG's text say, isn't one.
+     */
+    fun startsAsSketch(start: String): Boolean = SKETCH_START.containsMatchIn(start)
+
+    private val SKETCH_START = Regex("""^\uFEFF?\s*(<\?xml[^>]*>\s*)?(<!--.*?-->\s*)*<svg\b[^>]*\sclass="$SKETCH"[\s/>]""", RegexOption.DOT_MATCHES_ALL)
 
     /** `#rrggbb`, for an opaque color. */
     fun hex(color: Int): String = "#%06x".format(color and 0xFFFFFF)

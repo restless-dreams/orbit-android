@@ -98,6 +98,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.media.LiveMark
+import com.hyuchia.orbit.page.GOAL_VERSION
 import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.Media
 import com.hyuchia.orbit.rememberWords
@@ -122,8 +123,8 @@ import kotlinx.serialization.json.put
 import java.io.File
 import java.text.NumberFormat
 
-/** A kind of idea, drawn its own way by the map page's node types. */
-data class NodeKind(val type: String?, @StringRes val label: Int, val icon: String)
+/** A kind of idea, drawn its own way by the map page's node types, which draw its ideas written for up to `version`. */
+data class NodeKind(val type: String?, @StringRes val label: Int, val icon: String, val version: Int = 1)
 
 val NodeKinds = listOf(
     NodeKind(null, R.string.map_kind_idea, "💡"),
@@ -134,8 +135,24 @@ val NodeKinds = listOf(
     NodeKind("source", R.string.map_kind_source, "📚"),
     NodeKind("person", R.string.map_kind_person, "👤"),
     NodeKind("progress", R.string.map_kind_progress, "📊"),
-    NodeKind("goal", R.string.map_kind_goal, "🎯"),
+    NodeKind("goal", R.string.map_kind_goal, "🎯", GOAL_VERSION),
 )
+
+/**
+ * The kind `node` is, as the map's page draws it: its type whatever its spaces and capitals, as Orbit reads it, and
+ * the idea kind when it has none. Null for a kind the app doesn't know, or for one written for a newer version of
+ * its kind than the page draws, which the page draws as an idea of no kind: the editor and the details say no kind
+ * of it either, as the app steps no goal it can't read ([MapNode.isGoal]).
+ */
+internal fun kindOf(node: MapNode): NodeKind? {
+    val type = node.type?.trim().orEmpty()
+
+    if (type.isEmpty()) {
+        return NodeKinds.first { it.type == null }
+    }
+
+    return NodeKinds.firstOrNull { it.type.equals(type, ignoreCase = true) }?.takeIf { (node.typeVersion ?: 1) <= it.version }
+}
 
 /**
  * Everything an idea can be, edited live: each change shows on the map
@@ -250,7 +267,7 @@ fun NodeEditor(
             // A goal's numbers are what it's about: they come first.
             if (node.isGoal) {
                 Section(stringResource(R.string.map_section_goal)) {
-                    GoalSection(node, ui.progress.under(node), goalDrafts) { changes -> model.setGoal(node.id, changes) }
+                    GoalSection(node, ui.progress.under(node), goalDrafts, opened) { changes -> model.setGoal(node.id, changes) }
                 }
             }
 
@@ -267,15 +284,7 @@ fun NodeEditor(
             }
 
             Section(stringResource(R.string.common_status)) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Choice(stringResource(R.string.map_status_none), node.shownStatus == null) { set("status", null) }
-
-                    Statuses.forEach { (word, label, icon) ->
-                        Choice(stringResource(label), node.hasStatus(word), icon = { Icon(icon, contentDescription = null, Modifier.size(18.dp)) }) {
-                            set("status", JsonPrimitive(word))
-                        }
-                    }
-                }
+                StatusChoices(node) { word -> set("status", word?.let(::JsonPrimitive)) }
             }
 
             Section(stringResource(R.string.map_section_priority)) {
@@ -287,28 +296,20 @@ fun NodeEditor(
             }
 
             Section(stringResource(R.string.map_section_kind)) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    NodeKinds.forEach { kind ->
-                        // The emoji shows before the name, and screen readers say the name alone ("Milestone", not "chequered flag, Milestone").
-                        val icon = @Composable { Text(kind.icon, modifier = Modifier.clearAndSetSemantics {}) }
+                KindChoices(node) { kind ->
+                    val changes = kindChanges(node, kind)
 
-                        Choice(stringResource(kind.label), node.type.equals(kind.type, ignoreCase = true) || (kind.type == null && node.type == null), icon) {
-                            val type = kind.type?.let(::JsonPrimitive)
-                            // A goal's number typed a moment ago is saved before the change, never after it, over it.
-                            goalDrafts.saveNow()
+                    if (changes.isEmpty()) {
+                        return@KindChoices
+                    }
 
-                            if (node.isGoal && kind.type != GOAL_TYPE) {
-                                // An idea that stops being a goal takes its numbers with it, in the same step to undo.
-                                model.update(node.id, mapOf("type" to type, "attrs" to JsonObject(Goal.removed)))
-                            } else {
-                                set("type", type)
-                            }
+                    // A goal's number typed a moment ago is saved before the change, never after it, over it.
+                    goalDrafts.saveNow()
+                    model.update(node.id, changes)
 
-                            if (kind.type == GOAL_TYPE && !node.isGoal) {
-                                // Its numbers come at the top.
-                                scope.launch { scroll.animateScrollTo(0) }
-                            }
-                        }
+                    if (kind.type == GOAL_TYPE && !node.isGoal) {
+                        // Its numbers come at the top.
+                        scope.launch { scroll.animateScrollTo(0) }
                     }
                 }
             }
@@ -660,9 +661,76 @@ private fun Section(title: String, content: @Composable () -> Unit) {
     }
 }
 
+/** An idea's status, as chips: none, or one of [Statuses]. */
+@Composable
+internal fun StatusChoices(node: MapNode, onPick: (String?) -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.selectableGroup()) {
+        Choice(stringResource(R.string.map_status_none), node.shownStatus == null) { onPick(null) }
+
+        Statuses.forEach { (word, label, icon) ->
+            Choice(stringResource(label), node.hasStatus(word), icon = { Icon(icon, contentDescription = null, Modifier.size(18.dp)) }) { onPick(word) }
+        }
+    }
+}
+
+/** The kind an idea is, as chips: the one its type names ([kindNamed]), none of them for a kind the app doesn't know. */
+@Composable
+internal fun KindChoices(node: MapNode, onPick: (NodeKind) -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.selectableGroup()) {
+        NodeKinds.forEach { kind ->
+            // The emoji shows before the name, and screen readers say the name alone ("Milestone", not "chequered flag, Milestone").
+            val icon = @Composable { Text(kind.icon, modifier = Modifier.clearAndSetSemantics {}) }
+
+            Choice(stringResource(kind.label), kindNamed(node) == kind, icon) { onPick(kind) }
+        }
+    }
+}
+
+/**
+ * The kind `node`'s type names, whatever its spaces and capitals, and
+ * whatever version of it it was written for: the one the editor shows as
+ * chosen. Unlike [kindOf], a goal written for a newer version (`goal@2`) is
+ * a goal here, which picking Goal leaves as it is.
+ */
+internal fun kindNamed(node: MapNode): NodeKind? = NodeKinds.firstOrNull { it.type.orEmpty().equals(node.type?.trim().orEmpty(), ignoreCase = true) }
+
+/**
+ * What picking `kind` changes in `node`: nothing when its type names that
+ * kind already, even for a newer version of it, whose fields stay as that
+ * version wrote them; otherwise its type, and, for a goal that becomes
+ * another kind, its numbers, in one step to undo. The version of its type's
+ * fields it was written for (`task@2`) was its old type's, and goes with
+ * it: kept, the page would draw the kind picked as no kind at all, written
+ * for a version of it the page doesn't know.
+ */
+internal fun kindChanges(node: MapNode, kind: NodeKind): Map<String, JsonElement?> {
+    if (kindNamed(node) == kind) {
+        return emptyMap()
+    }
+
+    return buildMap {
+        put("type", kind.type?.let(::JsonPrimitive))
+
+        if (node.typeVersion != null) {
+            put("typeVersion", null)
+        }
+
+        if (node.isGoal && kind.type != GOAL_TYPE) {
+            // An idea that stops being a goal takes its numbers with it.
+            put("attrs", JsonObject(Goal.removed))
+        }
+    }
+}
+
+/**
+ * One of several choices, as a chip. Material's filter chips are checkboxes
+ * to TalkBack, for picking several: these are radio buttons, in their row's
+ * group, for picking one.
+ */
 @Composable
 private fun Choice(label: String, selected: Boolean, icon: (@Composable () -> Unit)? = null, onClick: () -> Unit) {
-    FilterChip(selected = selected, onClick = onClick, label = { Text(label) }, leadingIcon = icon)
+    // Outside the chip's own checkbox role, so it's the one TalkBack hears.
+    FilterChip(selected = selected, onClick = onClick, label = { Text(label) }, leadingIcon = icon, modifier = Modifier.semantics { role = Role.RadioButton })
 }
 
 /**

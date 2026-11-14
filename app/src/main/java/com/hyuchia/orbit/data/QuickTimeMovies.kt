@@ -107,7 +107,9 @@ internal object QuickTimeMovies {
             }
 
             val length = (inChunk * frameBytes).toInt()
-            val chunk = bytes.read(offset, length)
+            val read = bytes.read(offset, length)
+            // A chunk the file ends in, cut short, goes as far as its last whole frame: a frame without all its channels isn't sound.
+            val chunk = if (read.size % frameBytes == 0) read else read.copyOf(read.size / frameBytes * frameBytes)
             sound.write(sixteenBits(chunk, format))
             frames -= chunk.size / frameBytes
 

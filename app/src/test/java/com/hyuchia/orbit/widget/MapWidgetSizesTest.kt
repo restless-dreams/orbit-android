@@ -1,6 +1,8 @@
 package com.hyuchia.orbit.widget
 
 import android.content.Context
+import android.content.res.Resources
+import android.os.Build
 import androidx.compose.ui.unit.DpSize
 import androidx.glance.appwidget.testing.unit.runGlanceAppWidgetUnitTest
 import androidx.glance.testing.unit.hasContentDescriptionEqualTo
@@ -15,6 +17,7 @@ import com.hyuchia.orbit.data.MapSummary
 import com.hyuchia.orbit.map.Rollup
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.util.ReflectionHelpers
 
 /** The map widget as the launcher draws it at each of its six sizes: what shows, and where + fits. */
 @RunWith(AndroidJUnit4::class)
@@ -113,5 +116,46 @@ class MapWidgetSizesTest {
     @Test
     fun withoutAMapItSaysWhereMapsWillShow() {
         at(RoomyCell, null) { onNode(hasText("Your maps will show here. Open Orbit to start one.")).assertExists() }
+    }
+
+    /** Draws widgets as Android `sdk` does, with the phone's text at `fontScale`. */
+    private fun on(sdk: Int, fontScale: Float, draw: () -> Unit) {
+        val configuration = Resources.getSystem().configuration
+        val scale = configuration.fontScale
+        val version = Build.VERSION.SDK_INT
+
+        try {
+            ReflectionHelpers.setStaticField(Build.VERSION::class.java, "SDK_INT", sdk)
+            configuration.fontScale = fontScale
+            draw()
+        } finally {
+            configuration.fontScale = scale
+            ReflectionHelpers.setStaticField(Build.VERSION::class.java, "SDK_INT", version)
+        }
+    }
+
+    @Test
+    fun aRowWithLargeTextStillSaysItsProgressOnAndroid10And11() {
+        // Before Android 12 the bar is a picture of it: with no room for the words, screen readers hear them from it.
+        val bar = hasContentDescriptionEqualTo("1 of 4 done")
+
+        for (sdk in listOf(Build.VERSION_CODES.Q, Build.VERSION_CODES.R)) {
+            on(sdk, fontScale = 2f) {
+                for (size in listOf(ShortRow, LongRow)) {
+                    at(size, trip) {
+                        onNode(hasTextEqualTo("1 of 4 done")).assertDoesNotExist()
+                        onNode(bar).assertExists()
+                    }
+                }
+            }
+
+            // With the words beside it, they're heard once.
+            on(sdk, fontScale = 1f) {
+                at(ShortRow, trip) {
+                    onNode(hasTextEqualTo("1 of 4 done")).assertExists()
+                    onNode(bar).assertDoesNotExist()
+                }
+            }
+        }
     }
 }

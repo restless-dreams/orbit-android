@@ -40,7 +40,7 @@ class CastMediaStateTest {
 
         override val name: String = "Living room TV"
 
-        override fun send(message: String) {
+        override fun send(message: String, failed: (Int) -> Unit) {
             sent += message
         }
 

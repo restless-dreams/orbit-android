@@ -3,6 +3,7 @@
 <resources>
     <string name="main_could_not_keep_sent_map">O Orbit não conseguiu guardar o mapa que %1$s enviou. Peça para enviarem o mapa como arquivo.</string>
     <string name="main_could_not_open_that">Não foi possível abrir</string>
+    <string name="main_could_not_take_map_in">Não foi possível guardar esse mapa</string>
     <string name="main_ok">OK</string>
 
     <!-- Um arquivo zip de mapas, importado. -->
@@ -10,6 +11,7 @@
     <string name="main_maps_added">Mapas adicionados</string>
     <string name="main_no_maps_in_zip">Não há mapas nesse arquivo zip.</string>
     <string name="main_every_map_in_zip_already_here">Todos os mapas desse arquivo zip já estão aqui.</string>
+    <string name="main_import_stopped">Nem tudo chegou</string>
 
     <!-- Um mapa de outro app (OPML, FreeMind, XMind), importado: o que ele tinha que o Orbit guarda de outro jeito, ou não conseguiu guardar. -->
     <string name="main_import_notes_title">O que mudou ao importar</string>

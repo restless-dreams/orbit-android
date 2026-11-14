@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.text.KeyboardActions
@@ -75,9 +77,12 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.privacy.CountsOverTheMap
 import com.hyuchia.orbit.sketch.SketchCanvas
 import com.hyuchia.orbit.sketch.SketchKeys
 import com.hyuchia.orbit.sketch.SketchPens
@@ -105,6 +110,19 @@ internal fun SketchOverlay(model: MapViewModel, ui: MapUi, short: Boolean, clear
     }
 
     val drawing = session ?: return
+
+    // Waiting for the map to be drawn again: nothing over the map's place, which says why, and loads it again. Back still
+    // asks before strokes go.
+    if (sketching.held) {
+        BackHandler { model.cancelSketch() }
+
+        if (sketching.discarding) {
+            DiscardSketchDialog(onDiscard = { model.cancelSketch(letGo = true) }, onKeep = model::keepSketching)
+        }
+
+        return
+    }
+
     var pensOpen by rememberSaveable(sketching.nodeId) { mutableStateOf(false) }
     val phase = sketching.phase
     val idea = ui.nodes[sketching.nodeId]?.label(stringResource(R.string.common_untitled)).orEmpty()
@@ -209,6 +227,10 @@ internal fun SketchOverlay(model: MapViewModel, ui: MapUi, short: Boolean, clear
 
     if (sketching.discarding) {
         DiscardSketchDialog(onDiscard = { model.cancelSketch(letGo = true) }, onKeep = model::keepSketching)
+    }
+
+    if (sketching.confirming) {
+        ReplaceLandedDialog(idea, onReplace = model::replaceLandedPicture, onKeep = model::keepSketching)
     }
 }
 
@@ -364,7 +386,14 @@ private fun DescribeSketch(description: String, compact: Boolean, onChange: (Str
  * Lays the description's parts out: the title, the field under it and the
  * buttons at the end, under the field; or, `compact`, in one row, the title
  * at most [CompactTitleWidth] wide, the buttons at the end and the field
- * taking the room between them.
+ * taking the room between them. A row too narrow for the field to keep
+ * [LeastFieldWidth] beside them all, in a window beside another app's or in
+ * larger words, leaves the title out (the field says what it's for, and
+ * screen readers hear the title as the panel comes up), then puts Done
+ * under Keep drawing, and narrower still gives the field the row and the
+ * buttons one under it, where the room above the keyboard is tall enough
+ * for both. Where it isn't, the field narrows beside the buttons, down to
+ * [NarrowestFieldWidth], so their words stay whole and all of it shows.
  */
 @Composable
 private fun DescriptionParts(compact: Boolean, modifier: Modifier, title: @Composable () -> Unit, field: @Composable () -> Unit, buttons: @Composable () -> Unit) {
@@ -374,15 +403,44 @@ private fun DescriptionParts(compact: Boolean, modifier: Modifier, title: @Compo
         val loose = constraints.copy(minWidth = 0, minHeight = 0)
 
         if (compact) {
-            val heading = titles.first().measure(loose.copy(maxWidth = minOf(CompactTitleWidth.roundToPx(), width)))
-            val actions = buttonRows.first().measure(loose)
-            val fieldWidth = (width - heading.width - actions.width - 2 * gap).coerceAtLeast(0)
+            val least = (LeastFieldWidth * fontScale.coerceAtLeast(1f)).roundToPx()
+            val headingWidth = minOf(titles.first().maxIntrinsicWidth(constraints.maxHeight), CompactTitleWidth.roundToPx(), width)
+            // The buttons side by side, or Done under Keep drawing: as wide as the widest of them. Asked with no limit
+            // on their height, as a row asked to fit a short room would say it can't stack them.
+            val inOneRow = buttonRows.first().maxIntrinsicWidth(Constraints.Infinity)
+            val stacked = buttonRows.first().minIntrinsicWidth(Constraints.Infinity)
+            val beside = width - stacked - gap
+            val below = 8.dp.roundToPx()
+            // Too narrow for the field beside the buttons: the field across, the buttons under it at the end, where
+            // the room is tall enough for that. Above the keyboard on a phone on its side it isn't: there the field
+            // narrows beside the buttons instead, as long as it keeps some room to type.
+            val across = beside < least &&
+                (beside < NarrowestFieldWidth.roundToPx() || fields.first().minIntrinsicHeight(width) + below + buttonRows.first().minIntrinsicHeight(width) <= constraints.maxHeight)
+            // The buttons as tall as they need: a row of them told to fit a shorter room leaves Done out.
+            val tall = loose.copy(maxHeight = Constraints.Infinity)
+
+            if (across) {
+                val input = fields.first().measure(loose.copy(minWidth = width, maxWidth = width))
+                val actions = buttonRows.first().measure(tall)
+
+                return@Layout layout(width, input.height + below + actions.height) {
+                    input.placeRelative(0, 0)
+                    actions.placeRelative(width - actions.width, input.height + below)
+                }
+            }
+
+            val withTitle = width - headingWidth - inOneRow - 2 * gap >= least
+            // The buttons as wide as the field leaves them, but never narrower than their words: the field narrows first.
+            val actions = buttonRows.first().measure(tall.copy(maxWidth = if (width - inOneRow - gap >= least) width else maxOf(width - least - gap, stacked)))
+            val heading = if (withTitle) titles.first().measure(loose.copy(maxWidth = headingWidth)) else null
+            val start = heading?.let { it.width + gap } ?: 0
+            val fieldWidth = (width - start - actions.width - gap).coerceAtLeast(0)
             val input = fields.first().measure(loose.copy(minWidth = fieldWidth, maxWidth = fieldWidth))
-            val height = maxOf(heading.height, input.height, actions.height)
+            val height = maxOf(heading?.height ?: 0, input.height, actions.height)
 
             layout(width, height) {
-                heading.placeRelative(0, (height - heading.height) / 2)
-                input.placeRelative(heading.width + gap, (height - input.height) / 2)
+                heading?.placeRelative(0, (height - heading.height) / 2)
+                input.placeRelative(start, (height - input.height) / 2)
                 actions.placeRelative(width - actions.width, (height - actions.height) / 2)
             }
         } else {
@@ -403,13 +461,20 @@ private fun DescriptionParts(compact: Boolean, modifier: Modifier, title: @Compo
 /** The widest the title is in one row with the field: longer, it takes two lines. */
 private val CompactTitleWidth = 168.dp
 
+/** The narrowest the field is in one row with the buttons, at the font's own size: room for a few words as they're typed. */
+private val LeastFieldWidth = 160.dp
+
+/** The narrowest the field goes beside the buttons where the room is too short for it to have a row of its own. */
+private val NarrowestFieldWidth = 112.dp
+
 /** The description's field: up to three lines, or one when `compact`, where the row it's in keeps its height. */
 @Composable
 private fun DescriptionField(description: String, onChange: (String) -> Unit, onDone: () -> Unit, focus: FocusRequester, compact: Boolean, modifier: Modifier = Modifier) {
     OutlinedTextField(
         value = description,
         onValueChange = onChange,
-        label = { Text(stringResource(R.string.sketch_describe_label)) },
+        // On one line in a row, where the field can be narrow: a label over several would make it taller than the room.
+        label = { Text(stringResource(R.string.sketch_describe_label), maxLines = if (compact) 1 else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis) },
         singleLine = compact,
         maxLines = if (compact) 1 else 3,
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
@@ -429,12 +494,17 @@ private fun DescriptionField(description: String, onChange: (String) -> Unit, on
     )
 }
 
-/** Keep drawing, then Done, which keeps the sketch. */
+/**
+ * Keep drawing, then Done, which keeps the sketch. Each as wide as its words
+ * on one line, even where it's asked how narrow it can be: a Text's narrowest
+ * is its longest word, which would let the row give Keep drawing room for
+ * "Continuar" alone.
+ */
 @Composable
 private fun DescriptionButtons(onBack: () -> Unit, onDone: () -> Unit) {
-    TextButton(onClick = onBack) { Text(stringResource(R.string.sketch_keep_drawing), maxLines = 1) }
+    TextButton(onClick = onBack, modifier = Modifier.width(IntrinsicSize.Max)) { Text(stringResource(R.string.sketch_keep_drawing), maxLines = 1) }
 
-    Button(onClick = onDone) {
+    Button(onClick = onDone, modifier = Modifier.width(IntrinsicSize.Max)) {
         Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
         Text("  ${stringResource(R.string.common_done)}", maxLines = 1)
     }
@@ -442,22 +512,49 @@ private fun DescriptionButtons(onBack: () -> Unit, onDone: () -> Unit) {
 
 /** Whether a sketch may take the place of idea `idea`'s picture: Undo brings the picture back after. */
 @Composable
-private fun ReplacePictureDialog(idea: String, onSketch: () -> Unit, onCancel: () -> Unit) {
+internal fun ReplacePictureDialog(idea: String, onSketch: () -> Unit, onCancel: () -> Unit) {
     AlertDialog(
         onDismissRequest = onCancel,
-        title = { Text(stringResource(R.string.sketch_replace_title)) },
+        title = {
+            // It names the idea: a lock covers it.
+            CountsOverTheMap()
+            Text(stringResource(R.string.sketch_replace_title))
+        },
         text = { Text(stringResource(R.string.sketch_replace_text, idea)) },
         confirmButton = { TextButton(onClick = onSketch) { Text(stringResource(R.string.sketch_sketch)) } },
         dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.common_cancel)) } },
     )
 }
 
-/** Whether to let the strokes drawn go: nothing of the sketch stays. */
+/**
+ * Whether the sketch, as Done is tapped, may take the place of the picture
+ * that landed on idea `idea` while it was drawn, as one chosen before that
+ * took a while to copy in: Undo brings the picture back after.
+ */
 @Composable
-private fun DiscardSketchDialog(onDiscard: () -> Unit, onKeep: () -> Unit) {
+internal fun ReplaceLandedDialog(idea: String, onReplace: () -> Unit, onKeep: () -> Unit) {
     AlertDialog(
         onDismissRequest = onKeep,
-        title = { Text(stringResource(R.string.sketch_discard_title)) },
+        title = {
+            // It names the idea: a lock covers it.
+            CountsOverTheMap()
+            Text(stringResource(R.string.sketch_replace_title))
+        },
+        text = { Text(stringResource(R.string.sketch_replace_new_text, idea)) },
+        confirmButton = { TextButton(onClick = onReplace) { Text(stringResource(R.string.sketch_replace)) } },
+        dismissButton = { TextButton(onClick = onKeep) { Text(stringResource(R.string.sketch_keep_drawing)) } },
+    )
+}
+
+/** Whether to let the strokes drawn go: nothing of the sketch stays. */
+@Composable
+internal fun DiscardSketchDialog(onDiscard: () -> Unit, onKeep: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onKeep,
+        title = {
+            CountsOverTheMap()
+            Text(stringResource(R.string.sketch_discard_title))
+        },
         text = { Text(stringResource(R.string.sketch_discard_text)) },
         confirmButton = { TextButton(onClick = onDiscard) { Text(stringResource(R.string.sketch_discard)) } },
         dismissButton = { TextButton(onClick = onKeep) { Text(stringResource(R.string.sketch_keep_drawing)) } },

@@ -1,15 +1,15 @@
 # Política de privacidad
 
-*Última actualización: 5 de noviembre de 2026.*
+*Última actualización: 12 de noviembre de 2026.*
 
-**Orbit guarda tus mapas en tu teléfono.** No tiene cuentas, anuncios ni rastreo. No envía tus mapas ni nada sobre ti, ni a nosotros ni a nadie más. Aparte de la búsqueda diaria de versiones nuevas en Orbit de su sitio web (ver Actualizaciones), y de la información anónima sobre las transmisiones que envía la biblioteca de Cast de Google en Orbit de Google Play (ver Transmitir a una TV), lo único que sale de tu teléfono es lo que tú envías, como se explica abajo.
+**Orbit guarda tus mapas en tu teléfono.** No tiene cuentas, anuncios ni rastreo. No envía tus mapas ni nada sobre ti, ni a nosotros ni a nadie más. Aparte de la búsqueda diaria de versiones nuevas en Orbit de su sitio web (ver Actualizaciones), de la información anónima sobre las transmisiones que envía la biblioteca de Cast de Google en Orbit de Google Play (ver Transmitir a una TV), y de lo que Android sabe cuando Orbit tiene un fallo (ver Los fallos), lo único que sale de tu teléfono es lo que tú envías, como se explica abajo.
 
 ## Lo que se queda en tu teléfono
 
 - **Tus mapas,** con sus imágenes, sus audios, sus versiones y la papelera, en el almacenamiento propio de Orbit, que otras apps no pueden leer. Orbit no tiene cuenta ni nube, así que tus mapas solo están en este dispositivo: llegan a otros solo como se explica abajo, cuando los guardas en una carpeta, los envías, los compartes o los muestras, o cuando tu teléfono hace una copia de seguridad.
 - **Las notas de voz** que grabas para una idea. Orbit usa el micrófono, una vez que lo permites, solo mientras grabas una, nunca en segundo plano, y la nota se queda en su mapa, como sus imágenes.
 - **Tu configuración.**
-- **Los informes de fallos,** si Orbit llega a cerrarse inesperadamente. Dicen qué salió mal y qué versiones de Orbit y Android tienes, nunca lo que hay en tus mapas, y solo salen de tu teléfono si compartes uno.
+- **Los informes de fallos,** si Orbit llega a cerrarse inesperadamente. Dicen qué salió mal y qué versiones de Orbit y Android tienes, nunca lo que hay en tus mapas, y solo salen de tu teléfono si compartes uno. Android también se entera del fallo (ver Los fallos).
 
 ## Lo que sale de tu teléfono
 
@@ -22,6 +22,7 @@
 - **Los videos de YouTube y Vimeo** se reproducen dentro de Orbit, en los reproductores de YouTube y de Vimeo: el de YouTube en su modo de privacidad mejorada, para que lo que veas ahí no influya en lo que YouTube te muestra, y el de Vimeo con la indicación de no rastrear, sin cookies de terceros en ninguno de los dos. Ven lo que reproduce tu teléfono, y que se reproduce en Orbit, como YouTube pide que digan las apps. La imagen de vista previa de un video de YouTube viene de YouTube cada vez que se dibuja un mapa que lo tiene, así que YouTube ve qué videos tienen tus mapas. El reproductor de YouTube es parte de los servicios de API de YouTube, así que se le aplican los [términos del servicio de YouTube](https://www.youtube.com/t/terms) y la [política de privacidad de Google](https://policies.google.com/privacy), y al de Vimeo, la [política de privacidad de Vimeo](https://vimeo.com/privacy). Vimeo protege sus videos, así que su reproductor puede consultar el sistema de contenido protegido de tu teléfono, como lo haría el de un navegador, y nada más de tu teléfono.
 - **Los enlaces** se abren en tu navegador.
 - **Las copias de seguridad.** Si tu teléfono respalda sus apps (la copia de seguridad de Android, o al pasarte a un teléfono nuevo), tus mapas y tu configuración forman parte de ella, según la configuración de copias de seguridad de tu teléfono. Los mapas privados entran en ella solo cuando va cifrada de extremo a extremo, como la copia de Android en Google en un teléfono con bloqueo de pantalla, o cuando te pasas a un teléfono nuevo; después de restaurar una que los dejó fuera, Orbit te lo dice. Las versiones de tus mapas y la papelera quedan fuera de las copias en línea, igual que las imágenes, los audios y los videos que no caben en ellas. Al pasarte de un teléfono con Android 12 o posterior a uno nuevo, se lleva todo: también las versiones y la papelera, y lo que Orbit todavía tiene que eliminar de una carpeta donde guardas mapas. Desde un teléfono con Android 10 u 11, el cambio deja eso fuera, igual que una copia en línea.
+- **Los fallos.** Cuando Orbit se cierra inesperadamente o deja de responder, Android se entera, como con el fallo de cualquier app: qué salió mal y en qué parte del código de Orbit, sin los nombres de tus mapas ni nada de lo que tienen, tal como lo dice el informe de Orbit. Android lo guarda en los registros de tu teléfono y, si tu teléfono comparte datos de uso y diagnóstico, puede enviarlo a Google o al fabricante de tu teléfono, según sus políticas de privacidad: así es como Google Play nos muestra que Orbit de Google Play tuvo un fallo, y en qué parte de su código. Lo decide la configuración de tu teléfono, no Orbit.
 
 ## Actualizaciones
 

@@ -162,7 +162,30 @@ class MapDropsTest {
         val chain = listOf(MapNode("top", "Top")) + (1..3_000).map { MapNode("step-$it", "Step $it", parentId = if (it == 1) "top" else "step-${it - 1}") }
         val lines = ideaOutline(chain, "top").lines()
         assertEquals(3_001, lines.size)
-        assertEquals("${"  ".repeat(2_999)}- Step 3000", lines.last())
+        assertEquals("${"  ".repeat(OUTLINE_DEEPEST)}- Step 3000", lines.last())
+    }
+
+    @Test
+    fun `an outline nests as deep as it may, and lists what's deeper there`() {
+        val chain = listOf(MapNode("top", "Top")) + (1..40).map { MapNode("step-$it", "Step $it", parentId = if (it == 1) "top" else "step-${it - 1}") }
+        val lines = ideaOutline(chain, "top").lines()
+
+        // Each level nests under the one before, as deep as an outline goes.
+        (1..OUTLINE_DEEPEST + 1).forEach { step -> assertEquals("${"  ".repeat(step - 1)}- Step $step", lines[step]) }
+        // Deeper ones are listed at that depth, under the last one there, in their order.
+        (OUTLINE_DEEPEST + 2..40).forEach { step -> assertEquals("${"  ".repeat(OUTLINE_DEEPEST)}- Step $step", lines[step]) }
+    }
+
+    @Test
+    fun `a branch thousands of ideas deep drags out as an outline the size of its ideas`() {
+        // Six thousand levels once came to 36 million characters, each line indented by its depth.
+        val depth = 6_000
+        val chain = listOf(MapNode("top", "Top")) + (1..depth).map { MapNode("step-$it", "Step $it", parentId = if (it == 1) "top" else "step-${it - 1}") }
+        val outline = ideaOutline(chain, "top")
+        val names = chain.sumOf { it.text.length + 3 }
+
+        assertEquals(depth + 1, outline.lines().size)
+        assertTrue("${outline.length} characters", outline.length <= names + depth * 2 * OUTLINE_DEEPEST)
     }
 
     @Test

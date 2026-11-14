@@ -24,6 +24,10 @@
     <string name="present_on_the_tv">Na TV</string>
     <string name="present_tv_too_old">Esta TV ainda não consegue mostrar apresentações desta versão do Orbit. Apresente neste dispositivo ou em outra tela.</string>
     <string name="present_tv_older_maps">A TV desenha os mapas com uma versão mais antiga do Orbit, então partes deste mapa podem ficar diferentes lá.</string>
+    <string name="present_screen_stopped">O mapa parou na segunda tela porque o Android liberou memória.</string>
+    <string name="present_screen_did_not_load">O mapa não carregou na segunda tela.</string>
+    <string name="present_tv_missed">Parte da apresentação não chegou à TV.</string>
+    <string name="present_send_it_again">Enviar de novo</string>
     <plurals name="present_browsers_watching">
         <item quantity="one">Navegadores: %d</item>
         <item quantity="many">Navegadores: %d</item>

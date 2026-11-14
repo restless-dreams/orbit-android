@@ -112,6 +112,11 @@
         <item quantity="many">Orbit no pudo quitarles lo que puedan decir además de lo que muestran, como quién los hizo, cuándo y dónde, así que iría con los archivos.</item>
         <item quantity="other">Orbit no pudo quitarles lo que puedan decir además de lo que muestran, como quién los hizo, cuándo y dónde, así que iría con los archivos.</item>
     </plurals>
+    <plurals name="sharing_as_they_are_changed">
+        <item quantity="one">Cambió después de que respondiste, así que Orbit vuelve a preguntar.</item>
+        <item quantity="many">Cambiaron después de que respondiste, así que Orbit vuelve a preguntar.</item>
+        <item quantity="other">Cambiaron después de que respondiste, así que Orbit vuelve a preguntar.</item>
+    </plurals>
     <plurals name="sharing_leave_them_out">
         <item quantity="one">Dejar fuera</item>
         <item quantity="many">Dejar fuera</item>
@@ -142,7 +147,7 @@
     <string name="sharing_maps_stay_here_body">Orbit no tiene cuenta ni nube. Para tener tus mapas también en tus otros dispositivos, guárdalos en una carpeta que una app de sincronización o una nube mantenga sincronizada.</string>
     <string name="sharing_choose_a_folder">Elegir una carpeta</string>
     <string name="sharing_where_on_this_device">En este dispositivo</string>
-    <string name="sharing_where_on_this_device_description">Orbit no tiene cuenta ni nube. La copia de seguridad de Android, si está activada, guarda los mapas y la configuración, y las imágenes, los audios y los videos mientras quepan, pero no el historial; los mapas privados, solo si va cifrada, como con bloqueo de pantalla; si no, una restauración los deja fuera. Exportar todos los mapas guarda cada mapa completo, y los privados siguen siéndolo.</string>
+    <string name="sharing_where_on_this_device_description">Orbit no tiene cuenta ni nube. La copia de seguridad de Android, si está activada, guarda los mapas y la configuración, y las imágenes, los audios, los videos y los archivos mientras quepan, pero no el historial; los mapas privados, solo si va cifrada, como con bloqueo de pantalla; si no, una restauración los deja fuera. Exportar todos los mapas guarda cada mapa completo, y los privados siguen siéndolo.</string>
     <plurals name="sharing_backup_left_out">
         <item quantity="one">La última copia de seguridad de Android no tuvo espacio para %1$d mapa. Exportar todos los mapas lo guarda.</item>
         <item quantity="many">La última copia de seguridad de Android no tuvo espacio para %1$d mapas. Exportar todos los mapas los guarda.</item>

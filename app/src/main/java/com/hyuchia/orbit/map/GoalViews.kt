@@ -109,8 +109,10 @@ private fun goalNumberProblem(reading: NumberReading, words: Words): String? = w
  * A number typed in the phone's language, on the decimal keyboard. It saves
  * a moment after typing stops, when the keyboard's action is pressed, and
  * as it leaves the screen, once it reads as a number; emptied, it saves
- * null. What doesn't read as one is said under it, and isn't saved. A
- * number changed elsewhere, by a step or an undo, shows at once. It saves
+ * null. What doesn't read as one is said under it, and isn't saved. Only
+ * what's typed saves: a number with more decimals than the field shows (as
+ * a map from elsewhere may have) stays as it's written until it's changed.
+ * A number changed elsewhere, by a step or an undo, shows at once. It saves
  * as `onCommit` was when its `key` began, what the number meant then; among
  * `drafts`, a change that would make it mean something else saves it first.
  */
@@ -130,16 +132,24 @@ fun NumberField(
     val words = rememberWords()
     var text by remember(key) { mutableStateOf(value?.let { GoalNumbers.field(it, locale) }.orEmpty()) }
     var committed by remember(key) { mutableStateOf(value) }
+
+    // The text that stands for `committed`, as the field showed it or saved it: until what's typed is other than that, there's nothing to save.
+    var untouched by remember(key) { mutableStateOf(text) }
     val commit by remember(key) { mutableStateOf(onCommit) }.apply { this.value = onCommit }
 
     LaunchedEffect(key, value) {
         if (!sameNumber(value, committed)) {
             committed = value
             text = value?.let { GoalNumbers.field(it, locale) }.orEmpty()
+            untouched = text
         }
     }
 
     fun save() {
+        if (text == untouched) {
+            return
+        }
+
         val reading = GoalNumbers.read(text, locale)
 
         if (goalNumberProblem(reading, words) != null) {
@@ -147,6 +157,7 @@ fun NumberField(
         }
 
         val number = (reading as? NumberReading.Number)?.value
+        untouched = text
 
         if (!sameNumber(number, committed)) {
             committed = number
@@ -200,14 +211,16 @@ fun NumberField(
  * it counts, changed with `onChange`. The way follows the numbers once
  * there's a target; until then, the one picked stays. What's typed in its
  * fields and not saved yet is among `drafts`: a change of way saves it
- * first, as it was typed, and converts the goal from it.
+ * first, as it was typed, and converts the goal from it. The fields start
+ * over as the editor is `opened` on an idea, and not when the idea's new
+ * text gives it a new id: what's typed in them then stays, and saves on it.
  */
 @Composable
-fun GoalSection(node: MapNode, under: Rollup, drafts: FieldDrafts, onChange: (Map<String, JsonElement>) -> Unit) {
+fun GoalSection(node: MapNode, under: Rollup, drafts: FieldDrafts, opened: Int, onChange: (Map<String, JsonElement>) -> Unit) {
     val goal = Goal.of(node) ?: return
     val locale = LocalConfiguration.current.locales[0]
     val words = rememberWords()
-    var way by rememberSaveable(node.id) { mutableStateOf(goal.way) }
+    var way by rememberSaveable(opened) { mutableStateOf(goal.way) }
 
     LaunchedEffect(node.id, goal.way, goal.target != null) {
         if (goal.target != null) {
@@ -216,13 +229,13 @@ fun GoalSection(node: MapNode, under: Rollup, drafts: FieldDrafts, onChange: (Ma
     }
 
     // The word counted and the currency chosen are kept while the other way is tried.
-    var word by rememberSaveable(node.id) { mutableStateOf(goal.word) }
+    var word by rememberSaveable(opened) { mutableStateOf(goal.word) }
 
     LaunchedEffect(goal.word) {
         goal.word?.let { word = it }
     }
 
-    var currencyCode by rememberSaveable(node.id) { mutableStateOf((goal.currency ?: phoneCurrency(locale)).currencyCode) }
+    var currencyCode by rememberSaveable(opened) { mutableStateOf((goal.currency ?: phoneCurrency(locale)).currencyCode) }
 
     LaunchedEffect(goal.currency) {
         goal.currency?.let { currencyCode = it.currencyCode }
@@ -232,7 +245,7 @@ fun GoalSection(node: MapNode, under: Rollup, drafts: FieldDrafts, onChange: (Ma
     var choosingCurrency by remember { mutableStateOf(false) }
     val money = way != GoalWay.Counting
     // What the fields saved as a change of way saved their drafts first: the goal is converted from it.
-    val savedFirst = remember(node.id) { LinkedHashMap<String, JsonElement>() }
+    val savedFirst = remember(opened) { LinkedHashMap<String, JsonElement>() }
 
     fun set(changes: Map<String, JsonElement>) {
         // Money's numbers go with their currency.
@@ -268,7 +281,7 @@ fun GoalSection(node: MapNode, under: Rollup, drafts: FieldDrafts, onChange: (Ma
         }
 
         NumberField(
-            key = "${node.id} ${way.name} first",
+            key = "$opened ${way.name} first",
             value = first,
             label = stringResource(way.firstLabel),
             currency = currency.takeIf { money },
@@ -277,7 +290,7 @@ fun GoalSection(node: MapNode, under: Rollup, drafts: FieldDrafts, onChange: (Ma
             drafts = drafts,
         )
         NumberField(
-            key = "${node.id} ${way.name} second",
+            key = "$opened ${way.name} second",
             value = second,
             label = stringResource(way.secondLabel),
             placeholder = GoalNumbers.field(goal.start, locale),
@@ -301,7 +314,7 @@ fun GoalSection(node: MapNode, under: Rollup, drafts: FieldDrafts, onChange: (Ma
         } else {
             val raise = LocalSheetRaise.current
             EditorField(
-                key = node.id,
+                key = "$opened",
                 value = goal.word.orEmpty(),
                 label = stringResource(R.string.goal_whats_counted),
                 placeholder = stringResource(R.string.goal_whats_counted_example),

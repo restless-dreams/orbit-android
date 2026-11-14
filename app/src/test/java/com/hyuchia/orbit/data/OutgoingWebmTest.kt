@@ -293,12 +293,92 @@ class OutgoingWebmTest {
         }
     }
 
+    /** A cluster at `time`, with a block of `frames` for each of them, of track 1. */
+    private fun cluster(time: Int, vararg frames: String): ByteArray =
+        element(CLUSTER, element(0xE7, byteArrayOf(time.toByte())), *frames.map { element(SIMPLE_BLOCK, byteArrayOf(0x81.toByte(), 0, 0, 0x80.toByte()) + text(it)) }.toTypedArray())
+
+    /** A cue at `time` for track 1, at the cluster `at` from the segment's start, in two bytes so the cues' size doesn't change with it, and at its block `relative` from what's in the cluster. */
+    private fun cuePoint(time: Int, at: Int, relative: Int? = null): ByteArray {
+        val positions = element(0xF7, byteArrayOf(1)) + element(0xF1, byteArrayOf((at shr 8).toByte(), at.toByte())) + (relative?.let { element(0xF0, byteArrayOf(it.toByte())) } ?: ByteArray(0))
+        return element(CUE_POINT, element(0xB3, byteArrayOf((time shr 8).toByte(), time.toByte())), element(CUE_TRACK_POSITIONS, positions))
+    }
+
+    /**
+     * A WebM with its index and cues before its clusters, as ffmpeg writes
+     * them when asked to, the cues `pointing` at the clusters, from where
+     * each starts in the segment: two clusters, the second of two blocks.
+     */
+    private fun cuesFirst(pointing: (List<Int>) -> List<ByteArray>): ByteArray {
+        val clusters = listOf(cluster(0, "Test first frame"), cluster(100, "Test second frame", "Test third frame"))
+
+        fun segment(starts: List<Int>): ByteArray {
+            val cues = element(CUES, *pointing(starts).toTypedArray())
+            val index = element(SEEK_HEAD, element(SEEK, element(SEEK_ID, text("\u001CS»k")), element(SEEK_POSITION, byteArrayOf(0, 0))))
+            return index + cues + clusters.fold(ByteArray(0)) { all, cluster -> all + cluster }
+        }
+
+        // Where each cluster starts in the segment, past the index and the cues, whose sizes don't change with it.
+        val before = segment(listOf(0, 0)).size - clusters.sumOf { it.size }
+        val starts = listOf(before, before + clusters[0].size)
+        return element(EBML, element(0x4282, text("webm"))) + element(SEGMENT, segment(starts))
+    }
+
+    @Test
+    fun `a WebM cut short with its cues before its clusters goes without the cues for what was cut away`() {
+        // As the review's probe made one: cues for the second cluster, cut short in it before any of its blocks was whole, so it's cut away.
+        val alone = cuesFirst { starts -> listOf(cuePoint(100, starts[1])) }
+        val secondAt = elements(alone).one(SEGMENT).parts.filter { it.id == CLUSTER }[1].start
+        val cut = alone.copyOfRange(0, secondAt + 6)
+        val bytes = cleaned(file("cues-first.webm", cut))
+
+        assertEquals(secondAt, bytes.size)
+        val segment = elements(bytes).one(SEGMENT)
+        assertEquals(bytes.size, segment.end)
+        // The cues had nothing left to say: they're Void, where they were, and so is the index's entry for them.
+        val before = elements(alone).one(SEGMENT).parts
+        assertEquals(before.dropLast(1).map { if (it.id == CUES) VOID else it.id }, segment.parts.map { it.id })
+        assertEquals(before.dropLast(1).map { it.start }, segment.parts.map { it.start })
+        assertTrue(bytes.copyOfRange(segment.parts.one(VOID).body, segment.parts.one(VOID).end).all { it == 0.toByte() })
+        assertTrue(segment.parts.one(SEEK_HEAD).parts.none { it.id == SEEK })
+        assertArrayEquals(alone.copyOfRange(segment.parts.one(CLUSTER).start, bytes.size), bytes.copyOfRange(segment.parts.one(CLUSTER).start, bytes.size))
+    }
+
+    @Test
+    fun `a WebM's cues for a block cut away go, and those for what's left stay as they were`() {
+        // A cue for each cluster, and one for the second cluster's second block, cut short in that block.
+        val webm = cuesFirst { starts -> listOf(cuePoint(0, starts[0]), cuePoint(100, starts[1]), cuePoint(101, starts[1], relative = 3 + 23)) }
+        val second = elements(webm).one(SEGMENT).parts.filter { it.id == CLUSTER }[1]
+        val third = second.parts.last()
+        assertArrayEquals(text("Test third frame"), webm.copyOfRange(third.body + 4, third.end))
+        assertEquals(second.body + 3 + 23, third.start)
+        val bytes = cleaned(file("cues-relative.webm", webm.copyOfRange(0, third.start + 5)))
+
+        assertEquals(third.start, bytes.size)
+        val segment = elements(bytes).one(SEGMENT)
+        val points = elements(bytes, segment.parts.one(CUES).body, segment.parts.one(CUES).end)
+        val pointsBefore = elements(webm).one(SEGMENT).parts.one(CUES).let { elements(webm, it.body, it.end) }
+        // The cue for the block cut away is Void; the others are as they were, every one where it was.
+        assertEquals(listOf(CUE_POINT, CUE_POINT, VOID), points.map { it.id })
+        assertEquals(pointsBefore.map { it.start }, points.map { it.start })
+
+        for (point in points.take(2)) {
+            assertArrayEquals(webm.copyOfRange(point.start, point.end), bytes.copyOfRange(point.start, point.end))
+        }
+
+        assertTrue(bytes.copyOfRange(points[2].body, points[2].end).all { it == 0.toByte() })
+        // The index still points at the cues, which are there.
+        assertEquals(listOf(CUES), segment.parts.one(SEEK_HEAD).parts.filter { it.id == SEEK }.map { it.target(bytes) })
+    }
+
     private companion object {
         const val EBML = 0x1A45DFA3L
         const val SEGMENT = 0x18538067L
         const val SEEK_HEAD = 0x114D9B74L
         const val SEEK = 0x4DBBL
         const val SEEK_ID = 0x53ABL
+        const val SEEK_POSITION = 0x53ACL
+        const val CUE_POINT = 0xBBL
+        const val CUE_TRACK_POSITIONS = 0xB7L
         const val INFO = 0x1549A966L
         const val TIMESTAMP_SCALE = 0x2AD7B1L
         const val DURATION = 0x4489L

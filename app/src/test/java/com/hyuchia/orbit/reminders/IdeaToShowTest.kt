@@ -30,6 +30,20 @@ class IdeaToShowTest {
     }
 
     @Test
+    fun `of several with its name and date, the one at its place, else the one as many along as the reminder's`() {
+        val twice = nodes + listOf(
+            MapNode("errands", "Errands", parentId = "trip", depth = 1, index = 2, childCount = 1),
+            MapNode("bags-3", "Bags", parentId = "errands", depth = 2, index = 0, due = "2026-11-19"),
+        )
+
+        assertEquals("bags-3", ideaAmong(twice, IdeaToShow("map", "Bags", "2026-11-19", listOf(2, 0), occurrence = 1))?.id)
+        assertEquals("bags", ideaAmong(twice, IdeaToShow("map", "Bags", "2026-11-19", listOf(1, 0), occurrence = 0))?.id)
+        // Moved since: the second of them still.
+        assertEquals("bags-3", ideaAmong(twice, IdeaToShow("map", "Bags", "2026-11-19", listOf(7, 7), occurrence = 1))?.id)
+        assertEquals("bags", ideaAmong(twice, IdeaToShow("map", "Bags", "2026-11-19", listOf(7, 7), occurrence = 4))?.id)
+    }
+
+    @Test
     fun `none when no idea has its date anymore`() {
         assertNull(ideaAmong(nodes, IdeaToShow("map", "Book the flights", "2026-12-01", listOf(0))))
         assertNull(ideaAmong(emptyList(), IdeaToShow("map", "Book the flights", "2026-11-18 18:30", listOf(0))))

@@ -2,6 +2,7 @@ package com.hyuchia.orbit.data
 
 import com.hyuchia.orbit.FileWords
 import com.hyuchia.orbit.page.EditedMap
+import com.hyuchia.orbit.page.PageException
 import com.hyuchia.orbit.page.Renamed
 import com.hyuchia.orbit.study.StudyCard
 import kotlinx.coroutines.test.runTest
@@ -18,7 +19,8 @@ import java.util.Locale
  * refused. The edits themselves are the page's (web/map-edits.ts, held to
  * Orbit in web/map-edits.test.ts); here a light stand-in makes them, and
  * refuses a map a newer Orbit made, or one with "unreadable" in it, as the
- * page does those Orbit can only show.
+ * page does those Orbit can only show. A page that can't make them at all
+ * fails as the app's page does: on a WebView too old to draw maps, say.
  */
 class MapEditsTest {
     private val files: File = Files.createTempDirectory("orbit-edits").toFile()
@@ -236,5 +238,118 @@ class MapEditsTest {
         assertEquals("Diario (copia)", repository.summary(copy.id!!)!!.title)
         assertEquals("# Diario (copia)\n- Hoy\n", repository.read(copy.id!!))
         assertEquals(true, repository.summary(copy.id!!)!!.metadata.isPrivate)
+    }
+
+    /** The page's own failure, as the app's page throws it on a WebView too old to draw maps. */
+    private val tooOld = PageException("This device's WebView is too old to draw maps. Update it from your app store.", PageException.Kind.TooOld)
+
+    @Test
+    fun `a change the page can't make leaves the map as it was, and says why, rather than throwing`() = runTest {
+        val (repository, _) = loaded()
+        val edits = MapEdits(repository, { _, _, _ -> throw tooOld }, words)
+        val id = repository.add("---\ntags: [work]\n---\n# Plan\n")
+        val why = MapEditResult.PageFailed(tooOld.message!!)
+
+        assertEquals(why, edits.rename(id, "Roadmap"))
+        assertEquals(why, edits.setTags(id, listOf("home")))
+        assertEquals(MapCopy(null, why), edits.duplicate(id))
+        assertEquals(TagRename(changed = 0, kept = mapOf(id to why)), edits.renameTag("work", "office"))
+
+        assertEquals("---\ntags: [work]\n---\n# Plan\n", repository.read(id))
+        assertEquals(emptyList<MapVersion>(), repository.versions(id))
+        assertEquals(listOf(id), repository.maps.value!!.map { it.id })
+    }
+
+    @Test
+    fun `a tag renamed in every map keeps the maps changed before the page failed, and the rest keep the tag, saying why`() = runTest {
+        val (repository, _) = loaded()
+        var pageWorks = true
+
+        // The page makes the first change, then stops answering: no map after it waits on a page that can't make its change.
+        val edits = MapEdits(
+            repository,
+            { markdown, _, tags ->
+                asked += markdown
+
+                if (!pageWorks) {
+                    throw PageException("The page didn't answer", PageException.Kind.DidNotAnswer)
+                }
+
+                pageWorks = false
+                EditedMap(markdown = MapTags.write(markdown, tags!!))
+            },
+            words,
+        )
+
+        val tagged = listOf("Trip", "Plan", "Home").map { title -> repository.add("---\ntags: [work]\n---\n# $title\n") }
+
+        val renamed = edits.renameTag("work", "office")
+
+        val changed = tagged.filter { MapTags.read(repository.read(it)) == listOf("office") }
+        assertEquals(1, renamed.changed)
+        assertEquals(1, changed.size)
+        assertEquals((tagged - changed.toSet()).associateWith { MapEditResult.PageFailed("The page didn't answer") }, renamed.kept)
+        assertEquals(listOf("work", "work"), (tagged - changed.toSet()).map { MapTags.read(repository.read(it)).single() })
+        assertEquals(2, asked.size)
+    }
+
+    @Test
+    fun `a page that stops on one map is tried again on a new one, and the tag rename goes on to every map`() = runTest {
+        val (repository, _) = loaded()
+        var stops = 1
+
+        // Android stops the page's process for memory as it makes the first change: the next page makes it.
+        val edits = MapEdits(
+            repository,
+            { markdown, _, tags ->
+                asked += markdown
+
+                if (stops > 0) {
+                    stops -= 1
+                    throw PageException("The page stopped", PageException.Kind.Stopped)
+                }
+
+                EditedMap(markdown = MapTags.write(markdown, tags!!))
+            },
+            words,
+        )
+
+        val tagged = listOf("Trip", "Plan", "Home").map { title -> repository.add("---\ntags: [work]\n---\n# $title\n") }
+
+        assertEquals(TagRename(changed = 3), edits.renameTag("work", "office"))
+        assertEquals(listOf("office", "office", "office"), tagged.map { MapTags.read(repository.read(it)).single() })
+        assertEquals(4, asked.size)
+    }
+
+    @Test
+    fun `a map whose change the page refuses keeps the tag, said in the app's words, and the other maps still change`() = runTest {
+        val (repository, _) = loaded(Locale.forLanguageTag("es-MX"))
+        val spanish = FileWords(Locale.forLanguageTag("es-MX"))
+
+        // The page refuses this one map's change, in Orbit's own words, on every page: the others are its to make.
+        val edits = MapEdits(
+            repository,
+            { markdown, _, tags ->
+                asked += markdown
+
+                if ("Plan" in markdown) {
+                    throw PageException("No idea plan to edit", PageException.Kind.Refused)
+                }
+
+                EditedMap(markdown = MapTags.write(markdown, tags!!))
+            },
+            spanish,
+        )
+
+        val tagged = listOf("Trip", "Plan", "Home").map { title -> repository.add("---\ntags: [work]\n---\n# $title\n") }
+
+        val renamed = edits.renameTag("work", "office")
+
+        assertEquals(2, renamed.changed)
+        assertEquals(mapOf(tagged[1] to MapEditResult.PageFailed("La página no pudo hacer el cambio", lasting = false)), renamed.kept)
+        assertEquals(listOf("office", "work", "office"), tagged.map { MapTags.read(repository.read(it)).single() })
+        // The refused map is tried twice, on two pages; each of the others once.
+        assertEquals(4, asked.size)
+        assertEquals(MapEditResult.PageFailed("La página no pudo hacer el cambio", lasting = false), edits.rename(tagged[1], "Proyecto"))
     }
 }

@@ -159,14 +159,22 @@ internal object OnDevice {
     private fun typing(page: WebView): Boolean = onPage(page, "document.activeElement?.tagName ?? null") == "\"TEXTAREA\""
 
     /**
-     * Adds an idea to `idea`, in the middle of the map, as people do: the + in its orbit opens a planet to type in,
-     * the words go in as a keyboard's keys, and Enter adds it, and opens the next one. Escape hides the keyboard,
-     * then closes that one.
+     * Types a new idea under `idea`, in the middle of the map, as people do: the + in its orbit opens a planet to type
+     * in, and the words go in as a keyboard's keys. The planet stays open, with the words in it.
      */
-    fun addIdeaOnTheMap(page: WebView, idea: String, words: String) {
+    fun typeAnIdea(page: WebView, idea: String, words: String) {
         tapOnPage(page, "Add an idea to $idea")
         eventually("the new planet's field") { typing(page) }
         screen.executeShellCommand("input text ${words.replace(" ", "%s")}")
+        eventually("$words in the new planet") { onPage(page, "document.activeElement?.value ?? null") == JSONObject.quote(words) }
+    }
+
+    /**
+     * Adds an idea to `idea`, in the middle of the map, as people do: typed in a new planet ([typeAnIdea]), then
+     * Enter adds it, and opens the next one. Escape hides the keyboard, then closes that one.
+     */
+    fun addIdeaOnTheMap(page: WebView, idea: String, words: String) {
+        typeAnIdea(page, idea, words)
         screen.pressEnter()
         eventually("$words on the map") { mapHolds(page, words) }
 

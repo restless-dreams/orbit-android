@@ -40,6 +40,23 @@ class ShownMediaTest {
     }
 
     @Test
+    fun aVideoPausedRightAtItsEndIsAtItsEndAndPlaysAgainFromTheStart() {
+        val known = playing.copy(duration = 30.0)
+        // Paused as it ends, 30 seconds of 30: Play starts it over rather than leave it there.
+        val paused = known.played(false, 40_000)
+        assertEquals(30.0, paused.position(40_000), 0.0)
+        assertTrue(paused.atEnd(50_000))
+        assertFalse(paused.playingAt(50_000))
+        val again = paused.played(true, 50_000)
+        assertEquals(0.0, again.position(50_000), 0.0)
+        assertTrue(again.playingAt(52_000))
+        // Paused a moment before its end, it isn't there yet, and plays on from where it is.
+        val before = known.played(false, 39_000)
+        assertFalse(before.atEnd(50_000))
+        assertEquals(29.0, before.played(true, 50_000).position(50_000), 0.0)
+    }
+
+    @Test
     fun startingOverPlaysFromTheStartAsTheCommandsSay() {
         val paused = playing.played(false, 40_000)
         val over = paused.after(AudienceCommand.Seek(0.0), 41_000).after(AudienceCommand.Playback(true), 41_000)!!

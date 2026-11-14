@@ -10,6 +10,7 @@ import com.hyuchia.orbit.page.MapState
 import com.hyuchia.orbit.page.Media
 import com.hyuchia.orbit.page.MediaMotion
 import com.hyuchia.orbit.present.Audience
+import com.hyuchia.orbit.present.ScreenTrouble
 import com.hyuchia.orbit.present.ShownMedia
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,12 +26,22 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PresentationControlTest {
-    /** A screen that keeps what it's told, and can say how its video goes. */
+    /** A screen that keeps what it's told, can say how its video goes, and goes wrong when a test says. */
     private class Screen : Audience {
         override val name = "Screen"
         val heard = mutableListOf<AudienceCommand>()
         var says: ((MapMessage.MediaState) -> Unit)? = null
         var reckoned: ShownMedia? = null
+        override val trouble = MutableStateFlow<ScreenTrouble?>(null)
+
+        /** How many times it was loaded again. */
+        var loadedAgain = 0
+
+        override fun loadAgain() {
+            loadedAgain += 1
+            trouble.value = null
+            heard.clear()
+        }
 
         override fun send(command: AudienceCommand) {
             heard += command
@@ -228,6 +239,58 @@ class PresentationControlTest {
     }
 
     @Test
+    fun playAtTheVideosEndStartsItOverOnEveryScreenPausedThereOrNot() = runTest {
+        val control = control
+        val screen = Screen()
+        control.setBrowsers(screen)
+        control.showMedia(MediaKind.Video)
+        runCurrent()
+
+        // Paused right as it ends, by the phone's reckoning: 190 seconds of 190.
+        advanceTimeBy(190_000)
+        control.playMedia(false)
+        assertTrue(presentation.media!!.atEnd(testScheduler.currentTime))
+        control.playMedia(true)
+        assertEquals(listOf(AudienceCommand.Seek(0.0), AudienceCommand.Playback(true)), screen.heard.takeLast(2))
+        assertTrue(presentation.media!!.playingAt(testScheduler.currentTime))
+        advanceTimeBy(5_000)
+        assertEquals(5.0, presentation.media!!.position(testScheduler.currentTime), 0.0)
+
+        // Ended by itself, the same: every screen starts it over, as the phone does.
+        advanceTimeBy(200_000)
+        control.playMedia(true)
+        assertEquals(listOf(AudienceCommand.Seek(0.0), AudienceCommand.Playback(true)), screen.heard.takeLast(2))
+        assertEquals(0.0, presentation.media!!.position(testScheduler.currentTime), 0.0)
+    }
+
+    @Test
+    fun aStepBackAtTheFirstIdeaOrOnAtTheLastTakesTheAudienceBackToTheMap() = runTest {
+        val control = control
+        val screen = Screen()
+        control.setScreen(screen)
+
+        ui.update { it.copy(presentation = Presentation(listOf("tram", "end"), index = 0, startedAt = 0)) }
+        control.showMedia(MediaKind.Picture)
+        control.step(-1)
+        assertNull(presentation.media)
+        assertEquals(0, presentation.index)
+        assertEquals(AudienceCommand.CloseMedia, screen.heard.last())
+
+        ui.update { it.copy(presentation = Presentation(listOf("talk", "tram"), index = 1, startedAt = 0)) }
+        control.showMedia(MediaKind.Video)
+        control.step(1)
+        assertNull(presentation.media)
+        assertEquals(1, presentation.index)
+        assertEquals(AudienceCommand.CloseMedia, screen.heard.last())
+
+        // With the map back, a step past the end has nothing more to do.
+        val heard = screen.heard.size
+        control.step(1)
+        assertEquals(heard, screen.heard.size)
+        assertTrue(focused.isEmpty())
+    }
+
+    @Test
     fun whatTheSecondScreenSaysCorrectsWhereThePhoneReckonsTheVideoIsForBrowsersToo() = runTest {
         val control = control
         val screen = Screen()
@@ -287,6 +350,116 @@ class PresentationControlTest {
         control.showMedia(MediaKind.Video)
         assertNull(presentation.media)
         assertTrue(screen.heard.none { it is AudienceCommand.Media })
+    }
+
+    @Test
+    fun aScreenThatWentWrongIsLoadedAgainAndCaughtUpAndOneThatsWellIsLeftAlone() = runTest {
+        val control = control
+        val screen = Screen()
+        control.setScreen(screen)
+        control.showMedia(MediaKind.Video)
+        advanceTimeBy(20_000)
+
+        control.loadScreenAgain()
+        assertEquals(0, screen.loadedAgain)
+
+        // Its page stopped: a new one gets the map, the idea on screen and the video where it is.
+        screen.trouble.value = ScreenTrouble.Stopped
+        control.loadScreenAgain()
+        assertEquals(1, screen.loadedAgain)
+        assertEquals(
+            listOf(
+                AudienceCommand.Show("# Talk", AppTheme(dark = false, tokens = emptyMap()), focus = "tram"),
+                AudienceCommand.Step("tram", 1, 3),
+                AudienceCommand.Media("tram", MediaKind.Video, playing = true, at = 20.0),
+            ),
+            screen.heard,
+        )
+    }
+
+    @Test
+    fun aNewMapReachesEveryAudienceAtTheIdeaOnScreenAndThePresentationFollowsANewId() = runTest {
+        var markdown = "# Talk"
+        val control = PresentationControl(
+            scope = backgroundScope,
+            ui = ui,
+            clock = { testScheduler.currentTime },
+            focus = { focused += it },
+            map = { presentation -> AudienceCommand.Show(markdown, AppTheme(dark = false, tokens = emptyMap()), focus = presentation.current) },
+        )
+        val screen = Screen()
+        val browsers = Screen()
+        control.begin(seconds = 0)
+        control.setScreen(screen)
+        control.setBrowsers(browsers)
+        control.showMedia(MediaKind.Picture)
+
+        // Nothing new: the audiences have the map as it is.
+        control.mapChanged(listOf("talk", "tram", "end"))
+        assertEquals(1, screen.heard.count { it is AudienceCommand.Show })
+
+        // Tram 28 is renamed elsewhere, so it has a new id: the presentation keeps to it, its picture still over the map.
+        markdown = "# Talk, renamed"
+        control.renamed("tram", "tram-28")
+        ui.update { state -> state.copy(map = state.map?.let { map -> map.copy(nodes = map.nodes.map { if (it.id == "tram") it.copy(id = "tram-28") else it }, path = listOf("talk", "tram-28")) }) }
+        control.mapChanged(listOf("talk", "tram-28", "end"))
+        assertEquals(listOf("talk", "tram-28", "end"), presentation.order)
+        assertEquals("tram-28", presentation.media?.id)
+
+        listOf(screen, browsers).forEach { audience ->
+            assertEquals(
+                listOf(
+                    AudienceCommand.Show("# Talk, renamed", AppTheme(dark = false, tokens = emptyMap()), focus = "tram-28"),
+                    AudienceCommand.Step("tram-28", 1, 3),
+                    AudienceCommand.Media("tram-28", MediaKind.Picture, playing = false, at = 0.0),
+                ),
+                audience.heard.takeLast(3),
+            )
+        }
+
+        // Then it goes from the map elsewhere: the presentation goes on from the step in its place, and the phone's map flies there.
+        markdown = "# Talk, shorter"
+        ui.update { state -> state.copy(map = state.map?.let { map -> map.copy(nodes = map.nodes.filter { it.id != "tram-28" }) }) }
+        control.mapChanged(listOf("talk", "end"))
+        assertEquals(listOf("talk", "end"), presentation.order)
+        assertEquals(1, presentation.index)
+        assertNull(presentation.media)
+        assertEquals(listOf("end"), focused)
+        assertEquals(listOf(AudienceCommand.Show("# Talk, shorter", AppTheme(dark = false, tokens = emptyMap()), focus = "end"), AudienceCommand.Step("end", 1, 2)), screen.heard.takeLast(2))
+
+        // New text that left the phone's map on the idea's parent, as Orbit does when an id it was on goes: it flies back.
+        markdown = "# Talk, again"
+        ui.update { state -> state.copy(map = state.map?.copy(path = listOf("talk"))) }
+        control.mapChanged(listOf("talk", "end"))
+        assertEquals(listOf("end", "end"), focused)
+    }
+
+    @Test
+    fun anIdeaRenamedElsewhereIsTheNewIdeaAtItsPlaceAndARemovedOneIsNone() {
+        val before = listOf(
+            MapNode("trip", "Trip", childCount = 2),
+            MapNode("old", "Old", parentId = "trip", depth = 1, childCount = 1),
+            MapNode("tram", "Tram", parentId = "old", depth = 2),
+            MapNode("next", "Next", parentId = "trip", depth = 1, index = 1),
+        )
+
+        fun renaming(vararg names: Pair<String, String>) = before.map { node ->
+            val to = names.toMap()
+            node.copy(id = to[node.id] ?: node.id, parentId = node.parentId?.let { to[it] ?: it })
+        }
+
+        // Renamed on another device: the new idea at its place, under the same parent, at the same position.
+        assertEquals("lisbon", renamedInPlace("old", before, renaming("old" to "lisbon")))
+        // Its parent renamed too, or the map's center: followed the same way.
+        assertEquals("tram-28", renamedInPlace("tram", before, renaming("old" to "lisbon", "tram" to "tram-28")))
+        assertEquals("journey", renamedInPlace("trip", before, renaming("trip" to "journey")))
+
+        // Removed, the idea after it moves into its place: that one was there before, so it isn't the idea.
+        val removed = listOf(before[0], before[3].copy(index = 0))
+        assertNull(renamedInPlace("old", before, removed))
+        // Nor is a new idea somewhere else, or an idea the map didn't have before.
+        assertNull(renamedInPlace("old", before, removed + MapNode("porto", "Porto", parentId = "trip", depth = 1, index = 1)))
+        assertNull(renamedInPlace("gone", before, before))
     }
 
     @Test

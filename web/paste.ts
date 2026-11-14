@@ -1,20 +1,23 @@
 // Text pasted onto a map, as orbit-md for Orbit to read. A map or an idea copied from Orbit, or
-// any markdown that starts with a heading or frontmatter, is read as it is. Anything else becomes
-// a list: an idea a line, nested as the lines are indented, without the bullets or numbers they
-// had, and an address on a line of its own becomes an idea that opens it. Text that makes a new
-// map (mapFromText), and ideas caught on the go (caughtIdea), take the same shape.
+// any markdown that starts with a heading (`#`, or a line underlined with `===` or `---` with more
+// markdown after it) or frontmatter, is read as it is. Anything else becomes a list: an idea a
+// line, nested as the lines are indented, without the bullets or numbers they had, and an address
+// on a line of its own becomes an idea that opens it; a line that only underlines or rules off is
+// none. Text that makes a new map (mapFromText), and ideas caught on the go (caughtIdea), take the
+// same shape.
 
-import type { OrbitNewNode } from '@restless-dreams/orbit';
+import type { OrbitDocument, OrbitNewNode, OrbitNode } from '@restless-dreams/orbit';
 
 export interface PastedText {
   /** The text as orbit-md. */
   markdown: string;
 
   /**
-   * Whether the map it makes is itself the idea to paste, as an idea copied from Orbit is,
-   * rather than a holder for the ideas under it.
+   * Whether it's markdown that's a map of its own, as written, rather than a list made of plain
+   * text's lines: the map Orbit reads from it may then be rooted at the idea to paste, as an idea
+   * copied from Orbit is (see `pastedIdeas`).
    */
-  whole: boolean;
+  document: boolean;
 }
 
 /** A line of plain text as an idea: how deep it goes, and its text, without the bullet or number it had. */
@@ -39,8 +42,38 @@ const CHECKBOX = /^\[[ xX/]\]\s+/;
 const ADDRESS = /^https?:\/\/[^\s()<>"'\\[\]]+$/i;
 
 const HEADING = /^#{1,6}\s/;
-const TOP_HEADING = /^#\s/;
 const TAB_WIDTH = 4;
+
+/** A line under a heading's text that makes it one (a setext heading), as Orbit reads it: `===` for a top heading, `---` for one under it. */
+const UNDERLINE = /^ {0,3}(?:=+|-+)\s*$/;
+
+/** A heading written with `#`, as Orbit reads one. */
+const HASH_HEADING = /^ {0,3}#{1,6}\s/;
+
+/** A list item, as Orbit reads one: a bullet or a number, then its text. */
+const LIST_ITEM = /^\s*(?:[-*+]|\d{1,9}[.)])\s+\S/;
+
+/** A rule, as Orbit reads one: three or more of `-`, `*` or `_`, spaced or not. Orbit reads `* * *` as one, not as a list item. */
+const RULE = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/;
+
+/**
+ * A line Orbit reads as something other than a paragraph's text, so no underline makes a heading
+ * of it: a heading, a list item, a quote, a rule, a code fence, a comment, a picture or a link on
+ * a line of its own.
+ */
+const NOT_A_PARAGRAPH = [
+  HASH_HEADING,
+  LIST_ITEM,
+  /^\s*>/,
+  RULE,
+  /^ {0,3}(?:```|~~~)/,
+  /^\s*<!--/,
+  /^\s*\[?!\[[^\]]*\]\([^)]*\)(?:\]\([^)]*\))?\s*$/,
+  /^\s*\[[^\]]*\]\([^)]+\)\s*$/,
+];
+
+/** A line of plain text that only underlines or rules off the lines around it, as `=====`, `-----` or `* * *` do: no idea of its own. */
+const RULE_LINE = /^(?:=+|-+|(?:[-*_]\s*){3,})$/;
 
 /** The longest a map's name gets from text (Importer's TITLE_LENGTH); a longer line is kept whole as the map's note. */
 const TITLE_LENGTH = 80;
@@ -64,10 +97,41 @@ const title = (text: string): string => {
 /** Text's lines, with Windows' and old Macs' line endings read too, and no spaces left at their ends. */
 const linesOf = (text: string): string[] => text.replace(/\r\n?/g, '\n').split('\n').map((line) => line.replace(/\s+$/u, ''));
 
-/** Whether text is markdown that's a map of its own: it starts with a heading or frontmatter. */
+/** Whether `lines[at]` is one line of text with `===` or `---` right under it: a heading, as Orbit reads one (a setext heading). */
+const underlinedAt = (lines: string[], at: number): boolean =>
+  at + 1 < lines.length && lines[at].trim() !== '' && UNDERLINE.test(lines[at + 1]) && !NOT_A_PARAGRAPH.some((block) => block.test(lines[at]));
+
+/**
+ * Whether the lines from `from` on hold more markdown: a heading written with `#`, a list item (a
+ * rule is none), or another underlined heading, after a blank line.
+ */
+const moreMarkdown = (lines: string[], from: number): boolean => {
+  for (let index = from; index < lines.length; index += 1) {
+    const line = lines[index];
+
+    if (HASH_HEADING.test(line) || (LIST_ITEM.test(line) && !RULE.test(line)) || (lines[index - 1]?.trim() === '' && underlinedAt(lines, index))) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+/**
+ * Whether text is markdown that's a map of its own: it starts with a heading or frontmatter. A
+ * heading underlined with `===` or `---` counts when it's one line of text, as headings are, and
+ * more markdown follows it: plain text underlines a line too, a title over lines or a name over
+ * a signature, and its lines are ideas, as they always were.
+ */
 const isDocument = (lines: string[]): boolean => {
-  const first = lines.find((line) => line.trim() !== '') ?? '';
-  return first === '---' || HEADING.test(first);
+  const start = lines.findIndex((line) => line.trim() !== '');
+
+  if (start < 0) {
+    return false;
+  }
+
+  const first = lines[start];
+  return first === '---' || HEADING.test(first) || (underlinedAt(lines, start) && moreMarkdown(lines, start + 2));
 };
 
 /**
@@ -82,7 +146,7 @@ const outlineOf = (lines: string[]): OutlineLine[] => {
   for (const line of lines) {
     const content = line.trimStart();
 
-    if (content === '') {
+    if (content === '' || RULE_LINE.test(content)) {
       continue;
     }
 
@@ -120,7 +184,29 @@ const listOf = (ideas: OutlineIdea[]): string[] => {
   return lines;
 };
 
-/** `text` cut to at most `length` characters at a word's end, with "…" when it was cut, as the app shortens names (MapText.shorten). */
+/**
+ * How much of `text` is kept to end by `end`: up to the last whole character, as people see one, that ends by it
+ * (Unicode's grapheme clusters): an emoji with its skin tone, a family joined by zero-width joiners, a flag, a
+ * letter with its accent. A cut through one would leave half of it, or another one.
+ */
+const wholeCharactersTo = (text: string, end: number): number => {
+  let kept = 0;
+
+  for (const { index, segment } of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)) {
+    if (index + segment.length > end) {
+      break;
+    }
+
+    kept = index + segment.length;
+  }
+
+  return kept;
+};
+
+/**
+ * `text` cut to at most `length` characters at a word's end, with "…" when it was cut, as the app shortens names
+ * (MapText.shorten): both hold to the cases in app/src/test/resources/shortened-names.json.
+ */
 export const shorten = (text: string, length: number): string => {
   const single = text.replace(/\s+/g, ' ').trim();
 
@@ -128,7 +214,8 @@ export const shorten = (text: string, length: number): string => {
     return single;
   }
 
-  const cut = single.slice(0, length - 1);
+  // Never through an emoji, a flag or a letter with its accent: only whole characters, as people see them.
+  const cut = single.slice(0, wholeCharactersTo(single, length - 1));
   const space = cut.lastIndexOf(' ');
   return `${(space >= length / 2 ? cut.slice(0, space) : cut).replace(/[ ,;:.-]+$/, '')}…`;
 };
@@ -136,15 +223,33 @@ export const shorten = (text: string, length: number): string => {
 export const pastedText = (text: string): PastedText => {
   const lines = linesOf(text);
 
-  // Markdown that's a map of its own: one top heading is the idea pasted; with more or none, they're the ideas.
   if (isDocument(lines)) {
-    const tops = lines.filter((line) => TOP_HEADING.test(line)).length;
-    return { markdown: `${lines.join('\n')}\n`, whole: tops === 1 };
+    return { markdown: `${lines.join('\n')}\n`, document: true };
   }
 
   const items = outlineOf(lines).map(({ depth, content }) => `${'  '.repeat(depth)}- ${title(content)}`);
-  return { markdown: `# Pasted\n\n${items.join('\n')}\n`, whole: false };
+  return { markdown: `# Pasted\n\n${items.join('\n')}\n`, document: false };
 };
+
+/**
+ * Whether Orbit rooted the map it read at an idea of the text's own (its one top heading, or its
+ * one list item) rather than at one it made up for several, or for none. Orbit puts a root it
+ * makes up on the line of the idea it holds first, which an idea of the text's own shares with
+ * none under it; and it says when it found neither headings nor lists. What Orbit reads as a
+ * heading decides, so a line in a note's code block that looks like one doesn't count.
+ */
+const rootedInText = ({ root, diagnostics = [] }: OrbitDocument): boolean =>
+  !diagnostics.some(({ code }) => code === 'no-structure' || code === 'empty-document')
+  && !root.children.some((child) => child.source?.line === root.source?.line);
+
+/**
+ * The ideas a paste adds, from the map Orbit read its markdown as (`read`). Markdown that's a map
+ * of its own adds the idea it's rooted at, with what it holds, when that's one of its own (one top
+ * heading, as in an idea copied from Orbit); with several top headings or none, they're the ideas.
+ * Plain text's lines are always the ideas.
+ */
+export const pastedIdeas = (pasted: PastedText, read: OrbitDocument): OrbitNode[] =>
+  pasted.document && rootedInText(read) ? [read.root] : read.root.children;
 
 /**
  * A new map from text, with its branches as the text nests them, as pasting
@@ -174,22 +279,23 @@ export const mapFromText = (text: string, subject: string | null = null): string
     open.push(idea);
   }
 
-  const named = subject?.replace(/\s+/g, ' ').trim() || null;
+  const single = (line: string): string => line.replace(/\s+/g, ' ').trim();
+  const named = subject ? single(subject) || null : null;
   const middle = roots[0];
 
   if (!middle && !named) {
     return '';
   }
 
-  // The first line names the map when it's the subject too.
-  const byLine = !named || (middle !== undefined && middle.content === named);
+  // The first line names the map when it's the subject too, however it's spaced: it's not an idea again under it.
+  const byLine = !named || (middle !== undefined && single(middle.content) === named);
   const name = byLine ? middle.content.replace(CHECKBOX, '') : named;
   const ideas = byLine ? [...middle.children, ...roots.slice(1)] : roots;
 
   // An address stays a link the map opens; any other name too long is cut, and kept whole as the map's note.
-  const single = name.replace(/\s+/g, ' ').trim();
-  const heading = ADDRESS.test(single) ? title(single) : shorten(single, TITLE_LENGTH);
-  const note = heading !== single && !ADDRESS.test(single) ? `\n${single}\n` : '';
+  const whole = single(name);
+  const heading = ADDRESS.test(whole) ? title(whole) : shorten(whole, TITLE_LENGTH);
+  const note = heading !== whole && !ADDRESS.test(whole) ? `\n${whole}\n` : '';
   const list = ideas.length > 0 ? `\n${listOf(ideas).join('\n')}\n` : '';
   return `# ${heading}\n${note}${list}`;
 };

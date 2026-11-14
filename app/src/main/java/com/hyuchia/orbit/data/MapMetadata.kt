@@ -111,7 +111,18 @@ data class MapMetadata(
      * [StudyCard.extras].)
      */
     @Transient val extrasWithin: Map<String, JsonElement> = emptyMap(),
+
+    /** Read in place of details that couldn't be read, damaged or out of reach for now ([MetadataFile.unreadable]): they may have said anything. */
+    @Transient val unreadable: Boolean = false,
 ) {
+    /**
+     * Whether these details can't say if the map has a file in the folder
+     * maps are kept in, nor which: they couldn't be read, or their `sync`
+     * couldn't. Such a map may have one there that a sync can't tell from a
+     * file new to the maps, so its deletion keeps what it can ([SyncRecord.untold]).
+     */
+    val folderFileUnknown: Boolean get() = unreadable || SYNC_FIELD in extras
+
     /** How each card is going, from this device's answers and the other devices': each as its latest answer left it. */
     val studyProgress: Map<String, StudyCard> get() = mergedProgress(study, studyElsewhere)
 
@@ -215,7 +226,11 @@ data class SyncRecord(
     /**
      * On a deleted map's record, kept until its file goes from the folder
      * (`folder-deletions.json`): that the map was private, so its file,
-     * back in the folder, comes back as a private map.
+     * back in the folder, comes back as a private map. A private map's
+     * deletion whose file is gone, as the folder's sync sent the map to the
+     * trash or deleted its file, has no text to tell it by for a while
+     * ([gone], [textless]), so a file by its name is never deleted, and
+     * comes back private.
      */
     val private: Boolean? = null,
 
@@ -225,7 +240,52 @@ data class SyncRecord(
      * restored from a backup has, is trusted less until this one matches it.
      */
     val install: String? = null,
-)
+) {
+    /**
+     * A deleted map's record whose file its details couldn't tell
+     * ([MapMetadata.folderFileUnknown]), with no `file`: `folder` is the
+     * folder the maps were kept in as it was deleted, `hash` the map's text
+     * then, and `private` whether it was a private map. A sync of that folder
+     * deletes the one file that holds that text, and takes a file new to the
+     * maps that may be its file changed as a private map's when it was one
+     * ([planSync]). One of the folder's deletions this version can't read
+     * whole is one too, with what of it can be read ([MapStore.readTombstones]):
+     * with no `folder` either, it's about whichever folder the maps are kept
+     * in. Earlier versions read it as a deletion whose file is gone, and
+     * forget it at their first sync.
+     */
+    val untold: Boolean get() = file.isEmpty()
+
+    /**
+     * A private map's deletion as [gone] leaves it, with no text to tell its
+     * file by: no `hash` (an empty one, which no text has), and no time or
+     * size, so its file is always read, and never taken for the map's. A
+     * file by its name comes back as a private map, and one that may be the
+     * map renamed is told by the text of the private map in the trash that
+     * had the file ([MapTrash.deletedText]). One of the folder's deletions
+     * this version can't read the `hash` of keeps its time and size, and
+     * isn't one: any file new to the maps may be it.
+     */
+    val textless: Boolean get() = !untold && hash.isEmpty() && modified == 0L && size == -1L
+
+    /**
+     * This record as a private map's deletion whose file, `file` in the
+     * folder at `folder`, is gone from there since `since` ([textless]): it
+     * goes, as any deletion whose file is gone does, once a sync
+     * [MISSING_CONFIRMATION] later that left nothing for later agrees, or
+     * [DELETION_PATIENCE] on.
+     */
+    fun gone(since: Long, folder: String = this.folder, file: String = this.file) =
+        copy(folder = folder, file = file, hash = "", modified = 0, size = -1, missingSince = since, writing = null, private = true)
+
+    companion object {
+        /** The deletion of a map kept in the folder at `folder` whose details can't say which file is its: its text's [digest] (`hash`), and whether it was private. */
+        fun untoldDeletion(folder: String, hash: String, private: Boolean) = SyncRecord(folder = folder, file = "", hash = hash, private = true.takeIf { private })
+    }
+}
+
+/** [MapMetadata.sync]'s field in `meta.json`. */
+private const val SYNC_FIELD = "sync"
 
 /** Reads and writes `meta.json`, keeping what this version doesn't know (see [MapMetadata.extras] and [MapMetadata.extrasWithin]). */
 internal object MetadataFile {
@@ -288,9 +348,10 @@ internal object MetadataFile {
      * The details of a map whose `meta.json` can't be read: `fresh`, but
      * private, since what can't be read may have said so. Nothing shows it
      * unlocked; its owner unlocks it as any private map, and can make it not
-     * private.
+     * private. Nor do they say whether it has a file in the folder maps are
+     * kept in ([MapMetadata.folderFileUnknown]).
      */
-    fun unreadable(fresh: MapMetadata): MapMetadata = fresh.copy(isPrivate = true)
+    fun unreadable(fresh: MapMetadata): MapMetadata = fresh.copy(isPrivate = true, unreadable = true)
 
     /**
      * The details in `file`, a map's `meta.json`, or `fresh` when it has

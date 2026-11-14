@@ -46,6 +46,10 @@
     <string name="media_open_as_it_is">Open as it is</string>
     <!-- When no copy of a video could be made to open in another app, as on a device that's full. -->
     <string name="media_open_video_failed">Orbit couldn\'t make the copy of this video that another app opens. This device may not have room for it.</string>
+    <!-- When no copy of a picture, video or sound could be made to share from the full-screen viewer, as on a device that's full. -->
+    <string name="media_share_picture_failed">Orbit couldn\'t make the copy of this picture to share. This device may not have room for it.</string>
+    <string name="media_share_video_failed">Orbit couldn\'t make the copy of this video to share. This device may not have room for it.</string>
+    <string name="media_share_sound_failed">Orbit couldn\'t make the copy of this sound to share. This device may not have room for it.</string>
     <!-- %1$s is the video's site: YouTube or Vimeo. -->
     <string name="media_watch_on">Watch on %1$s</string>
 </resources>

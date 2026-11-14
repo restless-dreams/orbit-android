@@ -54,4 +54,7 @@
         <item quantity="many">%1$d mapas adicionados. %2$d já estavam aqui.</item>
         <item quantity="other">%1$d mapas adicionados. %2$d já estavam aqui.</item>
     </plurals>
+    <string name="common_import_stopped">O Orbit teve que parar no meio desse arquivo: %1$s.</string>
+    <string name="common_import_stopped_without_reason">O Orbit teve que parar no meio desse arquivo.</string>
+    <string name="common_import_again_for_the_rest">Se você importar de novo, o resto chega, e o que já chegou fica como está.</string>
 </resources>

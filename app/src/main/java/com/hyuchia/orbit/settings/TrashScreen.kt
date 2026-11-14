@@ -4,6 +4,8 @@ import android.content.res.Resources
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -42,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -266,16 +269,19 @@ fun TrashScreen(onOpen: (String) -> Unit, onBack: () -> Unit) {
     }
 }
 
-/** How wide a trash row has to be for its buttons to sit beside its words without squeezing them. */
+/** How wide a trash row has to be for its buttons to sit beside its words without squeezing them, at the font's own size. */
 private val ButtonsBeside = 640.dp
 
 /**
  * A map in the trash: its name and what's left of its time there, with
  * Restore and Delete for good beside them where there's room, or under
- * them on a phone. TalkBack hears which map each button acts on.
+ * them on a phone, Restore on a line of its own where they don't both fit,
+ * in a narrow window or in larger words. TalkBack hears which map each
+ * button acts on.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TrashRow(title: String, summary: String, lock: ImageVector?, onRestore: () -> Unit, onDelete: () -> Unit) {
+internal fun TrashRow(title: String, summary: String, lock: ImageVector?, onRestore: () -> Unit, onDelete: () -> Unit) {
     val restoreIt = stringResource(R.string.settings_restore_named, title)
     val deleteIt = stringResource(R.string.settings_delete_named_for_good, title)
 
@@ -296,7 +302,8 @@ private fun TrashRow(title: String, summary: String, lock: ImageVector?, onResto
     }
 
     BoxWithConstraints(Modifier.padding(horizontal = 8.dp)) {
-        val beside = maxWidth >= ButtonsBeside
+        // The buttons grow with the font: so does the room they need beside the words.
+        val beside = maxWidth >= ButtonsBeside * LocalDensity.current.fontScale.coerceAtLeast(1f)
 
         Column {
             ListItem(
@@ -311,9 +318,10 @@ private fun TrashRow(title: String, summary: String, lock: ImageVector?, onResto
             )
 
             if (!beside) {
-                Row(
+                FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    itemVerticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),

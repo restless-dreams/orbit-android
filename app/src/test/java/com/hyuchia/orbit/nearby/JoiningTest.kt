@@ -350,6 +350,150 @@ class JoiningTest {
         assertEquals(303, browser.post(room.joinPath, mapOf("name" to "Ana"), mapOf("Sec-Fetch-Site" to "same-origin")).status)
     }
 
+    /** What a test compares of two answers: everything a page, or a tool, could learn from them. */
+    private fun Answer.seen() = listOf(status, header("content-type"), header("content-security-policy"), header("set-cookie"), header("location"), body)
+
+    private val crossSite = mapOf("Sec-Fetch-Site" to "cross-site")
+
+    @Test
+    fun aPageOfAnotherSiteMakesNoOneJoinAndLearnsNothingOfTheCode() {
+        val room = present(JoiningOptions(askNames = false))
+        // A picture or a fetch on another site's page, at the room's own address.
+        val page = request(room.port, room.pagePath, headers = crossSite)
+        assertEquals(200, page.status)
+        assertNull(page.header("set-cookie"))
+        assertTrue(room.joining.members.value.isEmpty())
+        assertFalse(page.body.contains("browser.js"))
+        assertTrue(page.body.contains("class=\"join__button join__onward\" href=\"\">Open</a>"))
+        assertFalse(page.body.contains("<!--"))
+        assertFalse(page.body.contains("id=\"code\""))
+        assertFalse(page.body.contains("action=\"join\""))
+        // Its script, the way on, runs under the page's policy.
+        val policy = page.header("content-security-policy")!!
+        inlineScripts(page.body).forEach { assertTrue(policy.contains(scriptHash(it))) }
+
+        // The same answer for a wrong code, a code without its slash, an ended one, and the room whatever it asks.
+        val ended = present(JoiningOptions(askNames = false)).also { it.stop() }
+        val same = listOf("/000000/", "/${room.code}", "/${ended.code}/").map { request(room.port, it, headers = crossSite) }
+        same.forEach { assertEquals(page.seen(), it.seen()) }
+
+        room.joining.change(JoiningOptions(askNames = true, requirePin = true))
+        assertEquals(page.seen(), request(room.port, room.pagePath, headers = crossSite).seen())
+        room.joining.change(JoiningOptions(askNames = false))
+
+        // Everything else in a room is refused alike, right code or wrong, and joins no one.
+        listOf("status", "join", "events", "browser.js", "media/picture.png").forEach { part ->
+            val here = request(room.port, "/${room.code}/$part", headers = crossSite)
+            assertEquals(part, 403, here.status)
+            assertEquals(part, here.seen(), request(room.port, "/000000/$part", headers = crossSite).seen())
+        }
+
+        val posted = Browser(room.port).post(room.joinPath, emptyMap(), crossSite)
+        assertEquals(403, posted.status)
+        assertEquals(posted.seen(), Browser(room.port).post("/000000/join", emptyMap(), crossSite).seen())
+        assertTrue(room.joining.members.value.isEmpty())
+
+        // The page's way on comes from the room's own address: that joins at once, as the address typed or scanned does.
+        val browser = Browser(room.port)
+        assertTrue(browser.get(room.pagePath, mapOf("Sec-Fetch-Site" to "same-origin")).body.contains("browser.js"))
+        assertTrue(Browser(room.port).get(room.pagePath, mapOf("Sec-Fetch-Site" to "none")).body.contains("browser.js"))
+        assertEquals(listOf("Guest 1", "Guest 2"), room.joining.members.value.map { it.name })
+        // Once in, its page's own requests go on.
+        assertEquals("""{"state":"joined"}""", browser.get(room.statusPath, mapOf("Sec-Fetch-Site" to "same-origin")).body)
+        assertEquals(200, browser.get("/${room.code}/browser.js", mapOf("Sec-Fetch-Site" to "same-origin")).status)
+    }
+
+    @Test
+    fun wrongCodesFromAnotherSiteKeepNoOneWaiting() {
+        val room = present(JoiningOptions(askNames = false))
+        val elsewhere = listOf(crossSite, mapOf("Sec-Fetch-Site" to "same-site"), mapOf("Origin" to "http://example.com"))
+
+        // Past the five one address may get wrong, and past the hundred of every address together.
+        repeat(40) { index ->
+            val headers = elsewhere[index % elsewhere.size]
+            request(room.port, "/${100_000 + index}/", headers = headers)
+            request(room.port, "/${100_000 + index}/status", headers = headers)
+            Browser(room.port).post("/${100_000 + index}/join", emptyMap(), headers)
+        }
+
+        assertEquals(0L, room.lockedOut.value)
+        assertEquals(200, request(room.port, room.pagePath, headers = mapOf("Sec-Fetch-Site" to "same-origin")).status)
+        assertEquals(listOf("Guest 1"), room.joining.members.value.map { it.name })
+
+        // Codes typed on the room's own page still count, and so do those of browsers and tools that say nothing.
+        repeat(5) { request(room.port, "/000001/", headers = mapOf("Sec-Fetch-Site" to "same-origin")) }
+        assertEquals(429, request(room.port, room.pagePath).status)
+        assertTrue(room.lockedOut.value > 0)
+    }
+
+    @Test
+    fun aBrowserThatSaysOnlyItsOriginIsTakenAtItsWordForTheAddressItAsks() {
+        assumeTrue("Needs another loopback address to reach the phone at", canBindFrom("127.0.0.2"))
+        val room = present(JoiningOptions(askNames = true))
+
+        fun post(host: String, origin: String) = exchange(
+            room.port,
+            "POST ${room.joinPath} HTTP/1.1\r\nHost: $host\r\nOrigin: $origin\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 8\r\n\r\nname=Ana",
+        )
+
+        // The phone's address with its port, as the page came from it: in. Another port, or another site: not.
+        assertEquals(303, post("127.0.0.1:${room.port}", "http://127.0.0.1:${room.port}").status)
+        assertEquals(403, post("127.0.0.1:${room.port}", "http://127.0.0.1:${room.port + 1}").status)
+        assertEquals(1, room.joining.members.value.size)
+
+        // The phone's address changed while the page was open (from the Wi-Fi to its hotspot, say): a page opened at
+        // the new one asks it there, and is in; one at the old address asking the new one would be another site.
+        val atNewAddress = Socket().use { socket ->
+            socket.connect(InetSocketAddress("127.0.0.2", room.port), 5_000)
+            socket.soTimeout = 10_000
+            val body = "name=Bea"
+            val head = "POST ${room.joinPath} HTTP/1.1\r\nHost: 127.0.0.2:${room.port}\r\nOrigin: http://127.0.0.2:${room.port}\r\n"
+            socket.getOutputStream().write((head + "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: ${body.length}\r\n\r\n$body").toByteArray())
+            parse(socket.getInputStream().readBytes())
+        }
+
+        assertEquals(303, atNewAddress.status)
+        assertEquals(listOf("Ana", "Bea"), room.joining.members.value.map { it.name })
+    }
+
+    @Test
+    fun aBrowserBeforeFetchMetadataThatPostsWithOriginNullIsTakenAsTheTypist() {
+        // Safari before 16.4 says no Sec-Fetch-Site, and posts with `Origin: null` from a page without referrers.
+        val room = present(JoiningOptions(askNames = true, requirePin = true))
+        val pin = room.joining.pin.value!!
+
+        // So the form keeps referrers to the phone's own address: its posts carry the page's real origin.
+        val form = request(room.port, room.pagePath)
+        assertTrue(form.body.contains("action=\"join\""))
+        assertEquals("same-origin", form.header("referrer-policy"))
+
+        fun post(path: String, fields: String, headers: String) = exchange(
+            room.port,
+            "POST $path HTTP/1.1\r\nHost: 127.0.0.1:${room.port}\r\n${headers}Content-Type: application/x-www-form-urlencoded\r\nContent-Length: ${fields.length}\r\n\r\n$fields",
+        )
+
+        // A wrong PIN's form keeps them too.
+        val wrongPin = post(room.joinPath, "name=Ana&pin=${if (pin == "0000") "1111" else "0000"}", "Origin: null\r\n")
+        assertEquals(403, wrongPin.status)
+        assertEquals("same-origin", wrongPin.header("referrer-policy"))
+
+        // Without Sec-Fetch-Site, `Origin: null` says nothing: in, as a browser that says nothing is.
+        assertEquals(303, post(room.joinPath, "name=Ana&pin=$pin", "Origin: null\r\n").status)
+        assertEquals(listOf("Ana"), room.joining.members.value.map { it.name })
+
+        // With Sec-Fetch-Site saying another site, it's another site's, whatever its Origin.
+        val elsewhere = "Sec-Fetch-Site: cross-site\r\nOrigin: null\r\n"
+        assertEquals(403, post(room.joinPath, "name=Mallory&pin=$pin", elsewhere).status)
+        repeat(10) { post("/000000/join", "pin=0000", elsewhere) }
+        assertEquals(1, room.joining.members.value.size)
+        assertEquals(0L, room.lockedOut.value)
+
+        // Its wrong codes count, as anyone's typed.
+        repeat(5) { post("/000000/join", "pin=0000", "Origin: null\r\n") }
+        assertTrue(room.lockedOut.value > 0)
+        assertEquals(429, request(room.port, room.pagePath).status)
+    }
+
     @Test
     fun theCodePageStillAsksForTheCode() {
         val room = present(JoiningOptions())
@@ -493,6 +637,28 @@ class JoiningTest {
         assertTrue(ended.body.decodeToString().contains("The other device stopped sharing this map."))
         val status = runBlocking { joining.serve(get("/654321/status"), listOf("status")) { _, _ -> Response.notFound() } } as Response.Bytes
         assertEquals("""{"state":"ended"}""", status.body.decodeToString())
+    }
+
+    @Test
+    fun aSharedMapsPageFromAFileGivesTheSessionTooSoItsZipAndReloadsAreTheSameMembers() {
+        // A shared map's page is a file, made once for every browser: joining at once goes with it as with a page in memory.
+        val joining = Joining("654321", RoomKind.Share, JoiningOptions(askNames = false), template = { asset("join.html") }, words = english)
+        val file = File(mapFolder, "page.html").apply { writeText("<html>map</html>") }
+
+        val content: suspend (Member, List<String>) -> Response = { _, rest ->
+            if (rest.isEmpty()) Response.pageFile(file, "default-src 'none'") else Response.text(200, "zip")
+        }
+
+        val page = runBlocking { joining.serve(get("/654321/"), emptyList(), content) } as Response.FromFile
+        val cookie = page.headers.getValue("Set-Cookie")
+        assertTrue(cookie, Regex("orbit_share=[0-9a-f]{32}; Path=/654321/; HttpOnly; SameSite=Strict").matches(cookie))
+        // What the page carried for itself stays: its content policy.
+        assertEquals("default-src 'none'", page.headers["Content-Security-Policy"])
+        val session = cookie.substringBefore(';')
+
+        assertEquals(200, runBlocking { joining.serve(get("/654321/map.zip", cookie = session), listOf("map.zip"), content) }.status)
+        runBlocking { joining.serve(get("/654321/", cookie = session), emptyList(), content) }
+        assertEquals(listOf("Guest 1"), joining.members.value.map { it.name })
     }
 
     @Test

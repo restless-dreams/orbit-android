@@ -33,15 +33,14 @@ internal object MapKeys {
  * answers itself, which the list shows alongside. `back` is what Back does
  * on the map: a panel closes, the map goes up a level, or the map closes.
  * `lockNow` locks private maps at once, for a private map; none for another.
- * A map that can only be looked at has none that change it, nor lists them.
+ * A map that can only be looked at has none that change it, Undo and Redo
+ * included, nor lists them.
  */
 @Composable
 internal fun mapShortcuts(model: MapViewModel, ui: MapUi, present: () -> Unit, back: () -> Unit, lockNow: (() -> Unit)? = null): List<ShortcutGroup> {
     val idea = ui.sun.takeIf { ui.focused }
     val changeable = ui.readOnly == null
-    val map = listOfNotNull(
-        Shortcut(stringResource(R.string.common_undo), listOf(MapKeys.Undo)) { model.undo() },
-        Shortcut(stringResource(R.string.common_redo), listOf(MapKeys.Redo, Keys(KeyEvent.KEYCODE_Y, ctrl = true))) { model.redo() },
+    val map = undoShortcuts(changeable, undo = model::undo, redo = model::redo) + listOfNotNull(
         Shortcut(stringResource(R.string.common_search_the_map), listOf(MapKeys.Search), anywhere = true) { model.show(Panel.Search) },
         Shortcut(stringResource(R.string.map_shortcut_the_orbit), listOf(MapKeys.Orbit), anywhere = true) {
             if (!ui.focused) {
@@ -93,6 +92,23 @@ internal fun mapShortcuts(model: MapViewModel, ui: MapUi, present: () -> Unit, b
         ShortcutGroup(stringResource(R.string.map_shortcuts_this_map), map),
         ShortcutGroup(stringResource(R.string.map_shortcuts_on_the_map), onTheMap),
         typing.takeIf { changeable },
+    )
+}
+
+/**
+ * The map's Undo and Redo, on a map that can be changed. A map that can only
+ * be looked at takes no change, so it neither lists them nor takes their
+ * keys, which go on to whatever else has a use for them.
+ */
+@Composable
+internal fun undoShortcuts(changeable: Boolean, undo: () -> Unit, redo: () -> Unit): List<Shortcut> {
+    if (!changeable) {
+        return emptyList()
+    }
+
+    return listOf(
+        Shortcut(stringResource(R.string.common_undo), listOf(MapKeys.Undo), run = undo),
+        Shortcut(stringResource(R.string.common_redo), listOf(MapKeys.Redo, Keys(KeyEvent.KEYCODE_Y, ctrl = true)), run = redo),
     )
 }
 

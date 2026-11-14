@@ -1,0 +1,50 @@
+[
+  {
+    "why": "words: cut at a word's end",
+    "text": "The quick brown fox jumps over the lazy dog",
+    "length": 20,
+    "shortened": "The quick brown…"
+  },
+  {
+    "why": "an emoji the cut would split in two",
+    "text": "xxxxxxxxxxxxxxxxxx🎉🎉🎉",
+    "length": 20,
+    "shortened": "xxxxxxxxxxxxxxxxxx…"
+  },
+  {
+    "why": "an emoji that ends where the cut is",
+    "text": "xxxxxxxxxxxxxxxxx🎉🎉🎉",
+    "length": 20,
+    "shortened": "xxxxxxxxxxxxxxxxx🎉…"
+  },
+  {
+    "why": "a family of three, joined by zero-width joiners",
+    "text": "xxxxxxxxxxxxxxx👨‍👩‍👧yyyyy",
+    "length": 20,
+    "shortened": "xxxxxxxxxxxxxxx…"
+  },
+  {
+    "why": "a flag, two regional indicators",
+    "text": "xxxxxxxxxxxxxxxx🇵🇹🇵🇹zz",
+    "length": 20,
+    "shortened": "xxxxxxxxxxxxxxxx…"
+  },
+  {
+    "why": "a thumb with its skin tone",
+    "text": "xxxxxxxxxxxxxxxxx👍🏽zzz",
+    "length": 20,
+    "shortened": "xxxxxxxxxxxxxxxxx…"
+  },
+  {
+    "why": "a letter with its accent written after it",
+    "text": "xxxxxxxxxxxxxxxxxxézz",
+    "length": 20,
+    "shortened": "xxxxxxxxxxxxxxxxxx…"
+  },
+  {
+    "why": "short enough already",
+    "text": "A  logo for\tthe shop",
+    "length": 80,
+    "shortened": "A logo for the shop"
+  }
+]

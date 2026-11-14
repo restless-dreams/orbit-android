@@ -27,7 +27,7 @@
     <string name="export_opml" translatable="false">OPML</string>
     <string name="export_opml_description">The outline, for outliners and other mind map apps</string>
     <string name="export_zip">Zip</string>
-    <string name="export_zip_description">The markdown with the pictures, videos and sounds it holds</string>
+    <string name="export_zip_description">The markdown with the pictures, videos, sounds and files it holds</string>
 
     <!-- Each way out as a sentence names it, after Save, Share or Copy: “Save the web page”. -->
     <string name="export_web_page_named">the web page</string>
@@ -54,6 +54,11 @@
 
     <!-- When a map couldn't be laid out to print. -->
     <string name="export_print_failed">The map couldn’t be laid out for printing</string>
+    <!-- Said once Android's print dialog opens, when pictures of the map couldn't be loaded into the print: from the web, on a phone that can't reach it now, say. -->
+    <plurals name="export_print_without_pictures">
+        <item quantity="one">%d picture couldn’t be loaded, so it’s left out of the print</item>
+        <item quantity="other">%d pictures couldn’t be loaded, so they’re left out of the print</item>
+    </plurals>
 
     <!-- In a way's row, when its file couldn't be made, shared, saved or copied. -->
     <string name="export_could_not_make">Orbit couldn’t make this file. Try again in a moment.</string>

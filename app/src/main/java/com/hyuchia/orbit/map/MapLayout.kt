@@ -40,11 +40,27 @@ internal data class MapLayout(
     /** A sheet that stops halfway over the map lifts the map into the room above it. */
     val lifted: Boolean,
 
+    /**
+     * The map makes room for the keyboard: for a field on the map (a planet,
+     * the + in an orbit), so it stays above the keyboard, and under a panel
+     * that lifts the map, as a sheet or beside it, so the idea it's about
+     * stays in view. A keyboard for a field anywhere else isn't the map's:
+     * the search's (which keeps its own field above the keyboard, over the
+     * map or beside it), the map's text, a sketch's description, or a sheet
+     * or dialog over the map. The map stays as it is then, rather than being
+     * drawn anew at another size as the keyboard comes up, just as the first
+     * keys go in ([keyboardElsewhere] keeps it so until that keyboard goes).
+     */
+    val roomForKeyboard: Boolean,
+
     /** The map's text stands beside the map. */
     val sourceBeside: Boolean,
 
     /** The open panel stands beside the map, rather than over it as a sheet. */
     val panelBeside: Boolean,
+
+    /** The open panel is a sheet over the map: one of the panels ([MapPanels]), not an idea's menu, and not beside the map. */
+    val panelOver: Boolean,
 
     /**
      * How wide the map's text is beside the map, its divider left out: wider
@@ -73,11 +89,13 @@ internal data class MapLayout(
 
 /**
  * The map screen's layout on a screen `width` by `height`, with what `ui`
- * has open. What stands beside the map leaves it at least a phone's width
+ * has open, and whether a sheet or dialog with a field of its own is open
+ * over the map (`fieldOver`: an idea's icon being picked, the map's tags).
+ * What stands beside the map leaves it at least a phone's width
  * ([MinimumMapWidth]), and the toolbar, which floats over the map, fits the
  * map's width beside it rather than the screen's.
  */
-internal fun mapLayout(width: Dp, height: Dp, ui: MapUi): MapLayout {
+internal fun mapLayout(width: Dp, height: Dp, ui: MapUi, fieldOver: Boolean): MapLayout {
     val short = isShort(height)
     val divider = DividerDefaults.Thickness
     val wide = width >= WideScreen || (width > height && width - SidePanelWidth - divider >= MinimumMapWidth)
@@ -96,19 +114,39 @@ internal fun mapLayout(width: Dp, height: Dp, ui: MapUi): MapLayout {
     // so Style and layout doesn't come and go as the map is flown through.
     val styleRoom = RoomForStyle + (if (ui.hasMedia) ToolbarButtonWidth else 0.dp) + (if (ui.hasSounds) ToolbarButtonWidth else 0.dp)
 
+    // Nothing is open over the map but an idea's menu, or a panel lifts the map to keep its idea in view.
+    val panelMakesRoom = ui.panel == null || ui.panel is Panel.Menu || ui.panel.liftsMap()
+
     return MapLayout(
         short = short,
         wide = wide,
         styleInToolbar = width - beside >= styleRoom && !short,
         lifted = !wide && ui.panel.liftsMap(),
+        roomForKeyboard = panelMakesRoom && ui.source == null && !ui.sketching && !fieldOver,
         sourceBeside = sourceBeside,
         panelBeside = panelBeside,
+        panelOver = ui.panel != null && ui.panel !is Panel.Menu && !panelBeside,
         sourceWidth = sourceWidth,
         beside = beside,
         crumbsOver = !short || ui.pathMaking,
         labeledPresent = width >= LabeledPresentWidth,
         roomyTopBar = width >= LabeledPresentWidth && !short,
     )
+}
+
+/**
+ * Whether the keyboard that's up, or on its way up, came up for a field that
+ * isn't the map's: it did `before`, or the map has no room for a keyboard now
+ * ([MapLayout.roomForKeyboard]). The map keeps its size until that keyboard
+ * has gone. As the search closes with the keyboard up, the map would
+ * otherwise make room for it for a moment, while it still belongs to the
+ * search's sheet, then grow back as it goes: drawn anew twice, just as it
+ * flies to the idea found.
+ */
+internal fun keyboardElsewhere(before: Boolean, roomForKeyboard: Boolean, keyboardUp: Boolean): Boolean = when {
+    !keyboardUp -> false
+    !roomForKeyboard -> true
+    else -> before
 }
 
 /** Sheets that stop halfway over the map, with the map lifted into the space above them. */
@@ -126,3 +164,16 @@ internal fun Panel?.showsBeside(): Boolean =
  * something beside, the room the `rail` takes at the map's side.
  */
 internal fun besideRoom(beside: Dp, scaffoldEnd: Dp, rail: Dp): Dp = if (beside > 0.dp) (beside - scaffoldEnd).coerceAtLeast(0.dp) + rail else 0.dp
+
+/**
+ * How far a panel beside the map rises over the top bar, in pixels, to keep
+ * the field in use in it clear of the keyboard, `gap` above it: the field
+ * from `top` to `bottom` below the panel's top, with `room` of the panel
+ * above the keyboard. On a phone on its side the keyboard takes most of the
+ * height (261 dp of 411 on a Pixel), and leaves less room under the top bar
+ * than the panel's title takes alone. The panel rises only as far as it
+ * needs: up to the status bar, `topBar` above it, and on a smaller phone
+ * under it too, as far as the field's own top reaching it.
+ */
+internal fun panelRise(top: Float, bottom: Float, room: Float, topBar: Float, gap: Float): Float =
+    (bottom + gap - room).coerceIn(0f, (topBar + top).coerceAtLeast(0f))

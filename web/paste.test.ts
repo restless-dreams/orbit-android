@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { parseOrbit } from '@restless-dreams/orbit';
 import type { OrbitNewNode, OrbitNode } from '@restless-dreams/orbit';
-import { caughtIdea, mapFromText, pastedText, shorten } from './paste';
+import { caughtIdea, mapFromText, pastedIdeas, pastedText, shorten } from './paste';
 
 /** What a paste adds: each idea's text, nested, with its attributes that matter here. */
 const pasted = (text: string): unknown[] => {
-  const { markdown, whole } = pastedText(text);
-  const root = parseOrbit(markdown).root;
+  const read = pastedText(text);
 
   const shape = (node: OrbitNode): unknown => {
     const details = [node.status && `status ${node.status}`, node.link && `link ${node.link}`].filter(Boolean);
@@ -14,7 +15,7 @@ const pasted = (text: string): unknown[] => {
     return node.children.length > 0 ? { [name]: node.children.map(shape) } : name;
   };
 
-  return (whole ? [root] : root.children).map(shape);
+  return pastedIdeas(read, parseOrbit(read.markdown)).map(shape);
 };
 
 describe('plain text', () => {
@@ -65,10 +66,9 @@ describe('plain text', () => {
 describe('markdown', () => {
   test('pastes an idea copied from Orbit whole, with what it holds', () => {
     const copied = '# Flights <!-- orbit color: "#12295E" -->\nBook early.\n\n## Tokyo <!-- orbit status: done -->\n- Window seat\n\n## Osaka\n';
-    const { markdown, whole } = pastedText(copied);
-    const root = parseOrbit(markdown).root;
+    const read = pastedText(copied);
+    const [root] = pastedIdeas(read, parseOrbit(read.markdown));
 
-    expect(whole).toBe(true);
     expect(root.text).toBe('Flights');
     expect(root.color).toBe('#12295E');
     expect(root.note).toBe('Book early.');
@@ -82,6 +82,75 @@ describe('markdown', () => {
   test('pastes the sections of markdown without one top heading', () => {
     expect(pasted('## Groceries\n\n- Milk\n\n## Errands\n\n- Bank\n')).toEqual([{ Groceries: ['Milk'] }, { Errands: ['Bank'] }]);
     expect(pasted('# One\n\n- a\n\n# Two\n\n- b\n')).toEqual([{ One: ['a'] }, { Two: ['b'] }]);
+    // A title names the root Orbit makes for them, which isn't pasted either.
+    expect(pasted('---\ntitle: Week\n---\n# One\n\n# Two\n')).toEqual(['One', 'Two']);
+    // Nor is the line before them that names it.
+    expect(pasted('---\ntags: [home]\n---\nWeek\n\n# One\n\n# Two\n')).toEqual(['One', 'Two']);
+    // A deeper heading first: the top ones aren't the first, so they're all ideas.
+    expect(pasted('## Before\n# One\n')).toEqual(['Before', 'One']);
+  });
+
+  test('pastes the idea a heading-like line in a note\'s code block belongs to, whole', () => {
+    // As markdown written elsewhere has it: Orbit's own copy puts a note's code in a quote.
+    expect(pasted('# Flights\nBook early.\n\n```\n# not a heading\n```\n\n## Tokyo\n')).toEqual([{ Flights: ['Tokyo'] }]);
+
+    const read = pastedText('# Flights\nBook early.\n\n~~~\n# not a heading\n~~~\n\n## Tokyo\n');
+    const [root] = pastedIdeas(read, parseOrbit(read.markdown));
+    expect(root.note).toBe('Book early.\n\n~~~\n# not a heading\n~~~');
+  });
+
+  test('pastes one top heading whole at any level, and a list\'s one top item', () => {
+    expect(pasted('## Groceries\n\n- Milk\n- Eggs\n')).toEqual([{ Groceries: ['Milk', 'Eggs'] }]);
+    expect(pasted('---\ntags: [home]\n---\n- Groceries\n  - Milk\n')).toEqual([{ Groceries: ['Milk'] }]);
+    expect(pasted('---\ntags: [home]\n---\n- Milk\n- Eggs\n')).toEqual(['Milk', 'Eggs']);
+  });
+
+  test('pastes markdown that starts with a heading underlined with === or --- as the markdown it is', () => {
+    // A README's sections, as markdown written by hand often underlines them.
+    expect(pasted('Groceries\n=========\n\nWhat we need.\n\nThis week\n---------\n\n- Milk\n- Eggs\n\nNext week\n---------\n\n- Bread\n')).toEqual([
+      { Groceries: [{ 'This week': ['Milk', 'Eggs'] }, { 'Next week': ['Bread'] }] },
+    ]);
+
+    // With a list, or a heading written with #, after it.
+    expect(pasted('Groceries\n---------\n- Milk\n- Eggs')).toEqual([{ Groceries: ['Milk', 'Eggs'] }]);
+    expect(pasted('Trip\n====\nBook early.\n\n## Flights\n')).toEqual([{ Trip: ['Flights'] }]);
+
+    // Another underlined heading counts after a blank line: right under the first one's lines, it's plain text's rule.
+    const read = pastedText('Lisbon\n======\nBy the river.\n\nAlfama\n------\nOn the hill.');
+    const [root] = pastedIdeas(read, parseOrbit(read.markdown));
+    expect(read.document).toBe(true);
+    expect([root.text, root.note, root.children.map((child) => [child.text, child.note])]).toEqual(['Lisbon', 'By the river.', [['Alfama', 'On the hill.']]]);
+  });
+
+  test('pastes plain text that underlines a line as its lines, as ever, without an idea for the underline', () => {
+    // A title over lines, a name over a signature, a table's header, rules between lines, an outline under its title.
+    expect(pasted('Groceries\n---------\n\nMilk\nEggs\nBread')).toEqual(['Groceries', 'Milk', 'Eggs', 'Bread']);
+    expect(pasted('ORDER\n=====\nItem A\nItem B')).toEqual(['ORDER', 'Item A', 'Item B']);
+    expect(pasted('Thanks\n--\nAna')).toEqual(['Thanks', 'Ana']);
+    expect(pasted('name,qty\n--------\nmilk,2\neggs,12')).toEqual(['name,qty', 'milk,2', 'eggs,12']);
+    expect(pasted('Milk\n---\nEggs\n---\nBread')).toEqual(['Milk', 'Eggs', 'Bread']);
+    expect(pasted('Trip\n====\n  Flights\n    Window seat\n  Hotels')).toEqual([{ Trip: [{ Flights: ['Window seat'] }, 'Hotels'] }]);
+    expect(pasted('Section\n--------\nBody')).toEqual(['Section', 'Body']);
+    expect(pasted('Trip\n=====')).toEqual(['Trip']);
+    // A break between parts, `* * *` or `- - -`, is a rule, as Orbit reads it, not a list item: no more markdown.
+    expect(pasted('Story\n=====\nPart one\n* * *\nPart two')).toEqual(['Story', 'Part one', 'Part two']);
+    expect(pasted('Story\n=====\nPart one\n- - -\nPart two')).toEqual(['Story', 'Part one', 'Part two']);
+  });
+
+  test('keeps plain text whose first line is no heading\'s plain, and makes no idea of a line that only underlines or rules off', () => {
+    // A list's item, a quote, a link or a rule over a line of dashes is no heading: the lines are ideas, as before.
+    expect(pastedText('- Milk\n---\n- Eggs').document).toBe(false);
+    expect(pastedText('> Milk\n---\n# Eggs').document).toBe(false);
+    expect(pastedText('Milk\n\n=====\nEggs').document).toBe(false);
+    expect(pasted('[Notes](https://example.com/notes)\n---\nFlights\n- Window seat')).toEqual(['Notes (link https://example.com/notes)', 'Flights', 'Window seat']);
+    // A heading over several lines, which hardly anyone writes, is taken for plain lines with a rule under them.
+    expect(pastedText('Milk\nEggs\n---\n- Bread').document).toBe(false);
+    expect(pasted('Milk\nEggs\n=====\nBread\n- - -\nButter\n___')).toEqual(['Milk', 'Eggs', 'Bread', 'Butter']);
+  });
+
+  test('pastes nothing from markdown with no ideas in it', () => {
+    expect(pasted('---\ntags: [home]\n---\n')).toEqual([]);
+    expect(pasted('---\ntitle: Week\n---\nJust a line.\n')).toEqual([]);
   });
 });
 
@@ -148,6 +217,9 @@ describe('a new map from text', () => {
     expect(mapFromText('Flights\n  Window seat\nHotels', 'Summer trip')).toBe('# Summer trip\n\n- Flights\n  - Window seat\n- Hotels\n');
     // A subject that is the first line doesn't name the map twice.
     expect(mapFromText('Trip\n  Flights', 'Trip')).toBe('# Trip\n\n- Flights\n');
+    // However either is spaced: shared articles' titles and their first lines often differ only there.
+    expect(mapFromText('Trip  to\tLisbon\n  Flights', 'Trip to Lisbon')).toBe('# Trip to Lisbon\n\n- Flights\n');
+    expect(mapFromText('Trip to Lisbon\n  Flights', '  Trip   to Lisbon ')).toBe('# Trip to Lisbon\n\n- Flights\n');
   });
 
   test('a middle too long for a name is named by its start, and kept whole as the map\'s note', () => {
@@ -163,6 +235,21 @@ describe('a new map from text', () => {
 
   test('reads Windows line endings, and leaves blank lines out', () => {
     expect(mapFromText('Trip\r\n\r\n  Flights\r\n')).toBe('# Trip\n\n- Flights\n');
+  });
+
+  test('markdown that starts with an underlined heading is kept as written, and plain text\'s underline is no idea', () => {
+    expect(mapFromText('Trip\n=====\n\nFlights\n-------\n- Window seat\n')).toBe('Trip\n=====\n\nFlights\n-------\n- Window seat\n');
+    expect(mapOf('Trip\n=====\n\nFlights\n-------\n- Window seat\n')).toEqual({ Trip: [{ Flights: ['Window seat'] }] });
+    // Plain text makes the map it always made.
+    expect(mapFromText('Trip\n=====')).toBe('# Trip\n');
+    expect(mapOf('Groceries\n---------\n\nMilk\nEggs\nBread')).toEqual({ Groceries: ['Milk', 'Eggs', 'Bread'] });
+    expect(mapOf('ORDER\n=====\nItem A\nItem B')).toEqual({ ORDER: ['Item A', 'Item B'] });
+    expect(mapOf('Thanks\n--\nAna')).toEqual({ Thanks: ['Ana'] });
+    expect(mapOf('name,qty\n--------\nmilk,2\neggs,12')).toEqual({ 'name,qty': ['milk,2', 'eggs,12'] });
+    expect(mapOf('Milk\n---\nEggs\n---\nBread')).toEqual({ Milk: ['Eggs', 'Bread'] });
+    expect(mapOf('Trip\n====\n  Flights\n    Window seat\n  Hotels')).toEqual({ Trip: [{ Flights: ['Window seat'] }, 'Hotels'] });
+    expect(mapOf('[Notes](https://example.com/notes)\n---\nFlights')).toEqual({ 'Notes (link https://example.com/notes)': ['Flights'] });
+    expect(mapOf('Milk\nEggs\n=====\nBread')).toEqual({ Milk: ['Eggs', 'Bread'] });
   });
 });
 
@@ -206,5 +293,14 @@ describe('names cut short', () => {
     expect(shorten('Ideas for the weekend', 80)).toBe('Ideas for the weekend');
     expect(shorten('The quick brown fox jumps over the lazy dog', 20)).toBe('The quick brown…');
     expect(shorten('Supercalifragilisticexpialidocious', 10)).toBe('Supercali…');
+  });
+
+  test('never through a character as people see one, as the app cuts them too', () => {
+    // The cases MapTextTest holds the app's cut to: emoji, a family, a flag, a skin tone, an accent.
+    const cases = JSON.parse(readFileSync(join(import.meta.dir, '../app/src/test/resources/shortened-names.json'), 'utf8')) as { why: string; text: string; length: number; shortened: string }[];
+
+    for (const { why, text, length, shortened } of cases) {
+      expect(`${why}: ${shorten(text, length)}`).toBe(`${why}: ${shortened}`);
+    }
   });
 });

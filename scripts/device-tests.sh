@@ -3,8 +3,8 @@
 # maps drawn by the device's own WebView, as no unit test can:
 #
 #   - the app's own (app/src/androidTest), in Orbit's process: a map loading and drawing, an idea typed on the map
-#     and saved to the map's file, a page that doesn't load, a page whose process Android stops, and a job the
-#     page never finishes;
+#     and saved to the map's file, a page that doesn't load, a page whose process Android stops, a job the page
+#     never finishes, and the map under the search's sheet keeping its size as the keyboard comes up;
 #   - from the journeys (journeys/), in a process of their own: a map's screen as Android brings it back after it
 #     stopped Orbit's process;
 #   - the crash log, which has to stay empty of Orbit's crashes.

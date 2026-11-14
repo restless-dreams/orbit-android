@@ -182,6 +182,9 @@ export const receiverChannel = (options: ReceiverChannelOptions): ReceiverChanne
       if (data.type === 'hello') {
         const protocol = typeof data.protocol === 'number' && Number.isInteger(data.protocol) && data.protocol > 0 ? data.protocol : SILENT_PROTOCOL;
         protocols.set(keyOf(senderId), protocol);
+        // The phone starts over, as it does sending the presentation again after something didn't reach the TV: parts
+        // of a command it sent before, one of them lost, would otherwise join with its next command's and spoil it.
+        pieces.delete(keyOf(senderId));
         options.reply(senderId, options.announcement);
         return;
       }

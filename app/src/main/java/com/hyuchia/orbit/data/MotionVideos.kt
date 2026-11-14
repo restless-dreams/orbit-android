@@ -6,6 +6,9 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import com.hyuchia.orbit.Logs
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -15,26 +18,36 @@ import java.nio.ByteBuffer
  * as: its video as it was, frame for frame (HEVC or H.264), its sound made
  * AAC when it's uncompressed, as iPhones record it, so browsers play it too,
  * and nothing else of the movie: not its metadata tracks, place or make.
+ * Making one stops as soon as its import does.
  */
 internal object MotionVideos {
-    /** Writes `input` as an MP4 to `output`; false, and no `output`, when it can't be made one. */
-    fun toMp4(input: File, output: File): Boolean {
+    /**
+     * Writes `input` as an MP4 to `output`; false, and no `output`, when it
+     * can't be made one. Cancelled, it stops, leaves no `output`, and says
+     * so as a coroutine does, rather than that it couldn't be made.
+     */
+    suspend fun toMp4(input: File, output: File): Boolean {
         // Android's reader won't open a movie without an `ftyp`, as older iPhones write theirs: it reads a copy given one.
         val typed = File(output.parentFile, "${output.name}.typed")
 
         return try {
             convert(if (QuickTimeMovies.withFileType(input, typed)) typed else input, output)
             true
-        } catch (failure: Exception) {
-            Logs.warn("OrbitMotion", "A live photo's movie couldn't be made an MP4", failure)
+        } catch (cancelled: CancellationException) {
             output.delete()
+            throw cancelled
+        } catch (failure: Exception) {
+            output.delete()
+            // A failure that came of its import being cancelled, as the muxer's when it's let go before its first sample, is that cancellation.
+            currentCoroutineContext().ensureActive()
+            Logs.warn("OrbitMotion", "A live photo's movie couldn't be made an MP4", failure)
             false
         } finally {
             typed.delete()
         }
     }
 
-    private fun convert(input: File, output: File) {
+    private suspend fun convert(input: File, output: File) {
         val extractor = MediaExtractor()
 
         try {
@@ -42,7 +55,7 @@ internal object MotionVideos {
             val tracks = (0 until extractor.trackCount).associateWith { extractor.getTrackFormat(it) }
             val (videoTrack, videoFormat) = tracks.entries.firstOrNull { it.value.mime.startsWith("video/") } ?: throw IOException("A movie without a video")
             // Android doesn't read QuickTime's descriptions of uncompressed sound: that's read here, AAC by Android.
-            val sound = QuickTimeMovies.sound(input)?.let(::encode)
+            val sound = QuickTimeMovies.sound(input)?.let { encode(it) }
                 ?: tracks.entries.firstOrNull { it.value.mime == MediaFormat.MIMETYPE_AUDIO_AAC }?.let { aac(input, it.key) }
             val rotation = if (videoFormat.containsKey(MediaFormat.KEY_ROTATION)) videoFormat.getInteger(MediaFormat.KEY_ROTATION) else 0
             val muxer = MediaMuxer(output.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
@@ -70,12 +83,14 @@ internal object MotionVideos {
     }
 
     /** A track's samples, as they are, into the muxer's track `into`. */
-    private fun copySamples(extractor: MediaExtractor, track: Int, format: MediaFormat, muxer: MediaMuxer, into: Int) {
+    private suspend fun copySamples(extractor: MediaExtractor, track: Int, format: MediaFormat, muxer: MediaMuxer, into: Int) {
         extractor.selectTrack(track)
         val buffer = ByteBuffer.allocate(if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE) else SAMPLE_ROOM)
         val info = MediaCodec.BufferInfo()
+        val context = currentCoroutineContext()
 
         while (true) {
+            context.ensureActive()
             val size = extractor.readSampleData(buffer, 0)
 
             if (size < 0) {
@@ -125,8 +140,14 @@ internal object MotionVideos {
         }
     }
 
-    /** Uncompressed 16-bit sound, as an iPhone records a live photo's, encoded as AAC. */
-    private fun encode(sound: Pcm): Sound? {
+    /**
+     * Uncompressed 16-bit sound, as an iPhone records a live photo's,
+     * encoded as AAC, a whole frame at a time: a frame without all its
+     * channels, at the end of a sound cut short, stays out. An encoder with
+     * no room for a frame can't be given any, and stops the encoding, as
+     * one that takes no sound and gives none back for a few seconds does.
+     */
+    private suspend fun encode(sound: Pcm): Sound? {
         val rate = sound.rate
         val channels = sound.channels
         val frame = 2 * channels
@@ -142,18 +163,25 @@ internal object MotionVideos {
         try {
             encoder.configure(target, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             encoder.start()
-            val pending = ByteBuffer.wrap(sound.samples)
+            val pending = ByteBuffer.wrap(sound.samples, 0, sound.samples.size / frame * frame)
             val info = MediaCodec.BufferInfo()
+            val context = currentCoroutineContext()
             val samples = mutableListOf<Pair<ByteBuffer, MediaCodec.BufferInfo>>()
             var encoded: MediaFormat? = null
             var frames = 0L
             var fed = false
+            // Passes in a row in which the encoder took no sound and gave none back.
+            var idle = 0
 
             while (true) {
+                context.ensureActive()
+                var moved = false
+
                 if (!fed) {
                     val index = encoder.dequeueInputBuffer(WAIT)
 
                     if (index >= 0) {
+                        moved = true
                         val buffer = encoder.getInputBuffer(index) ?: throw IOException("No room to encode the sound")
                         buffer.clear()
 
@@ -162,6 +190,12 @@ internal object MotionVideos {
                             fed = true
                         } else {
                             val count = minOf(buffer.remaining(), pending.remaining()) / frame * frame
+
+                            // Given nothing, again and again, the encoder would never get to the end.
+                            if (count == 0) {
+                                throw IOException("No room to encode a frame of the sound")
+                            }
+
                             val chunk = pending.slice().limit(count) as ByteBuffer
                             buffer.put(chunk)
                             pending.position(pending.position() + count)
@@ -172,6 +206,16 @@ internal object MotionVideos {
                 }
 
                 val out = encoder.dequeueOutputBuffer(info, WAIT)
+
+                if (out == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED || out >= 0) {
+                    moved = true
+                }
+
+                idle = if (moved) 0 else idle + 1
+
+                if (idle > MOST_IDLE) {
+                    throw IOException("The encoder stopped taking or giving sound")
+                }
 
                 when {
                     out == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> encoded = encoder.outputFormat
@@ -208,4 +252,7 @@ internal object MotionVideos {
 
     /** How long to wait for the encoder each time, in microseconds. */
     private const val WAIT = 10_000L
+
+    /** The most passes in a row the encoder may take no sound and give none back: each waits for it once or twice, so three to six seconds. */
+    private const val MOST_IDLE = 300
 }

@@ -54,4 +54,15 @@ class QuickCaptureTest {
     fun windowsLineEndingsSplitToo() {
         assertEquals(listOf("One", "Two"), ideasFromText("One\r\nTwo\r\n"))
     }
+
+    @Test
+    fun aMapGivenBackAsItWasHasNoIdeaAddedAndSaysSo() {
+        // The page gives the map's text back as it was when it reads no idea in what was caught, as in frontmatter alone.
+        val markdown = "# Trip\n\n- Lisbon\n"
+        val failed = runCatching { withCaughtIdeas(markdown, markdown) }.exceptionOrNull()
+        assertEquals(CaptureFailure.NoIdeas, (failed as? CaptureException)?.failure)
+
+        // Ideas in it, the map's text changes, and goes.
+        assertEquals("# Trip\n\n- Lisbon\n- Call the hotel\n", withCaughtIdeas(markdown, "# Trip\n\n- Lisbon\n- Call the hotel\n"))
+    }
 }

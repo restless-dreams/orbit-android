@@ -8,6 +8,7 @@ import com.hyuchia.orbit.map.Rollup
 import com.hyuchia.orbit.page.MapNode
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import java.text.BreakIterator
 import kotlin.math.ceil
 
 /** What the home screen shows about a map, read from its orbit-md text. */
@@ -526,7 +527,10 @@ object MapText {
         return false
     }
 
-    /** `text` cut to at most `length` characters at a word's end, with "…" when it was cut. */
+    /**
+     * `text` cut to at most `length` characters at a word's end, with "…" when it was cut, as the pages shorten
+     * names (`shorten` in web/paste.ts): both hold to the cases in the tests' shortened-names.json.
+     */
     fun shorten(text: String, length: Int): String {
         val single = text.replace(Regex("""\s+"""), " ").trim()
 
@@ -534,7 +538,11 @@ object MapText {
             return single
         }
 
-        val cut = single.substring(0, length - 1)
+        // Never through an emoji, a flag or a letter with its accent: only whole characters, as people see them
+        // (Unicode's grapheme clusters, an emoji with its skin tone or a family joined by zero-width joiners included).
+        val characters = BreakIterator.getCharacterInstance().also { it.setText(single) }
+        val end = if (characters.isBoundary(length - 1)) length - 1 else characters.preceding(length - 1).coerceAtLeast(0)
+        val cut = single.substring(0, end)
         val space = cut.lastIndexOf(' ')
         return (if (space >= length / 2) cut.substring(0, space) else cut).trimEnd(' ', ',', ';', ':', '.', '-') + "…"
     }
@@ -1517,16 +1525,14 @@ object MapText {
     }
 
     /**
-     * The line with each link and picture written in markdown (`[words](address)`,
-     * `![words](address)`) as its words alone: from a `[` to the first `]`
-     * after it, with `(` right after that, to the first `)`. Read in one
+     * Where the line's links written in markdown are (`[words](address)`),
+     * first to last, each from its `[` to its `)`: from a `[` to the first
+     * `]` after it, with `(` right after that, to the first `)`. Read in one
      * pass: a `[` with no `]` after it, or a `](` with no `)` after it,
      * starts nothing, and nor can any after it, so a line of thousands of
      * `[` is read once, rather than once from each (seconds for 20,000).
      */
-    internal fun linkWords(text: String): String {
-        val words = StringBuilder()
-        var written = 0
+    internal fun links(text: String): Sequence<IntRange> = sequence {
         var from = 0
         var close = -1
         var paren = -1
@@ -1559,11 +1565,25 @@ object MapText {
                 break
             }
 
+            yield(open..paren)
+            from = paren + 1
+        }
+    }
+
+    /**
+     * The line with each link and picture written in markdown (`[words](address)`,
+     * `![words](address)`) as its words alone, the links as [links] finds
+     * them.
+     */
+    internal fun linkWords(text: String): String {
+        val words = StringBuilder()
+        var written = 0
+
+        for (link in links(text)) {
             // A picture's `!` goes with it, unless the link before it ends there.
-            val start = if (open > written && text[open - 1] == '!') open - 1 else open
-            words.append(text, written, start).append(text, open + 1, close)
-            written = paren + 1
-            from = written
+            val start = if (link.first > written && text[link.first - 1] == '!') link.first - 1 else link.first
+            words.append(text, written, start).append(text, link.first + 1, text.indexOf(']', link.first))
+            written = link.last + 1
         }
 
         return words.append(text, written, text.length).toString()

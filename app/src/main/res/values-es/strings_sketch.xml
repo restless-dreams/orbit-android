@@ -26,6 +26,8 @@
 
     <string name="sketch_replace_title">¿Reemplazar la imagen con un dibujo?</string>
     <string name="sketch_replace_text">El dibujo toma el lugar de la imagen de %1$s. Deshacer la recupera.</string>
+    <string name="sketch_replace_new_text">%1$s recibió una imagen mientras dibujabas. El dibujo toma su lugar, y Deshacer la recupera.</string>
+    <string name="sketch_replace">Reemplazar</string>
 
     <string name="sketch_discard_title">¿Descartar el dibujo?</string>
     <string name="sketch_discard_text">Lo que dibujaste se pierde, y la idea queda como estaba.</string>

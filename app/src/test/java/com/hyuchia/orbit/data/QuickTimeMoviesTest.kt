@@ -74,4 +74,18 @@ class QuickTimeMoviesTest {
     fun `a movie whose sound is compressed has none read here`() {
         assertNull(QuickTimeMovies.sound(sample("motion.mp4")))
     }
+
+    @Test
+    fun `stereo sound cut short partway through a frame reads as far as its last whole frame`() {
+        // Three frames of two channels, of which a frame and a half are there: one sample of the second frame, and a byte of the next.
+        val samples = byteArrayOf(1, 2, 3, 4, 5, 6, 7)
+        val sound = QuickTimeMovies.sound(ArrayBytes(TestMedia.liveMovie(samples, frames = 3)))!!
+
+        assertEquals(2, sound.channels)
+        assertEquals(48_000, sound.rate)
+        assertArrayEquals(byteArrayOf(1, 2, 3, 4), sound.samples)
+
+        // Nor does a sound whose first frame is cut short have any frame to read.
+        assertNull(QuickTimeMovies.sound(ArrayBytes(TestMedia.liveMovie(byteArrayOf(1, 2, 3), frames = 3))))
+    }
 }

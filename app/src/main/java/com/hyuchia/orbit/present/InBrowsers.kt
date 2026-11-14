@@ -1,5 +1,6 @@
 package com.hyuchia.orbit.present
 
+import android.content.Context
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -17,10 +18,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -41,6 +40,8 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.container
+import com.hyuchia.orbit.data.AppSettings
+import com.hyuchia.orbit.data.AsTheyAreFiles
 import com.hyuchia.orbit.data.MediaSummary
 import com.hyuchia.orbit.data.Uncleaned
 import com.hyuchia.orbit.nearby.AddressText
@@ -49,49 +50,67 @@ import com.hyuchia.orbit.nearby.JoiningControls
 import com.hyuchia.orbit.nearby.JoiningOptions
 import com.hyuchia.orbit.nearby.LockoutNote
 import com.hyuchia.orbit.nearby.rememberAddress
+import com.hyuchia.orbit.privacy.privateSheetProperties
 import com.hyuchia.orbit.rememberWords
-import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.MediaWords
 import com.hyuchia.orbit.ui.SheetPage
 import com.hyuchia.orbit.ui.WhatGoes
 import com.hyuchia.orbit.ui.thisDeviceIcon
 import com.hyuchia.orbit.ui.uncleanedLines
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
 /**
- * The presentation in browsers on the local network while `on`: started,
- * handed to the map as an audience, and stopped when turned off or when the
- * presentation ends. Joining starts the way the last presentation's did.
- * The browsers get the map's files that can't go clean only when they're
- * among `asTheyAre`, as the presenter chose.
+ * The presentation in browsers on the local network, while it's shown
+ * there: kept with the map's view model rather than its screen, so a screen
+ * made again (for a new language or text size, say) keeps the room, its
+ * address, its code and who's in it. It's handed to the presentation as an
+ * audience (`onAudience`) as it starts, and taken back as it stops: when the
+ * presenter stops showing it, when the presentation ends, or with the map.
  */
-@Composable
-fun rememberBrowserPresenting(on: Boolean, mapFolder: File, asTheyAre: () -> Set<String>, onAudience: (Audience?) -> Unit): BrowserPresenting? {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val settings = LocalAppSettings.current
-    var presenting by remember { mutableStateOf<BrowserPresenting?>(null) }
+class BrowserRoom(private val onAudience: (Audience?) -> Unit) {
+    private val shown = MutableStateFlow<BrowserPresenting?>(null)
 
-    DisposableEffect(on) {
-        val options = JoiningOptions(askNames = settings.presentAskNames, requirePin = settings.presentRequirePin, limit = settings.presentLimit)
-        val made = if (on) BrowserPresenting(context.applicationContext, mapFolder, scope, options, asTheyAre).also { it.start() } else null
-        presenting = made
-        made?.let { onAudience(it.audience) }
+    /** The room while it's shown. */
+    val presenting: StateFlow<BrowserPresenting?> = shown.asStateFlow()
 
-        onDispose {
-            if (made != null) {
-                onAudience(null)
-                made.audience.close()
-                made.stop()
-            }
-
-            presenting = null
+    /** Shows the presentation in browsers, in the room `make` makes, unless it's shown there already. */
+    fun start(make: () -> BrowserPresenting) {
+        if (shown.value != null) {
+            return
         }
+
+        val made = make()
+        made.start()
+        shown.value = made
+        onAudience(made.audience)
     }
 
-    return presenting
+    /** Stops showing it: the browsers hear the presentation ended, and nothing listens for them any more. */
+    fun stop() {
+        val made = shown.value ?: return
+        shown.value = null
+        onAudience(null)
+        made.audience.close()
+        made.stop()
+    }
+}
+
+/**
+ * A room for the presentation of the map in `mapFolder` in browsers, its
+ * work on `scope`. Joining starts the way the last presentation's did. The
+ * browsers get the map's files that can't go clean only when they're among
+ * `asTheyAre`, as the presenter chose, as they were then: one that changed
+ * since stays on this device.
+ */
+fun browserPresenting(context: Context, settings: AppSettings, mapFolder: File, scope: CoroutineScope, asTheyAre: () -> AsTheyAreFiles): BrowserPresenting {
+    val options = JoiningOptions(askNames = settings.presentAskNames, requirePin = settings.presentRequirePin, limit = settings.presentLimit)
+    return BrowserPresenting(context.applicationContext, mapFolder, scope, options, asTheyAre)
 }
 
 /**
@@ -116,7 +135,7 @@ fun BrowserAddressSheet(presenting: BrowserPresenting, media: MediaSummary, uncl
         scope.launch { state.hide() }.invokeOnCompletion { then() }
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state) {
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state, properties = privateSheetProperties()) {
         EscapeCloses(onDismiss)
         KeepsBarsHidden()
 

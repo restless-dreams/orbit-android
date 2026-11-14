@@ -31,7 +31,8 @@ import com.hyuchia.orbit.theme.parseCssColor
  * as it opens, once whatever was over it closes, and each time the screen
  * moves the page to a new place in its layout, which loses the focus. With
  * `focusable` false, it takes no focus at all and gives up any it has: the
- * screen over it, a study session, has the keys and its own buttons for Tab.
+ * screen over it, a study session or a presentation, has the keys and its
+ * own buttons for Tab.
  * With `heard` false, screen readers pass the page by: something over it
  * speaks for it, as a sketch's canvas does for its planet.
  *

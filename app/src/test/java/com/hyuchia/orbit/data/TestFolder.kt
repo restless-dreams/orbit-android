@@ -59,8 +59,31 @@ internal class TestFolder : SyncFolder {
     /** The pictures, videos and sounds read from `media/`, by name, in the order they were. */
     val mediaReads = mutableListOf<String>()
 
-    /** The room the storage the folder is on has free: a new picture, video or sound past it, and some to spare, is refused as [DocumentFolder] refuses it. */
+    /**
+     * The room the storage the folder is on has free: a picture, video or
+     * sound that adds more than that past the one it's written over, if
+     * any, with some to spare, is refused as [DocumentFolder] refuses it.
+     */
     var room = Long.MAX_VALUE
+
+    /** Makes Orbit's next picture, video or sound written into `media/` stop partway, its start left there, as Orbit stopping midway leaves it. */
+    var cutNextMediaWrite = false
+
+    /**
+     * What a write [cutNextMediaWrite] cuts short throws instead of saying
+     * what it left ([MediaWriteStopped]): Orbit stopping there and then, or
+     * a failure that can't tell.
+     */
+    var cutMediaWriteStops: (() -> Throwable)? = null
+
+    /** What Orbit's next picture, video or sound written into `media/` throws before any of it is written, as a provider failing would. */
+    var failNextMediaWrite: Throwable? = null
+
+    /** Runs after `media/` is listed, once, as another app writing there right then would. */
+    var afterMediaListing: (() -> Unit)? = null
+
+    /** Makes the folder's app take away what a write [cutNextMediaWrite] cuts short left, as one does with a file it made for a write that failed. */
+    var cutMediaWriteCleared = false
 
     override fun files(): List<FolderFile> {
         failListing?.let { throw it }
@@ -129,7 +152,9 @@ internal class TestFolder : SyncFolder {
 
     override fun media(): Map<String, FolderFile> {
         mediaListed = mediaFiles.keys.toSet()
-        return mediaFiles.mapValues { (name, bytes) -> FolderFile(name, mediaTimes[name] ?: 0, mediaListedSizes[name] ?: bytes.size.toLong()) }
+        val listing = mediaFiles.mapValues { (name, bytes) -> FolderFile(name, mediaTimes[name] ?: 0, mediaListedSizes[name] ?: bytes.size.toLong()) }
+        afterMediaListing?.also { afterMediaListing = null }?.invoke()
+        return listing
     }
 
     override fun readMedia(name: String, into: OutputStream): Boolean {
@@ -152,17 +177,37 @@ internal class TestFolder : SyncFolder {
      * makes the folder's app number (`photo (1).jpg`), as may [mediaNamed].
      */
     override fun writeMedia(name: String, from: File): FolderFile {
-        if (name !in mediaListed && from.length() + ROOM_LEFT_FREE > room) {
+        failNextMediaWrite?.let { failure ->
+            failNextMediaWrite = null
+            throw failure
+        }
+
+        val replacing = if (name in mediaListed) mediaFiles[name]?.size?.toLong() ?: 0 else 0
+
+        if (from.length() - replacing + ROOM_LEFT_FREE > room) {
             throw NoRoomForMedia(name)
         }
 
         val bytes = from.readBytes()
         val made = if (name in mediaListed) name else free(mediaNamed?.invoke(name) ?: name, mediaFiles.keys)
         mediaListed = mediaListed + made
-        mediaFiles[made] = bytes
+        mediaFiles[made] = if (cutNextMediaWrite) bytes.copyOf(bytes.size / 2) else bytes
         mediaListedSizes -= made
         time += 1_000
         mediaTimes[made] = time
+
+        if (cutNextMediaWrite) {
+            cutNextMediaWrite = false
+            cutMediaWriteStops?.let { throw it() }
+
+            if (cutMediaWriteCleared) {
+                deleteMedia(made)
+            }
+
+            // As DocumentFolder says it: what this write left, by the file it made, or nothing once that's gone.
+            throw MediaWriteStopped(mediaFiles[made]?.let { FolderFile(made, time, it.size.toLong()) }, IOException("Cut short"))
+        }
+
         return FolderFile(made, time, bytes.size.toLong())
     }
 

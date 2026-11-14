@@ -1,5 +1,6 @@
 package com.hyuchia.orbit.map
 
+import android.os.SystemClock
 import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.data.FolderSync
 import com.hyuchia.orbit.data.Importer
@@ -10,6 +11,7 @@ import com.hyuchia.orbit.page.MapPage
 import com.hyuchia.orbit.page.MapPictures
 import com.hyuchia.orbit.privacy.PrivateLock
 import com.hyuchia.orbit.reminders.IdeaToShow
+import com.hyuchia.orbit.study.StudyWrites
 import com.hyuchia.orbit.ui.TimeWords
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.SendChannel
@@ -43,7 +45,7 @@ interface MapApp {
     fun timeWords(): TimeWords
 
     /** The phone's clipboard: ideas copied from the map, and text or a picture pasted onto it. */
-    val clipboard: MapClipboard
+    val clipboard: IdeasClipboard
 
     /** Pictures of the map, drawn for exports and shares. */
     val pictures: MapPictures
@@ -54,6 +56,9 @@ interface MapApp {
     /** The folder maps are kept in, asked to sync a study session's answers soon, for the other devices there. */
     val folderSync: FolderSync
 
+    /** The answers given in study mode on their way to the maps' details, which outlive a map's screen. */
+    val studyWrites: StudyWrites
+
     /** Where a map deleted from its own screen goes, for Home to offer it back with Undo. */
     val deletedMaps: SendChannel<TrashedMap>
 
@@ -62,4 +67,7 @@ interface MapApp {
 
     /** Makes big videos smaller as they come in, where the phone can; a test's makes none. */
     val videoMaker: VideoMaker get() = VideoMaker.NONE
+
+    /** Milliseconds since the phone started ([SystemClock.elapsedRealtime]), for a presentation's times; a test's clock is its own. */
+    fun elapsedRealtime(): Long = SystemClock.elapsedRealtime()
 }

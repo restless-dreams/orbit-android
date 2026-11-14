@@ -88,9 +88,38 @@ class GoalNumbersTest {
     }
 
     @Test
+    fun spacesAndApostrophesGroupDigitsAsOtherMarksDo() {
+        // As the languages that group with them write numbers, whatever space or apostrophe the keyboard types.
+        assertEquals(BigDecimal(1234), read("1 234", english))
+        assertEquals(BigDecimal(12345678), read("12 345 678", english))
+        assertEquals(BigDecimal(1234), read("1'234", english))
+        assertEquals(BigDecimal("1234.5"), read("1’234.5", Locale.forLanguageTag("de-CH")))
+        assertEquals(BigDecimal("1234567.5"), read("1 234  567,5", Locale.FRANCE))
+        assertEquals(BigDecimal("1234567.5"), read("1\u202F234\u00A0567,5", Locale.FRANCE))
+        assertEquals(BigDecimal(-1234), read(" - 1 234 ", english))
+        // In twos before the last three, as India groups them with commas.
+        assertEquals(BigDecimal(1234567), read("12 34 567", english))
+
+        // Marks that group nothing make no number, rather than another one: 1 2 isn't 12, nor is 1 2.5 12.5.
+        for (typed in listOf("1 2", "1'2", "1’2", "1 2.5", "12 5", "1 23", "1 2345", "1 234'567", "1,234 567", "1 2 345")) {
+            assertEquals(typed, "Write a number, like 12.5", problem(typed, english))
+        }
+
+        assertEquals("Write a number, like 12,5", problem("1 2,5", german))
+    }
+
+    @Test
     fun numbersAreKeptToSixDecimals() {
         assertEquals(BigDecimal("0.333333"), read("0.33333333", english))
         assertEquals(BigDecimal(5), read("5.000", english))
+    }
+
+    @Test
+    fun aNumberThatRoundsToTooBigIsTooBig() {
+        // Kept to 15 digits, it would be 1e15, which no reader of the map takes: its goal would lose the number.
+        assertEquals("That's too big a number", problem("999999999999999.5", english))
+        assertEquals("That's too big a number", problem("-999999999999999.9", english))
+        assertEquals(BigDecimal("999999999999999"), read("999999999999999.4", english))
     }
 
     @Test

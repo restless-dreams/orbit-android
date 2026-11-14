@@ -277,6 +277,52 @@ class OutgoingSoundsTest {
     }
 
     @Test
+    fun `a FLAC with anything between its frames doesn't go, as a player skips it`() {
+        val original = fixture("frames.flac").readBytes()
+        val frames = flacBlocks(original).second
+        val starts = flacFrameStarts(original, frames)
+        val between = mapOf(
+            "words" to text("Test leftover, recorded at +38.7139-009.1394/"),
+            "a tag" to footedId3Tag(),
+            // What looks like a frame's header, but whose checksum isn't one.
+            "a frame's start" to original.copyOfRange(starts[1], starts[1] + 40),
+        )
+
+        for ((what, bytes) in between) {
+            for (at in listOf(starts[1], starts[4], starts.last())) {
+                val probe = original.copyOfRange(0, at) + bytes + original.copyOfRange(at, original.size)
+                assertNull("$what before frame at $at", OutgoingMedia.of(file("between-${what.replace(' ', '-')}-$at.flac", probe)))
+            }
+        }
+
+        // Its frames one after another go, every one of them, as they are; and zeros between them, which say nothing, as they are too.
+        assertArrayEquals(original.copyOfRange(frames, original.size), cleaned(fixture("frames.flac")).copyOfRange(frames, original.size))
+        val zeros = original.copyOfRange(0, starts[4]) + ByteArray(64) + original.copyOfRange(starts[4], original.size)
+        assertArrayEquals(zeros.copyOfRange(frames, zeros.size), cleaned(file("zeros.flac", zeros)).copyOfRange(frames, zeros.size))
+    }
+
+    /** A file's bytes, counting how many of them were read. */
+    private class CountingBytes(private val source: Bytes) : Bytes {
+        var read = 0L
+
+        override val size: Long get() = source.size
+
+        override fun read(at: Long, count: Int): ByteArray = source.read(at, count).also { read += it.size }
+    }
+
+    @Test
+    fun `a FLAC's frames are read once, however many there are`() {
+        val original = fixture("frames.flac").readBytes()
+        val frames = flacBlocks(original).second
+        // 1,400 frames, as a few seconds of a sound have.
+        val long = original.copyOfRange(0, frames) + (1..200).fold(ByteArray(0)) { all, _ -> all + original.copyOfRange(frames, original.size) }
+        val bytes = CountingBytes(ArrayBytes(long))
+
+        assertTrue(FlacBlocks.plan(bytes) != null)
+        assertTrue("read ${bytes.read} bytes of ${long.size}", bytes.read <= 2L * long.size)
+    }
+
+    @Test
     fun `a FLAC cut short goes clean, without the frame or tag its file ends in`() {
         val original = fixture("frames.flac").readBytes()
         val whole = cleaned(fixture("frames.flac"))
@@ -671,6 +717,35 @@ class OutgoingSoundsTest {
         assertEquals("JUNK", String(bytes, 12, 4, Charsets.ISO_8859_1))
         // The chunks after it, the format first, go as they do without it.
         assertArrayEquals(cleaned(fixture("tagged.wav")).copyOfRange(12, wav.size), bytes.copyOfRange(12 + list.size, bytes.size))
+    }
+
+    @Test
+    fun `a WAV's bytes of padding go as zeros, every chunk where it was`() {
+        // As the review's probe made one: chunks of an odd size, each followed by a byte of padding that says something, the samples' own among them.
+        val format = littleEndian(1).copyOf(2) + littleEndian(1).copyOf(2) + littleEndian(8000) + littleEndian(8000) + littleEndian(1).copyOf(2) + littleEndian(8).copyOf(2)
+        val chunk = { type: String, content: ByteArray, pad: String -> text(type) + littleEndian(content.size) + content + text(pad) }
+        val body = text("WAVE") + chunk("fmt ", format, "") + chunk("data", byteArrayOf(42, 43, 44), "D") + chunk("LIST", byteArrayOf(1), "G") + chunk("LIST", byteArrayOf(2), "P") + chunk("LIST", byteArrayOf(3), "S")
+        val wav = text("RIFF") + littleEndian(body.size) + body
+        val bytes = cleaned(file("pads.wav", wav))
+
+        assertEquals(wav.size, bytes.size)
+        val before = waveChunks(wav)
+        assertEquals(before.map { it.first to it.third }, waveChunks(bytes).map { it.first to it.third })
+        assertEquals(listOf("fmt ", "data", "JUNK", "JUNK", "JUNK"), waveChunks(bytes).map { it.second })
+
+        // Every byte of padding is a zero, where it was; the samples are as they were.
+        for ((start, _, size) in before.drop(1)) {
+            assertEquals("the padding after the chunk at $start", 0.toByte(), bytes[start + 8 + size.toInt()])
+        }
+
+        assertArrayEquals(byteArrayOf(42, 43, 44), bytes.copyOfRange(before[1].first + 8, before[1].first + 11))
+        assertFalse(bytes.says("D") || bytes.says("G") || bytes.says("P") || bytes.says("S"))
+
+        // Cut short in the last chunk's header: the byte of padding before it is the last that goes, and a zero too.
+        val going = cleaned(file("pads-cut.wav", wav.copyOfRange(0, before[4].first + 4)))
+        assertEquals(before[4].first, going.size)
+        assertEquals(0.toByte(), going[before[4].first - 1])
+        assertFalse(going.says("G") || going.says("P"))
     }
 
     @Test

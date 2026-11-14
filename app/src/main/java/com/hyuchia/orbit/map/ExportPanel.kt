@@ -44,7 +44,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -66,10 +68,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.hyuchia.orbit.Logs
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.container
+import com.hyuchia.orbit.data.AsTheyAreFiles
+import com.hyuchia.orbit.data.FileChanged
 import com.hyuchia.orbit.data.MediaSummary
 import com.hyuchia.orbit.data.OutgoingMedia
 import com.hyuchia.orbit.data.OutputFailed
@@ -152,6 +159,31 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
     var problem by rememberSaveable { mutableStateOf<Pair<Format, Int>?>(null) }
     // The format last copied, said in its row before Android 13, which says so itself from then on.
     var copied by rememberSaveable { mutableStateOf<Format?>(null) }
+    // How many pictures the print just opened goes without: said once Orbit is back from Android's print dialog, which
+    // covers the map as it opens, so the message is seen.
+    var printedWithout by remember { mutableIntStateOf(0) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+
+    DisposableEffect(lifecycle) {
+        var away = false
+
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) {
+                away = true
+            } else if (event == Lifecycle.Event.ON_RESUME && away) {
+                away = false
+
+                if (printedWithout > 0) {
+                    model.printedWithout(printedWithout)
+                    printedWithout = 0
+                }
+            }
+        }
+
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+
     val title = ui.map?.title ?: stringResource(R.string.export_default_title)
     val dynamicColor = LocalAppSettings.current.dynamicColor
     // Paper is white: the app's colors in light, whatever mode the phone is in.
@@ -160,14 +192,16 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
     val device = thisDeviceIcon()
     // Files that can't go clean stay on this device unless the person chooses, as a way out starts, to share them as they are.
     val asTheyAre = rememberAsTheyAre()
-    val chosen = asTheyAre.chosen
+    val answers = asTheyAre.chosen
     // What goes with each way out, and whether there's a zip to offer: finding out reads the map's file, so not while the panel draws.
     val uncleaned by produceState(Uncleaned(), ui.revision) { value = model.uncleaned() }
+    // Those chosen to go as they are, each as it is now: one that changed since was chosen as it was, and stays.
+    val chosen = answers.chosenIn(uncleaned)
     val media by produceState(MediaSummary(), ui.revision, uncleaned, chosen) { value = model.mediaSummary(leavingOut = uncleaned.names - chosen) }
     val clean by produceState(MediaSummary(), ui.revision, uncleaned) { value = model.mediaSummary(leavingOut = uncleaned.names) }
     // The sounds and live photos' motions a web page of the map carries inside, with those of `chosen`: the rest stay here.
-    val soundsInPage by produceState(emptySet<String>(), ui.revision, chosen) { value = model.soundsInPage(chosen) }
-    val motionsInPage by produceState(emptySet<String>(), ui.revision, chosen) { value = model.motionsInPage(chosen) }
+    val soundsInPage by produceState(emptySet<String>(), ui.revision, answers) { value = model.soundsInPage(answers) }
+    val motionsInPage by produceState(emptySet<String>(), ui.revision, answers) { value = model.motionsInPage(answers) }
     // A zip past what older versions of Orbit open says to update Orbit wherever it's opened.
     val pastOlderZips by produceState(false, ui.revision) { value = model.pastOlderZips() }
     // A web page carries up to 100 MiB of the map's pictures: the rest stay here, as its sounds and motions past theirs do.
@@ -175,8 +209,8 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
     // A YAML map's own text is its YAML, and its markdown is Orbit's writing of it.
     val yaml by produceState(false, ui.revision) { value = model.isYaml() }
 
-    /** A picture or a drawing of the map, as the chips choose; a drawing's pictures that can't go clean go only when `names` has any. */
-    suspend fun picture(format: Format, names: Set<String>): ByteArray? {
+    /** A picture or a drawing of the map, as the chips choose; a drawing's pictures that can't go clean go only when they're among `files`. */
+    suspend fun picture(format: Format, files: AsTheyAreFiles): ByteArray? {
         val markdown = if (framing == Framing.View) null else model.currentMarkdown()
         val drawn = model.picture(
             PictureRequest(
@@ -190,9 +224,9 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
             ),
         )
 
-        // A drawing carries its pictures inside it, so they go as they would in a zip.
+        // A drawing carries its pictures inside it, so they go as they would in a zip: each as the person chose for it.
         return if (format == Format.Svg && drawn != null) {
-            withContext(Dispatchers.Default) { OutgoingMedia.drawing(drawn.decodeToString(), names.isNotEmpty()).toByteArray() }
+            withContext(Dispatchers.IO) { OutgoingMedia.drawing(drawn.decodeToString(), files).toByteArray() }
         } else {
             drawn
         }
@@ -208,18 +242,18 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
 
     /**
      * Writes the map in `format` to `output`, with those of the map's files
-     * that can't go clean that are in `names` going as they are; false when
+     * that can't go clean that are in `files` going as they are; false when
      * it couldn't be made. A web page and a zip are written as they're made,
      * a piece at a time, once `room` has room for the most they may come to:
      * either can be bigger than the map's files together.
      */
-    suspend fun write(format: Format, names: Set<String>, output: OutputStream, room: (Long) -> Unit): Boolean = when (format) {
-        Format.Png, Format.Svg -> picture(format, names)?.also(output::write) != null
-        Format.WebPage -> model.writeWebPage(context, output, names, room)
+    suspend fun write(format: Format, files: AsTheyAreFiles, output: OutputStream, room: (Long) -> Unit): Boolean = when (format) {
+        Format.Png, Format.Svg -> picture(format, files)?.also(output::write) != null
+        Format.WebPage -> model.writeWebPage(context, output, files, room)
         Format.Pdf -> false
         Format.Markdown, Format.Yaml, Format.Opml -> text(format)?.toByteArray()?.also(output::write) != null
         Format.Zip -> {
-            model.writeZip(output, names, room)
+            model.writeZip(output, files, room)
             true
         }
     }
@@ -229,11 +263,15 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
      * or null, with its row saying so, when it couldn't be made: a picture or
      * video that went as it was read, a file that can't be read, a page that
      * couldn't convert it, a storage too full for it. Those of the map's
-     * files that can't go clean that are in `names` go as they are.
+     * files that can't go clean that are in `files` go as they are; one that
+     * changed since the person was asked about it says [FileChanged], to be
+     * asked about again, and nothing is made.
      */
-    suspend fun made(format: Format, names: Set<String>): File? {
+    suspend fun made(format: Format, files: AsTheyAreFiles): File? {
         val file = try {
-            makeExport(context, exportName(context, title, format.extension)) { output -> write(format, names, output, room = this) }
+            makeExport(context, exportName(context, title, format.extension)) { output -> write(format, files, output, room = this) }
+        } catch (changed: FileChanged) {
+            throw changed
         } catch (full: OutputFailed) {
             Logs.warn("OrbitExport", "No room for the map's ${format.extension}", full)
             problem = format to R.string.export_no_room
@@ -272,12 +310,32 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
         }
     }
 
-    fun run(format: Format, share: Boolean) = asTheyAre.then(uncleaned.carried(format)) { names ->
+    /**
+     * Makes the map in `format` and shares or saves it, with the files of
+     * `files` as they are. One of them that changed since the person
+     * answered about it stops it, and it's asked about again as it is now,
+     * and started again: once, after which it says it couldn't be made.
+     */
+    fun go(format: Format, share: Boolean, files: AsTheyAreFiles, again: Boolean) {
         scope.launch {
             problem = null
             copied = null
             working = format
-            val file = made(format, names)
+
+            val file = try {
+                made(format, files)
+            } catch (changed: FileChanged) {
+                working = null
+
+                if (again) {
+                    problem = format to R.string.export_could_not_make
+                } else {
+                    asTheyAre.askAgain(model.uncleaned().carried(format)) { now -> go(format, share, now, again = true) }
+                }
+
+                return@launch
+            }
+
             working = null
             file ?: return@launch
 
@@ -300,11 +358,30 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
         }
     }
 
-    /** Lays the map out for paper with the pictures of `names` as they are, and opens Android's print dialog. */
-    fun startPrinting(activity: Activity, request: PrintRequest, names: Set<String>) {
+    fun run(format: Format, share: Boolean) = asTheyAre.then(uncleaned.carried(format)) { files -> go(format, share, files, again = false) }
+
+    /**
+     * Lays the map out for paper with the pictures of `files` as they are,
+     * and opens Android's print dialog. One of them that changed since the
+     * person answered about it is asked about again, once, as [go] does.
+     */
+    fun startPrinting(activity: Activity, request: PrintRequest, files: AsTheyAreFiles, again: Boolean = false) {
         scope.launch {
             working = Format.Pdf
-            val page = model.printPage(context, printTheme, request, names)
+
+            val page = try {
+                model.printPage(context, printTheme, request, files)
+            } catch (changed: FileChanged) {
+                working = null
+
+                if (again) {
+                    model.printFailed()
+                } else {
+                    asTheyAre.askAgain(model.uncleaned().carried(Format.Pdf)) { now -> startPrinting(activity, request, now, again = true) }
+                }
+
+                return@launch
+            }
 
             if (page == null) {
                 working = null
@@ -321,11 +398,13 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
                 return@launch
             }
 
-            MapPrinter.print(activity, model.pageTitle(context), page, goes) { printing ->
+            MapPrinter.print(activity, model.pageTitle(context), page, goes) { printing, missing ->
                 working = null
 
                 if (!printing && goes()) {
                     model.printFailed()
+                } else if (printing && missing > 0) {
+                    printedWithout = missing
                 }
             }
         }
@@ -335,10 +414,13 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
     fun print() {
         val activity = context.findActivity() ?: return
         val request = printRequest(framing, ui.mode, focus = ui.map?.path?.lastOrNull(), opensIn = ui.map?.options?.view)
-        asTheyAre.then(uncleaned.carried(Format.Pdf)) { names -> startPrinting(activity, request, names) }
+        asTheyAre.then(uncleaned.carried(Format.Pdf)) { files -> startPrinting(activity, request, files) }
     }
 
     fun copy(format: Format) {
+        // A private map that locks while its text is made puts nothing on the clipboard, however quickly it's unlocked again.
+        val locks = model.locks()
+
         scope.launch {
             problem = null
             copied = null
@@ -357,6 +439,10 @@ fun ExportPanel(model: MapViewModel, ui: MapUi) {
 
             if (copying == null) {
                 problem = format to couldNotMake(format, ui.readOnly, yaml)
+                return@launch
+            }
+
+            if (model.lockedSince(locks)) {
                 return@launch
             }
 

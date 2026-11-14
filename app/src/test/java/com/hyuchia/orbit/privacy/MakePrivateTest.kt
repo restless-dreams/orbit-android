@@ -2,10 +2,13 @@ package com.hyuchia.orbit.privacy
 
 import android.app.KeyguardManager
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.hyuchia.orbit.EXTRA_MAP_ID
 import com.hyuchia.orbit.OrbitApplication
 import com.hyuchia.orbit.data.MapSummary
+import com.hyuchia.orbit.ui.offerShortcut
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -13,6 +16,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -28,24 +32,31 @@ class MakePrivateTest {
 
     private val app: OrbitApplication get() = ApplicationProvider.getApplicationContext()
 
-    /** A map called "Secret journal", and the phone's screen lock with private maps unlocked. */
+    /** A map called "Secret journal" in the launcher's shortcuts, and the phone's screen lock with private maps unlocked. */
     private fun journal(): MapSummary = runBlocking {
         shadowOf(app.getSystemService(KeyguardManager::class.java)).setIsDeviceSecure(true)
         app.container.privateMaps.refreshScreenLock()
         app.container.privateMaps.lock.unlock()
         app.container.maps.load()
-        app.container.maps.summary(app.container.maps.create("Secret journal"))!!
+        val journal = app.container.maps.summary(app.container.maps.create("Secret journal"))!!
+        offerShortcut(app, journal.id, journal.title)
+        assertTrue(inShortcuts(journal))
+        journal
     }
 
-    /** Makes `map` private, and what says so. */
+    private fun inShortcuts(map: MapSummary): Boolean =
+        ShortcutManagerCompat.getDynamicShortcuts(app).any { it.intent.getStringExtra(EXTRA_MAP_ID) == map.id }
+
+    /** Makes `map` private, and what says so once it's done. */
     private fun makePrivate(map: MapSummary): List<String> {
         val said = mutableListOf<String>()
         lateinit var change: (MapSummary, Boolean) -> Unit
         compose.setContent { change = rememberMakePrivate { said += it } }
         compose.runOnUiThread { change(map, true) }
-        // Saving the map's details runs off the main thread, and CI runs beside other builds.
-        compose.waitUntil(timeoutMillis = 30_000) { app.container.maps.summary(map.id)?.metadata?.isPrivate == true }
-        compose.waitForIdle()
+        // Its details are written off the main thread, and CI runs beside other builds. Back on it, the map leaves the
+        // launcher's shortcuts, and what says so is said right after, in the same go: its details read private before
+        // either happens.
+        compose.waitUntil(timeoutMillis = 30_000) { !inShortcuts(map) }
         return said
     }
 

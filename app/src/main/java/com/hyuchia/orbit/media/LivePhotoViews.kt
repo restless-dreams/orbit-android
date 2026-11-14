@@ -1,6 +1,10 @@
 package com.hyuchia.orbit.media
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.media.AudioManager
 import android.view.TextureView
 import androidx.annotation.OptIn
 import androidx.compose.animation.core.animateFloatAsState
@@ -21,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +46,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -66,6 +72,67 @@ import java.io.File
 internal data class LivePlay(val sound: Boolean, val held: Boolean = false, val round: Long = System.nanoTime())
 
 /**
+ * When a live photo's motion plays on the viewer's page for its picture
+ * ([play]): once without sound as the page comes up and its still shows,
+ * with its sound while the picture is held or its mark is pressed, and
+ * never while it's zoomed in. Zooming in ends it, and so does Orbit leaving
+ * the screen, the picture held or not, so the still is back either way.
+ */
+@Stable
+internal class LivePhotoPlay {
+    var play by mutableStateOf<LivePlay?>(null)
+        private set
+
+    /** The picture is held: the motion plays, with its sound, until the finger lifts. */
+    var held by mutableStateOf(false)
+        private set
+
+    /**
+     * The page is `current` or not, with Android's animations on (`moving`),
+     * its still `shown` and `fitted`, not zoomed in: on screen so, it plays
+     * once without sound; otherwise it doesn't.
+     */
+    fun arrive(current: Boolean, moving: Boolean, shown: Boolean, fitted: Boolean) {
+        held = false
+        play = if (current && moving && shown && fitted) LivePlay(sound = false) else null
+    }
+
+    /** Its mark, or a key, plays it with its sound, unless it's zoomed in. */
+    fun press(fitted: Boolean) {
+        if (fitted) {
+            play = LivePlay(sound = true)
+        }
+    }
+
+    /** Held, it plays with its sound until the finger lifts, unless it's zoomed in. */
+    fun hold(fitted: Boolean) {
+        if (fitted) {
+            held = true
+            play = LivePlay(sound = true, held = true)
+        }
+    }
+
+    /** The finger that held it lifted: the still is back. */
+    fun lift() {
+        held = false
+        play = null
+    }
+
+    /** It played through: the still is back, unless it's held, when the motion keeps its last frame until the finger lifts. */
+    fun ended() {
+        if (!held) {
+            play = null
+        }
+    }
+
+    /** Zoomed in, or Orbit left the screen: it ends there, held or not, and the still is back. */
+    fun stop() {
+        held = false
+        play = null
+    }
+}
+
+/**
  * A live photo's motion, under its still and fitted as the still is: the
  * still keeps every touch, and fades away over the motion (see
  * [animateStillAlpha]) as `onShowing` says the motion's first frame shows,
@@ -74,7 +141,8 @@ internal data class LivePlay(val sound: Boolean, val held: Boolean = false, val 
  * stand-in in tests), starts once its texture is laid out, so none of it
  * plays unseen, and lets go of the phone's sound when it plays without any.
  * Orbit leaving the screen ends the motion there and then: its sound
- * doesn't go on out of sight, and the still is back when Orbit is.
+ * doesn't go on out of sight, and the still is back when Orbit is. So do
+ * headphones coming out while it plays with its sound.
  */
 @OptIn(UnstableApi::class)
 @Composable
@@ -108,12 +176,37 @@ internal fun LiveMotion(
         }
     }
 
-    // Orbit leaving the screen ends the motion at once, sound and all, as a sound or a video pauses then.
+    // Orbit leaving the screen ends the motion at once, sound and all, as a sound or a video pauses then, and the still is back
+    // whatever's asked of it: even while the picture is held, no frame of the motion stays over it.
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
         if (play != null) {
             player?.pause()
+            showing = false
             ended()
         }
+    }
+
+    // Headphones coming out end a motion playing with its sound in the same way, as a sound or a video pauses then: its sound
+    // never goes on out loud. One playing without sound plays on.
+    val sounding = play?.sound == true
+
+    DisposableEffect(uri, sounding) {
+        if (!sounding) {
+            return@DisposableEffect onDispose {}
+        }
+
+        val unplugged = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                    player?.pause()
+                    showing = false
+                    ended()
+                }
+            }
+        }
+
+        ContextCompat.registerReceiver(context, unplugged, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_NOT_EXPORTED)
+        onDispose { runCatching { context.unregisterReceiver(unplugged) } }
     }
 
     LaunchedEffect(uri, play) {

@@ -42,6 +42,15 @@ class MapFilesTest {
     }
 
     @Test
+    fun `a job gets the pictures and videos of its map at its own address, and nothing else there`() {
+        assertEquals(JobMedia("0f3a", "alfama.jpg"), jobMedia("/jobs/0f3a/media/alfama.jpg"))
+        assertEquals("https://$PAGE_HOST/jobs/0f3a/", jobBaseUrl("0f3a"))
+
+        listOf("/jobs/0f3a/map.md", "/jobs/0f3a/media/../map.md", "/jobs//media/a.jpg", "/jobs/0f3a/media/page.html", "/maps/0f3a/media/a.jpg", "/jobs/0f3a/media/old/a.jpg")
+            .forEach { assertNull(it, jobMedia(it)) }
+    }
+
+    @Test
     fun `a picture that went or can't be read is missing, rather than stopping the app`() {
         val folder = Files.createTempDirectory("orbit-media").toFile()
 
@@ -66,5 +75,14 @@ class MapFilesTest {
         assertNull(mapIdOf("https://$PAGE_HOST/maps/../x/"))
         assertNull(mapIdOf("https://example.com/maps/lisbon/"))
         assertNull(mapIdOf("http://$PAGE_HOST/maps/lisbon/"))
+    }
+
+    @Test
+    fun `a job that draws a map reads that map's pictures, and one that draws none reads none`() {
+        // A thumbnail, and ideas caught on the go, drawn out of sight on the map they're for.
+        assertEquals("lisbon", mapIdOf(jobBaseUrl(MapCommand.Snapshot(1, "webp", "# Lisbon\n", baseUrl = mapBaseUrl("lisbon")))))
+        assertEquals("lisbon", mapIdOf(jobBaseUrl(MapCommand.AddIdeas(2, "# Lisbon\n", "Call the hotel", baseUrl = mapBaseUrl("lisbon")))))
+        assertNull(jobBaseUrl(MapCommand.AddIdeas(3, "# Lisbon\n", "Call the hotel")))
+        assertNull(jobBaseUrl(MapCommand.Convert(4, "# Lisbon\n", "yaml")))
     }
 }

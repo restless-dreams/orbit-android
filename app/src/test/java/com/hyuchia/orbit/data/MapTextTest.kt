@@ -2,6 +2,11 @@ package com.hyuchia.orbit.data
 
 import com.hyuchia.orbit.FileWords
 import com.hyuchia.orbit.map.GoalNumbers
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -450,6 +455,8 @@ class MapTextTest {
     fun `links and comments read in one pass come out as the patterns made them`() {
         // The patterns a line's links and comments were read with, which took seconds on lines of thousands of brackets.
         val link = Regex("""!?\[([^\]]*)]\([^)]*\)""")
+        // The source editor's, which colors links without their `!`.
+        val plainLink = Regex("""\[[^\]]*]\([^)]*\)""")
         val comment = Regex("""(?<!\s)\s*<!--.*?-->""")
         val orbit = Regex("""<!--\s*orbit\b(.*?)-->""")
         val pieces = listOf("[", "]", "(", ")", "!", "a", " ", "  ", "<!--", "-->", "orbit", "orbits", "-", ">", "<", "b c", "_")
@@ -459,6 +466,7 @@ class MapTextTest {
             val text = (0 until random.nextInt(14)).joinToString("") { pieces[random.nextInt(pieces.size)] }
 
             assertEquals(text, link.replace(text) { it.groupValues[1] }, MapText.linkWords(text))
+            assertEquals(text, plainLink.findAll(text).map { it.range }.toList(), MapText.links(text).toList())
             assertEquals(text, comment.replace(text, ""), MapText.withoutComments(text))
             assertEquals(text, comment.find(text)?.value, MapText.commentsIn(text).firstOrNull()?.let(text::substring))
             assertEquals(text, orbit.find(text)?.groupValues?.get(1), MapText.orbitComment(text))
@@ -496,5 +504,18 @@ class MapTextTest {
         assertEquals("A short title", MapText.shorten("A  short\ttitle", 80))
         assertEquals("The quick brown…", MapText.shorten("The quick brown fox jumps over the lazy dog", 20))
         assertEquals("x".repeat(19) + "…", MapText.shorten("x".repeat(500), 20))
+    }
+
+    @Test
+    fun aCutKeepsWholeCharactersAsPeopleSeeThemAsThePagesDo() {
+        // The cases the pages' shorten holds to as well (web/paste.test.ts): emoji, a family, a flag, a skin tone, an accent.
+        val cases = Json.parseToJsonElement(requireNotNull(javaClass.classLoader?.getResource("shortened-names.json")).readText()).jsonArray
+
+        for (case in cases.map { it.jsonObject }) {
+            val text = case.getValue("text").jsonPrimitive.content
+            val shortened = MapText.shorten(text, case.getValue("length").jsonPrimitive.int)
+
+            assertEquals(case.getValue("why").jsonPrimitive.content, case.getValue("shortened").jsonPrimitive.content, shortened)
+        }
     }
 }

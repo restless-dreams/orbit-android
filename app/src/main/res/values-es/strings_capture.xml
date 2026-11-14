@@ -5,6 +5,8 @@
     <string name="capture_no_maps">Todavía no hay mapas. Abre Orbit para empezar uno.</string>
     <string name="capture_map">Mapa</string>
     <string name="capture_your_idea">Tu idea</string>
+    <!-- In quick capture, in place of the ideas typed for a private map while private maps are locked. -->
+    <string name="capture_draft_locked">Tus ideas para este mapa siguen aquí. Desbloquéalo para verlas.</string>
     <plurals name="capture_ideas_one_on_each_line">
         <item quantity="one">%d idea, una en cada línea</item>
         <item quantity="many">%d ideas, una en cada línea</item>

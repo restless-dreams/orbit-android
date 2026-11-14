@@ -128,6 +128,9 @@ private val answerOrder = compareBy<StudyCard>({ it.at }, { it.due }, { it.box }
 /** Of two answers to a card, the one that decides how it's going (see [answerOrder]); the first, when they're as late and as far along. */
 fun latestOf(one: StudyCard, other: StudyCard): StudyCard = if (answerOrder.compare(one, other) >= 0) one else other
 
+/** Whether this answer to a card decides how it's going over `other` (see [answerOrder]): it's later, or as late and further along. */
+fun StudyCard.outranks(other: StudyCard): Boolean = answerOrder.compare(this, other) > 0
+
 /**
  * How each card is going, from this device's answers (`mine`) and the other
  * devices' (`elsewhere`, by device): each card as its latest answer on any of

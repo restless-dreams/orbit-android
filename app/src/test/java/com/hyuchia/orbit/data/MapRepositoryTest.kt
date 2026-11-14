@@ -22,6 +22,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Assume.assumeFalse
@@ -107,7 +108,9 @@ class MapRepositoryTest {
 
         val text = "# Beach <!-- orbit video: media/video-2.mp4 -->\n![](media/picture-1.jpg)\n![](media/missing.jpg)\n"
 
-        assertEquals(text, repository.copyMedia(from, to, text))
+        val pasted = repository.copyMedia(from, to, text)
+        assertEquals(text, pasted.text)
+        assertEquals(listOf("media/picture-1.jpg", "media/video-2.mp4"), pasted.copied.sorted())
         assertEquals(1_000L, File(maps, "$to/media/picture-1.jpg").length())
         assertEquals(2_000L, File(maps, "$to/media/video-2.mp4").length())
         assertFalse(File(maps, "$to/media/unused.jpg").exists())
@@ -142,8 +145,11 @@ class MapRepositoryTest {
         assertEquals(
             "- ![](media/photo-3.jpg) ![](media/photo-2.jpg) ![](./media/picture-1.jpg)\n- ![](media/IMG_1234-2.jpg) [See](https://example.com/media/photo.jpg)\n" +
                 "- <!-- orbit image: { src: media/photo-3.jpg, motion: media/lake-2-motion.mp4 } -->\n",
-            pasted,
+            pasted.text,
         )
+
+        // Only what came is the paste's to take back: never the map's picture-1.jpg, which the pasted idea shows as it's the same.
+        assertEquals(setOf("media/photo-3.jpg", "media/photo-2.jpg", "media/IMG_1234-2.jpg", "media/lake-2-motion.mp4"), pasted.copied.toSet())
 
         // The map's own as they were, and the pasted ones beside them, each holding what its idea shows.
         mapOf("photo.jpg" to 2, "photo-3.jpg" to 1, "photo-2.jpg" to 3, "picture-1.jpg" to 4, "IMG_1234-2.jpg" to 5, "lake-motion.mp4" to 7, "lake-2-motion.mp4" to 6).forEach { (name, byte) ->
@@ -152,6 +158,27 @@ class MapRepositoryTest {
 
         // The map's own still on its way keeps its name for when it comes.
         assertFalse(File(maps, "$to/media/IMG_1234.jpg").exists())
+    }
+
+    @Test
+    fun `files copied for a paste that doesn't happen go again, but one the map's text came to point at meanwhile stays`() = runTest {
+        val repository = loaded()
+        val from = repository.add("# Trip\n")
+        val to = repository.add("# Plans\n")
+        File(maps, "$from/media").mkdirs()
+        File(maps, "$from/media/picture-1.jpg").writeBytes(ByteArray(1_000) { 1 })
+        File(maps, "$from/media/picture-2.jpg").writeBytes(ByteArray(2_000) { 2 })
+        val pasted = repository.copyMedia(from, to, "- ![](media/picture-1.jpg)\n- ![](media/picture-2.jpg)\n")
+        assertEquals(3_000L, repository.mediaSizeNow(to))
+
+        // Meanwhile the map's text came to point at one of them, as a new version from the folder maps are kept in can.
+        assertEquals(WriteResult.Written, repository.write(to, "# Plans\n- ![](media/picture-2.jpg)\n"))
+        repository.letGo(to, pasted.copied)
+        repository.takeBack(to, pasted.copied)
+
+        assertFalse(File(maps, "$to/media/picture-1.jpg").exists())
+        assertEquals(2_000L, File(maps, "$to/media/picture-2.jpg").length())
+        assertEquals(2_000L, repository.mediaSizeNow(to))
     }
 
     @Test
@@ -195,7 +222,7 @@ class MapRepositoryTest {
 
         assertFalse(File(maps, "$to/media/picture-1.jpg").exists())
         // Text without files of the map's needs no room.
-        assertEquals("- Seeds\n", repository.copyMedia(from, to, "- Seeds\n"))
+        assertEquals(CopiedMedia("- Seeds\n"), repository.copyMedia(from, to, "- Seeds\n"))
     }
 
     @Test
@@ -208,8 +235,8 @@ class MapRepositoryTest {
         File(maps, "$from/media/picture-1.jpg").writeBytes(ByteArray(1_000))
         File(maps, "$to/media/picture-1.jpg").writeBytes(ByteArray(1_000))
 
-        assertEquals("![](media/picture-1.jpg)", repository.copyMedia("../$from", to, "![](media/picture-1.jpg)"))
-        assertEquals("![](media/../map.md) ![](media/.hidden)", repository.copyMedia(from, to, "![](media/../map.md) ![](media/.hidden)"))
+        assertEquals(CopiedMedia("![](media/picture-1.jpg)"), repository.copyMedia("../$from", to, "![](media/picture-1.jpg)"))
+        assertEquals(CopiedMedia("![](media/../map.md) ![](media/.hidden)"), repository.copyMedia(from, to, "![](media/../map.md) ![](media/.hidden)"))
         assertEquals(listOf("picture-1.jpg"), File(maps, "$to/media").list()!!.toList())
     }
 
@@ -244,15 +271,50 @@ class MapRepositoryTest {
         val from = File(files, "history-from").apply { mkdirs() }
         File(from, "1000.md").writeText("one")
         File(from, "2000.md").writeText("two")
+        File(from, "3000.md").writeText("three")
         val to = File(files, "history-to").apply { mkdirs() }
-        File(to, "1000.md").writeText("kept")
+        File(to, "1000.md").writeText("one")
+        // One this side has only the first bytes of: a copy of it cut short, coming back from the other side.
+        File(to, "3000.md").writeText("three, whole")
 
         assertTrue(move(from, to))
         assertFalse(from.exists())
-        assertEquals("kept", File(to, "1000.md").readText())
+        assertEquals("one", File(to, "1000.md").readText())
         assertEquals("two", File(to, "2000.md").readText())
+        assertEquals("three, whole", File(to, "3000.md").readText())
         assertTrue(move(File(files, "history-to"), File(files, "history-elsewhere")))
         assertTrue(File(files, "history-elsewhere/2000.md").isFile)
+    }
+
+    @Test
+    fun `a copy a crash cut short is finished from the whole file before that one is deleted`() {
+        val whole = ByteArray(20_000) { (it % 251).toByte() }
+        val from = File(files, "history-from").apply { mkdirs() }
+        File(from, "1000.md").writeBytes(whole)
+        File(from, "2000.md").writeText("two")
+        // An earlier move that stopped partway, its files as far as they got: one cut short, one not started.
+        val to = File(files, "history-to").apply { mkdirs() }
+        File(to, "1000.md").writeBytes(whole.copyOf(10_000))
+        File(to, "2000.md").writeText("")
+
+        assertTrue(move(from, to))
+        assertFalse(from.exists())
+        assertArrayEquals(whole, File(to, "1000.md").readBytes())
+        assertEquals("two", File(to, "2000.md").readText())
+    }
+
+    @Test
+    fun `a file the other side has that holds something else keeps the folder where it was`() {
+        val from = File(files, "history-from").apply { mkdirs() }
+        File(from, "1000.md").writeText("one")
+        File(from, "2000.md").writeText("two")
+        val to = File(files, "history-to").apply { mkdirs() }
+        File(to, "1000.md").writeText("kept")
+
+        assertFalse(move(from, to))
+        assertEquals("one", File(from, "1000.md").readText())
+        assertEquals("two", File(from, "2000.md").readText())
+        assertEquals("kept", File(to, "1000.md").readText())
     }
 
     @Test
@@ -981,7 +1043,7 @@ class MapRepositoryTest {
         // An answer given before the folder was left lands after: the tablet's answers stay this map's.
         repository.keepStudyHere()
         val known = StudyCard(box = 2, due = 20_003, first = 19_990, at = 3_000)
-        repository.changeStudy(id, StudyChange.Answer("ser", known))
+        repository.changeStudy(id, StudyChange.Answer("ser", known, before = StudyCard(box = 1, due = 20_000, first = 19_990, at = 1_000)))
         assertEquals(mapOf("ser" to known, "estar" to tablet), loaded().summary(id)?.metadata?.study)
     }
 
@@ -994,12 +1056,36 @@ class MapRepositoryTest {
         // The sync listed the maps, then an answer was kept.
         val listed = repository.summary(id)!!.metadata
         val known = StudyCard(box = 1, due = 20_001, first = 20_000, at = 3_000)
-        repository.changeStudy(id, StudyChange.Answer("ser", known))
+        repository.changeStudy(id, StudyChange.Answer("ser", known, before = null))
 
         assertEquals(mapOf("estar" to tablet), listed.studyProgress)
         assertEquals(mapOf("ser" to known, "estar" to tablet), repository.takeStudyElsewhere(id))
         assertEquals(mapOf("ser" to known, "estar" to tablet), repository.summary(id)?.metadata?.study)
         assertNull(repository.takeStudyElsewhere("gone"))
+    }
+
+    @Test
+    fun `an answer the maps can't take, as a newer Orbit keeps them, says so rather than seeming kept, and one for a map that's gone is dropped`() = runTest {
+        val id = loaded().add("# Verbs\n## Ser\n- soy\n")
+        File(maps, ".layout.json").writeText("""{"version":${LAYOUT_VERSION + 1},"compatible":${LAYOUT_VERSION + 1}}""")
+        val repository = loaded()
+        assertFalse(repository.writable.value)
+        val answer = StudyChange.Answer("ser", StudyCard(box = 1, due = 20_001, first = 20_000), before = null)
+
+        try {
+            repository.changeStudy(id, answer)
+            fail("The answer should have been refused")
+        } catch (refused: IOException) {
+            assertEquals("A newer version of Orbit keeps these maps: update Orbit to change them.", refused.message)
+        }
+
+        assertNull(repository.summary(id)?.metadata?.study)
+
+        // A map that's gone has nowhere to keep it: nothing to try again.
+        File(maps, ".layout.json").delete()
+        val writable = loaded()
+        assertTrue(writable.writable.value)
+        writable.changeStudy("gone", answer)
     }
 
     @Test
@@ -1238,6 +1324,45 @@ class MapRepositoryTest {
         assertEquals(listOf(123L), repository.versions("plan").map { it.time })
         val backup = File(files, "backups").listFiles()!!.single()
         assertEquals("# Plan\n- A\n", File(backup, "maps/plan/map.md").readText())
+    }
+
+    @Test
+    fun `a map's file is never renamed to point at another of its files by the new name`() = runTest {
+        val repository = loaded()
+        val text = "# Reports\n- First <!-- orbit files: media/file-report.pdf -->\n"
+        val id = repository.add(text, pictures = mapOf("file-report.pdf" to "first".toByteArray()))
+        // Kept for an earlier version: another report by the name a rename would give.
+        File(maps, "$id/media/file-report-2.pdf").writeText("earlier")
+
+        assertNull(repository.renameMedia(id, "file-report.pdf", "file-report-2.pdf", expected = text))
+        assertEquals(text, repository.read(id))
+        assertEquals("earlier", File(maps, "$id/media/file-report-2.pdf").readText())
+
+        // A copy an earlier rename made, the same bytes, is used as it is.
+        File(maps, "$id/media/file-report-3.pdf").writeText("first")
+        val renamed = repository.renameMedia(id, "file-report.pdf", "file-report-3.pdf", expected = text)
+        assertEquals("# Reports\n- First <!-- orbit files: media/file-report-3.pdf -->\n", renamed)
+    }
+
+    @Test
+    fun `a lone map file that can't be moved into its folder keeps the layout from being recorded, and moves at the next launch`() = runTest {
+        maps.mkdirs()
+        File(maps, "Lone.md").writeText("# Lone\n")
+        File(maps, "Other.md").writeText("# Other\n")
+        val stuck = StorageLayout(maps, history, File(files, "backups"), { now }) { file, to -> file.name != "Lone.md" && file.renameTo(to) }
+
+        assertThrows(IOException::class.java) { stuck.prepare() }
+
+        // The other moved; the lone one stays where it was, with no empty folder taking its name, and nothing says the layout is done.
+        assertEquals("# Other\n", File(maps, "other/map.md").readText())
+        assertEquals("# Lone\n", File(maps, "Lone.md").readText())
+        assertFalse(File(maps, "lone").exists())
+        assertFalse(File(maps, ".layout.json").exists())
+
+        val repository = loaded()
+        assertEquals(setOf("Lone", "Other"), repository.maps.value!!.map { it.title }.toSet())
+        assertEquals("# Lone\n", File(maps, "lone/map.md").readText())
+        assertTrue(File(maps, ".layout.json").readText().contains("\"version\":$LAYOUT_VERSION"))
     }
 
     @Test
@@ -1621,6 +1746,27 @@ class MapRepositoryTest {
     }
 
     @Test
+    fun `media named only in code stays out of a map's zip and what it says goes, and stays with the map`() = runTest {
+        val repository = loaded()
+        // As the review's probe wrote it: a name in padded inline code, and one in a fenced block, both of clean pictures.
+        val markdown = "# Trip\n- Inline ` media/inline.jpg `\n- Fenced\n  ```\n  media/fenced.jpg\n  ```\n- Shown ![](media/shown.jpg)\n"
+        val photo = cameraJpeg()
+        val id = repository.add(markdown, pictures = mapOf("inline.jpg" to photo, "fenced.jpg" to photo, "shown.jpg" to photo))
+        val written = ByteArrayOutputStream().also { repository.writeZip(id, it) }.toByteArray()
+        val entries = unzipped(written).map { it.first }
+        val observed = "references=${MediaNames.references(markdown)}, entries=$entries"
+
+        assertEquals(observed, listOf("$MEDIA_DIRECTORY/shown.jpg"), entries.filter { it.startsWith("$MEDIA_DIRECTORY/") })
+        // What goes with it says so, as do the files that can't go clean.
+        assertEquals(1, repository.mediaSummary(id).pictures)
+        File(repository.folder(id), "$MEDIA_DIRECTORY/fenced.jpg").writeBytes(photo.copyOfRange(0, 200))
+        assertTrue(repository.uncleaned(id).isEmpty)
+        // The map keeps them, and Export all takes them.
+        val everything = unzipped(ByteArrayOutputStream().also { repository.exportAll(it) }.toByteArray()).map { it.first }
+        assertTrue(everything.toString(), everything.any { it.endsWith("/$MEDIA_DIRECTORY/inline.jpg") } && everything.any { it.endsWith("/$MEDIA_DIRECTORY/fenced.jpg") })
+    }
+
+    @Test
     fun `a zip of a map gives its own map file before any other`() = runTest {
         val zip = ByteArrayOutputStream().also { output ->
             ZipOutputStream(output).use { zip ->
@@ -1884,8 +2030,8 @@ class MapRepositoryTest {
 
         assertEquals(yaml, repository.read(id))
         assertEquals(MediaSummary(videos = 1, audio = 1, bytes = 160), repository.mediaSummary(id))
-        assertEquals(Uncleaned(sounds = setOf("memo-mf2k1x.mp4")), repository.uncleaned(id))
-        assertEquals(setOf("memo-mf2k1x.mp4"), repository.soundsInPage(id, asTheyAre = setOf("memo-mf2k1x.mp4")))
+        assertEquals(Uncleaned(sounds = setOf("memo-mf2k1x.mp4")), repository.uncleaned(id).copy(stamps = emptyMap()))
+        assertEquals(setOf("memo-mf2k1x.mp4"), repository.soundsInPage(id, asTheyAre = chosenAsTheyAreIn(repository.folder(id), "memo-mf2k1x.mp4")))
     }
 
     @Test
@@ -2260,7 +2406,7 @@ class MapRepositoryTest {
         repository.addMediaFile(id, "picture-1.jpg") { it.write(ByteArray(10) { 1 }); true }
         repository.addMediaFile(id, "picture-2.jpg") { it.write(ByteArray(10) { 2 }); true }
 
-        val zipped = ByteArrayOutputStream().also { repository.writeZip(id, it, setOf("picture-1.jpg", "picture-2.jpg")) }.toByteArray()
+        val zipped = ByteArrayOutputStream().also { repository.writeZip(id, it, chosenAsTheyAreIn(repository.folder(id), "picture-1.jpg", "picture-2.jpg")) }.toByteArray()
         assertEquals(setOf("picture-1.jpg"), repository.readBundle(ByteArrayInputStream(zipped))!!.pictures.keys)
         assertEquals(1, repository.mediaSummary(id).pictures)
     }
@@ -2396,12 +2542,12 @@ class MapRepositoryTest {
         repository.addMediaFile(id, "picture-1.jpg") { it.write(photo); true }
         repository.addMediaFile(id, "picture-2.jpg") { it.write(cut); true }
 
-        assertEquals(Uncleaned(pictures = setOf("picture-2.jpg")), repository.uncleaned(id))
+        assertEquals(Uncleaned(pictures = setOf("picture-2.jpg")), repository.uncleaned(id).copy(stamps = emptyMap()))
         assertEquals(2, repository.mediaSummary(id).pictures)
         assertEquals(1, repository.mediaSummary(id, leavingOut = setOf("picture-2.jpg")).pictures)
 
         suspend fun zipped(asTheyAre: Set<String>) =
-            ByteArrayOutputStream().also { repository.writeZip(id, it, asTheyAre) }.toByteArray().let { repository.readBundle(ByteArrayInputStream(it))!!.pictures }
+            ByteArrayOutputStream().also { repository.writeZip(id, it, chosenAsTheyAreIn(repository.folder(id), *asTheyAre.toTypedArray())) }.toByteArray().let { repository.readBundle(ByteArrayInputStream(it))!!.pictures }
 
         // Left out unless chosen; then exactly as it is, while the one that goes clean still does.
         assertEquals(setOf("picture-1.jpg"), zipped(emptySet()).keys)

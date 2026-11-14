@@ -100,7 +100,10 @@ class DropsInFlightTest {
             ui = ui,
             locked = MutableStateFlow(false),
             page = { page },
-            update = { id, _, _ -> updated += id },
+            change = { id, _, _ ->
+                updated += id
+                true
+            },
             tell = { told += it },
         )
 

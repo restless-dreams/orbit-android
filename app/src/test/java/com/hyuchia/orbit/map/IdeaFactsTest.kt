@@ -69,4 +69,18 @@ class IdeaFactsTest {
 
         assertEquals(emptyList<String>(), said())
     }
+
+    @Test
+    fun `a kind reads as the map draws it, whatever its spaces and capitals`() {
+        show(MapNode("beds", "Beds", type = " Milestone "))
+
+        assertEquals(listOf("Milestone"), said())
+    }
+
+    @Test
+    fun `a kind written for a newer version than the map draws is none it says`() {
+        show(MapNode("beds", "Beds", type = "milestone", typeVersion = 2))
+
+        assertEquals(emptyList<String>(), said())
+    }
 }

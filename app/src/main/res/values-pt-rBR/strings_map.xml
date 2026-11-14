@@ -28,6 +28,8 @@
     <string name="map_stopped">O Android liberou memória enquanto ele estava aberto. Suas alterações estão salvas.</string>
     <string name="map_did_not_load_title">O mapa não carregou</string>
     <string name="map_did_not_load">A página que o desenha não conseguiu iniciar. Seu mapa está seguro.</string>
+    <string name="map_stopped_with_sketch">O Android liberou memória enquanto ele estava aberto. Suas alterações estão salvas, e seu desenho volta com o mapa.</string>
+    <string name="map_did_not_load_with_sketch">A página que o desenha não conseguiu iniciar. Seu mapa está seguro, e seu desenho volta com ele.</string>
     <string name="map_load_it_again">Carregar de novo</string>
     <string name="map_icon_for">Ícone de %1$s</string>
     <string name="map_color_for">Cor de %1$s</string>
@@ -64,6 +66,7 @@
     <string name="map_change_declined">O Orbit não conseguiu fazer essa alteração, então o mapa ficou como estava.</string>
     <string name="map_changed_elsewhere">Este mapa mudou em outro lugar enquanto você o editava. Sua versão está no histórico, e Desfazer a traz de volta.</string>
     <string name="map_change_kept_in_history">Este mapa mudou em outro lugar, então sua última alteração está no histórico.</string>
+    <string name="map_change_kept_in_trash">Este mapa foi para a lixeira enquanto você o alterava. Sua última alteração está no histórico: restaure o mapa para recuperá-la.</string>
     <string name="map_change_not_saved">O Orbit não salvou essa alteração porque ela deixaria o mapa vazio. Use Desfazer para revertê-la.</string>
     <string name="map_deleted_idea">Ideia “%1$s” excluída</string>
     <string name="map_checked_item">Item “%1$s” marcado</string>
@@ -75,6 +78,7 @@
     <string name="map_cut_idea">Ideia “%1$s” recortada</string>
     <string name="map_too_much_to_copy">É coisa demais para copiar de uma vez</string>
     <string name="map_nothing_to_paste">Não há nada para colar: primeiro copie um texto ou uma imagem</string>
+    <string name="map_paste_idea_gone">Nada foi colado: a ideia não existe mais</string>
     <string name="map_paste_media_failed">O Orbit não conseguiu copiar as imagens, os vídeos e os áudios dessas ideias para este mapa, então nada foi colado.</string>
     <string name="map_pasted_the_picture">Imagem colada</string>
     <plurals name="map_pasted_ideas">
@@ -92,6 +96,9 @@
     <string name="map_add_its_movie">Adicionar o vídeo</string>
     <string name="map_made_a_live_photo">A imagem agora é uma foto ao vivo</string>
     <string name="map_video_unreadable">Não foi possível ler esse vídeo.</string>
+    <string name="map_picture_idea_gone">A imagem não foi adicionada: a ideia dela não existe mais</string>
+    <string name="map_video_idea_gone">O vídeo não foi adicionado: a ideia dele não existe mais</string>
+    <string name="map_sound_idea_gone">O áudio não foi adicionado: a ideia dele não existe mais</string>
     <plurals name="map_added_ideas">
         <item quantity="one">%d ideia adicionada</item>
         <item quantity="many">%d ideias adicionadas</item>

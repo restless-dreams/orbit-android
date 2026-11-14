@@ -6,6 +6,8 @@ import androidx.core.content.FileProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.hyuchia.orbit.OrbitApplication
 import com.hyuchia.orbit.container
+import com.hyuchia.orbit.data.FileStamp
+import com.hyuchia.orbit.data.writeAtomically
 import com.hyuchia.orbit.ui.openMapExport
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -96,15 +98,52 @@ class OpenInAnotherAppTest {
         val cut = located.copyOfRange(0, located.size - 100)
         val (id, video) = mapWith("video-2.mp4", cut)
 
-        assertEquals(Shared.NotClean, runBlocking { openVideoInAnotherApp(activity, id, video) })
+        val asked = runBlocking { openVideoInAnotherApp(activity, id, video) }
+        assertTrue(asked is Shared.NotClean)
         assertNull(shadowOf(activity).nextStartedActivity)
         assertEquals(emptyList<File>(), exports())
 
-        openVideoAsItIs(activity, id, video)
+        // Chosen, the other app gets a copy of the very file asked about, never the map's own file.
+        assertEquals(Shared.Clean, runBlocking { openVideoAsItIs(activity, id, video, (asked as Shared.NotClean).stamp) })
         val opened = shadowOf(activity).nextStartedActivity
         assertEquals(Intent.ACTION_VIEW, opened.action)
-        assertEquals("/maps/$id/media/video-2.mp4", opened.data!!.path)
+        val copy = exports().single()
+        assertEquals("/exports/${copy.parentFile!!.name}/video-2.mp4", opened.data!!.path)
+        assertArrayEquals(cut, copy.readBytes())
         assertTrue(opened.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+    }
+
+    @Test
+    fun `a video replaced after the person chose to open it as it is doesn't go, and is asked about again`() {
+        val cut = located.copyOfRange(0, located.size - 100)
+        val (id, video) = mapWith("video-5.mp4", cut)
+        val asked = runBlocking { openVideoInAnotherApp(activity, id, video) } as Shared.NotClean
+
+        // Another video Orbit can't clean takes its place under its name, the same size and time, before the person answers.
+        val time = video.lastModified()
+        writeAtomically(video, located.copyOfRange(100, located.size))
+        video.setLastModified(time)
+
+        assertEquals(Shared.Changed, runBlocking { openVideoAsItIs(activity, id, video, asked.stamp) })
+        assertNull(shadowOf(activity).nextStartedActivity)
+        assertEquals(emptyList<File>(), exports())
+
+        // One Orbit can clean put there instead goes clean, without asking.
+        writeAtomically(video, located)
+        assertEquals(Shared.Clean, runBlocking { openVideoAsItIs(activity, id, video, asked.stamp) })
+        assertFalse(exports().single().readBytes().says(place))
+    }
+
+    @Test
+    fun `a video that leads elsewhere, through a link in the map's folder, never opens`() {
+        val (id, video) = mapWith("video-6.mp4", located)
+        val outside = File(activity.cacheDir, "outside.mp4").apply { writeBytes(located) }
+        video.delete()
+        java.nio.file.Files.createSymbolicLink(video.toPath(), outside.toPath())
+
+        assertEquals(Shared.Failed, runBlocking { openVideoInAnotherApp(activity, id, video) })
+        assertNull(shadowOf(activity).nextStartedActivity)
+        assertEquals(emptyList<File>(), exports())
     }
 
     @Test
@@ -117,7 +156,7 @@ class OpenInAnotherAppTest {
         assertTrue(activity.container.privateMaps.hidesNow(id))
 
         runBlocking { openVideoInAnotherApp(activity, id, video) }
-        openVideoAsItIs(activity, id, video)
+        runBlocking { openVideoAsItIs(activity, id, video, FileStamp.of(video.canonicalFile)!!) }
 
         assertNull(shadowOf(activity).nextStartedActivity)
         assertEquals(emptyList<File>(), exports())

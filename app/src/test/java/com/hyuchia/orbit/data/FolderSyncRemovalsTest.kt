@@ -8,6 +8,8 @@ import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -29,7 +31,12 @@ class FolderSyncRemovalsTest {
     private val folder = TestFolder()
     private val settings = SettingsRepository(settingsStoreIn(File(root, "settings.preferences_pb")))
 
-    private fun repository() = MapRepository(File(root, "maps"), File(root, "trash"), starters, words, clock = { now })
+    /** This device's maps, moving them to the trash with `rename`. */
+    private fun repository(rename: (File, File) -> Boolean = { file, to -> file.renameTo(to) }) =
+        MapRepository(File(root, "maps"), File(root, "trash"), starters, words, clock = { now }, rename = rename)
+
+    /** Orbit stopping in the middle of a sync: past each step's own catch, as nothing runs after it. */
+    private class Died : Error()
 
     private val maps = repository()
 
@@ -42,6 +49,25 @@ class FolderSyncRemovalsTest {
     private suspend fun start() {
         maps.load()
         settings.update { it.copy(syncFolder = "memory") }
+    }
+
+    /** `maps` as Orbit starts with them, and a sync of them. */
+    private suspend fun started(maps: MapRepository): FolderSync {
+        maps.load()
+        settings.update { it.copy(syncFolder = "memory") }
+        return FolderSync(maps, settings, CoroutineScope(Dispatchers.Default + work), File(root, "folder-notes.json"), words, TestEditor(words)) { folder }
+    }
+
+    /** "Gone" in the folder, with "Stays": then its file goes, and a sync long enough after is to agree. */
+    private suspend fun goneFrom(maps: MapRepository, sync: FolderSync): String {
+        val gone = maps.add("# Gone\n- Idea\n")
+        maps.add("# Stays\n- Idea\n")
+        sync.syncNow()
+        folder.delete("Gone.md")
+        sync.syncNow()
+        val record = maps.summary(gone)!!.metadata.sync!!
+        maps.setSyncRecord(gone, record.copy(missingSince = record.missingSince!! - MISSING_CONFIRMATION))
+        return gone
     }
 
     /** Five maps in the folder, and one more that stays: then the five files go, and a sync long enough after agrees. */
@@ -204,5 +230,84 @@ class FolderSyncRemovalsTest {
         val left = notes - FolderNotes(removed = listOf("Plan", "Diary"), keptBoth = listOf("Trip (changed elsewhere)"))
         assertEquals(FolderNotes(tooBig = listOf("film.mp4, in “Diary”"), private = listOf("film.mp4, in “Diary”")), left)
         assertTrue((notes - notes).isEmpty)
+    }
+
+    @Test
+    fun `a map that can't follow its file into the trash stays, still following it, and isn't written back to the folder`() = runTest {
+        var stuck = true
+        val maps = repository { file, to -> !stuck && file.renameTo(to) }
+        val sync = started(maps)
+        val gone = goneFrom(maps, sync)
+
+        sync.syncNow()
+
+        assertEquals("Gone.md", maps.summary(gone)!!.metadata.sync!!.file)
+        assertTrue(maps.trash.value.isEmpty())
+        assertEquals(emptyList<String>(), sync.state.value.notes.removed)
+        assertNotNull(sync.state.value.problem)
+        sync.syncNow()
+        assertFalse("Gone.md" in folder.texts)
+
+        // Once it can, it goes.
+        stuck = false
+        sync.syncNow()
+        assertFalse(maps.exists(gone))
+        assertEquals(listOf("Gone"), maps.trash.value.map { it.title })
+        assertEquals(listOf("Gone"), sync.state.value.notes.removed)
+        assertEquals(setOf("Stays.md"), folder.texts.keys)
+    }
+
+    @Test
+    fun `Orbit stopping as a map follows its file into the trash leaves it following the file, not written back to the folder`() = runTest {
+        val first = repository { _, _ -> throw Died() }
+        val firstSync = started(first)
+        val gone = goneFrom(first, firstSync)
+        firstSync.syncNow()
+
+        val maps = repository()
+        val sync = started(maps)
+        assertEquals("Gone.md", maps.summary(gone)!!.metadata.sync!!.file)
+        sync.syncNow()
+
+        assertFalse(maps.exists(gone))
+        assertEquals(listOf("Gone"), maps.trash.value.map { it.title })
+        assertEquals(setOf("Stays.md"), folder.texts.keys)
+    }
+
+    @Test
+    fun `a map the folder sent to the trash, Orbit stopping right after, comes back from it with a file of its own`() = runTest {
+        val first = repository { file, to ->
+            file.renameTo(to)
+            throw Died()
+        }
+
+        val firstSync = started(first)
+        goneFrom(first, firstSync)
+        firstSync.syncNow()
+
+        val maps = repository()
+        val sync = started(maps)
+        sync.syncNow()
+        assertEquals(setOf("Stays.md"), folder.texts.keys)
+        assertEquals(emptyList<SyncRecord>(), maps.folderDeletions())
+
+        val back = maps.restore(maps.trash.value.single())!!
+        sync.syncNow()
+        assertEquals(setOf("Gone.md", "Stays.md"), folder.texts.keys)
+        assertEquals("Gone.md", maps.summary(back)!!.metadata.sync!!.file)
+        assertNull(maps.summary(back)!!.metadata.sync!!.missingSince)
+    }
+
+    @Test
+    fun `a map follows its file into the trash while the folder's deletions can't be read, and leaves them as they were`() = runTest {
+        start()
+        val gone = goneFrom(maps, sync)
+        val deletions = File(root, "folder-deletions.json")
+        deletions.writeText("[{")
+
+        assertNotNull(maps.delete(gone, byFolder = true))
+
+        assertFalse(maps.exists(gone))
+        assertEquals("[{", deletions.readText())
     }
 }

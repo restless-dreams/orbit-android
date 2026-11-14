@@ -54,11 +54,14 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
@@ -182,7 +185,10 @@ fun takesDrops(state: MapUi, locked: Boolean): Boolean =
  * what letting go would do; let go, the drop goes through the same changes
  * pasting makes, with one Undo. A drop on a map that can't be changed, is
  * behind its lock, or while it's presented or a path is made, is refused
- * before it starts.
+ * before it starts. One that takes a while follows its idea as new text
+ * gives it a new id (`ideas`), and says it was added only once the page
+ * says the idea took it: one whose idea was deleted meanwhile says so, and
+ * its copies go.
  */
 class MapDrops(
     private val scope: CoroutineScope,
@@ -201,8 +207,22 @@ class MapDrops(
     private val ui: StateFlow<MapUi>,
     private val locked: StateFlow<Boolean>,
     private val page: () -> MapPage,
-    private val update: (String, String, JsonElement?) -> Unit,
+
+    /**
+     * Sets an attribute of an idea and waits for the page to say what came
+     * of it: true once the idea has it; false when the idea isn't on the map
+     * now. It throws [PageException] when Orbit declined it, or the page
+     * didn't say (see [MapViewModel.change]).
+     */
+    private val change: suspend (String, String, JsonElement?) -> Boolean,
+
     private val tell: (MapEvent) -> Unit,
+
+    /** Which copy is each idea's latest picture: one let go on an idea that a newer picture took the place of meanwhile stays out. */
+    private val pictures: PictureTurns = PictureTurns(),
+
+    /** The ideas drops are let go on, each followed as new text gives it a new id while the drop comes in. */
+    private val ideas: FollowedIdeas = FollowedIdeas(),
 ) {
     private val hintState = MutableStateFlow<DropHint?>(null)
     private val copyState = MutableStateFlow<DropCopy?>(null)
@@ -433,14 +453,15 @@ class MapDrops(
     }
 
     private suspend fun add(clip: ClipData, resolver: ContentResolver, target: String) {
+        val idea = ideas.follow(target)
         val items = withLivePhotos(withContext(Dispatchers.IO) { droppedItems(clip, resolver) }, resolver)
 
         when (val plan = planDrop(items)) {
             is DropPlan.OpenMaps -> openMaps(plan.files, resolver)
-            is DropPlan.Media -> addMedia(plan.item, resolver, target)
-            is DropPlan.NewIdeas -> addNewIdeas(plan.items, resolver, target)
-            is DropPlan.Ideas -> addText(plan.items, resolver, target)
-            is DropPlan.Files -> addFiles(plan.items, resolver, target)
+            is DropPlan.Media -> addMedia(plan.item, resolver, idea)
+            is DropPlan.NewIdeas -> addNewIdeas(plan.items, resolver, idea)
+            is DropPlan.Ideas -> addText(plan.items, resolver, idea)
+            is DropPlan.Files -> addFiles(plan.items, resolver, idea)
             DropPlan.Nothing -> tell(MapEvent.Snackbar(ShownText.Resource(R.string.drop_nothing_to_add)))
         }
     }
@@ -501,7 +522,7 @@ class MapDrops(
      * text file comes whole, up to [TEXT_FILE_LIMIT]; a longer one, or one
      * that can't be read, adds nothing, saying why.
      */
-    private suspend fun addText(items: List<DroppedItem>, resolver: ContentResolver, target: String) {
+    private suspend fun addText(items: List<DroppedItem>, resolver: ContentResolver, idea: FollowedIdeas.Idea) {
         val dropped = withContext(Dispatchers.IO) {
             droppedText(items, TEXT_FILE_LIMIT, words.string(R.string.drop_text_file_too_long), words) { address -> resolver.openInputStream(address.toUri()) }
         }
@@ -519,9 +540,11 @@ class MapDrops(
             return
         }
 
-        if (!stillTakes()) {
+        if (!stillTakes() || ideaRemoved(idea)) {
             return
         }
+
+        val target = idea.id
 
         try {
             val pasted = page().request(PastedIdeas.serializer()) { job -> MapCommand.Paste(job, target, text) }
@@ -543,7 +566,7 @@ class MapDrops(
      * One that can't join, too big or unreadable, is left out, and the
      * message says why; the rest still join.
      */
-    private suspend fun addFiles(items: List<DroppedItem>, resolver: ContentResolver, target: String) {
+    private suspend fun addFiles(items: List<DroppedItem>, resolver: ContentResolver, idea: FollowedIdeas.Idea) {
         // A live photo's two halves go as the two files they are.
         val addresses = items.flatMap { item ->
             when (item) {
@@ -557,7 +580,7 @@ class MapDrops(
             }
         }
 
-        copied(target, total = addresses.size, video = false) {
+        copied(idea.id, total = addresses.size, video = false) {
             val files = mutableListOf<MapFile>()
             var problem: ShownText? = null
 
@@ -570,6 +593,8 @@ class MapDrops(
                 } catch (refused: MediaRefusedException) {
                     problem = ShownText.Plain(refused.message.orEmpty())
                 } catch (stopped: CancellationException) {
+                    // Stopped partway: the files in already won't join the idea, and their room is the map's again at once.
+                    maps.letGo(mapId, files.map { it.src })
                     throw stopped
                 } catch (unreadable: Exception) {
                     Logs.warn(TAG, "Couldn't read a file that was dropped", unreadable)
@@ -577,24 +602,37 @@ class MapDrops(
                 }
             }
 
-            // Copied while the map went on: what it can't take now stays out, its files left for the map's tidying up.
+            // Copied while the map went on: what it can't take now stays out, its files left for the map's tidying up, and
+            // its room the map's again.
             if (files.isEmpty() || !stillTakes()) {
+                maps.letGo(mapId, files.map { it.src })
                 problem?.let { tell(MapEvent.Snackbar(it)) }
                 return@copied
             }
 
-            page().send(MapCommand.AddFiles(target, files))
+            val target = idea.id
+            val gone = ShownText.Plural(R.plurals.files_idea_gone, files.size, listOf(files.size))
+
+            if (!landed(files.map { it.src }, gone) { page().request(Boolean.serializer()) { job -> MapCommand.AddFiles(target, files, job) } }) {
+                return@copied
+            }
+
             tell(MapEvent.Added)
             val added = ShownText.Plural(R.plurals.files_added, files.size, listOf(label(target), files.size))
             tell(MapEvent.Snackbar(problem?.let { ShownText.Joined(listOf(added, it), " ") } ?: added, undo = true))
         }
     }
 
-    /** One picture, video or sound: copied into the map, and made the idea's, with Undo. */
-    private suspend fun addMedia(item: DroppedItem, resolver: ContentResolver, target: String) {
+    /**
+     * One picture, video or sound: copied into the map, and made the idea's,
+     * with Undo. A picture whose copy finishes after a newer one went on the
+     * idea, or the picture came off it, stays out, and so does its copy.
+     */
+    private suspend fun addMedia(item: DroppedItem, resolver: ContentResolver, idea: FollowedIdeas.Idea) {
         val video = item is DroppedItem.Video
+        val turn = if (item is DroppedItem.Picture || item is DroppedItem.LivePhoto) pictures.take(idea.id) else null
 
-        copied(target, total = 1, video = video, sound = item is DroppedItem.Sound) {
+        copied(idea.id, total = 1, video = video, sound = item is DroppedItem.Sound) {
             // A video made smaller, or kept as it is on a phone that can't, says so once it's the idea's.
             var smaller: Pair<VideoWay, AddedVideo>? = null
 
@@ -611,22 +649,42 @@ class MapDrops(
                         copyState.update { it?.copy(asking = false) }
                         val copy = addVideo(uri, resolver, way) ?: return@copied
                         smaller = way to copy
-                        Triple("video", videoAttribute(copy.src, copy.thumbnail, ui.value.nodes[target]?.video?.caption), R.string.drop_added_the_video)
+                        Triple("video", videoAttribute(copy.src, copy.thumbnail, ui.value.nodes[idea.id]?.video?.caption), R.string.drop_added_the_video)
                     }
                     is DroppedItem.Sound -> {
                         // As one added from the phone: the idea's caption stays, else the file's name gives one.
                         val copy = maps.addSound(mapId, item.address.toUri(), resolver) { progress -> copyState.update { it?.copy(progress = progress) } }
-                        Triple("audio", soundAttribute(copy.src, ui.value.nodes[target]?.audio?.caption ?: copy.caption), R.string.drop_added_the_sound)
+                        Triple("audio", soundAttribute(copy.src, ui.value.nodes[idea.id]?.audio?.caption ?: copy.caption), R.string.drop_added_the_sound)
                     }
                     else -> return@copied
                 }
 
-                // Copied while the map went on: what it can't take now stays out, its file left for the map's tidying up.
+                // Copied while the map went on: what it can't take now stays out, its file left for the map's tidying up, and its
+                // room the map's again.
                 if (!stillTakes()) {
+                    maps.letGo(mapId, filesIn(value))
                     return@copied
                 }
 
-                update(target, field, value)
+                // Its idea removed meanwhile, which also ended a picture's turn: that's said, rather than taken for a newer picture.
+                if (idea.gone) {
+                    maps.takeBack(mapId, filesIn(value))
+                    tell(MapEvent.Snackbar(ShownText.Resource(goneMessage(item))))
+                    return@copied
+                }
+
+                if (turn != null && !pictures.current(turn)) {
+                    maps.takeBack(mapId, filesIn(value))
+                    return@copied
+                }
+
+                // Said once the page says the idea took it: deleted meanwhile, it didn't, and that's said instead.
+                val target = idea.id
+
+                if (!landed(filesIn(value), ShownText.Resource(goneMessage(item))) { change(target, field, value) }) {
+                    return@copied
+                }
+
                 tell(MapEvent.Added)
                 tell(MapEvent.Snackbar(ShownText.Resource(added, listOf(label(target))), undo = true))
                 smaller?.let { (way, video) -> madeSmaller(way, video) }
@@ -647,8 +705,8 @@ class MapDrops(
      * One that can't join, too big or unreadable, is left out, and the
      * message says why.
      */
-    private suspend fun addNewIdeas(items: List<DroppedItem>, resolver: ContentResolver, target: String) {
-        copied(target, total = items.size, video = items.any { it is DroppedItem.Video }, sound = items.any { it is DroppedItem.Sound }) {
+    private suspend fun addNewIdeas(items: List<DroppedItem>, resolver: ContentResolver, idea: FollowedIdeas.Idea) {
+        copied(idea.id, total = items.size, video = items.any { it is DroppedItem.Video }, sound = items.any { it is DroppedItem.Sound }) {
             val nodes = mutableListOf<JsonObject>()
             var problem: String? = null
             // The big videos among them are offered smaller once, all together, before any is copied.
@@ -692,6 +750,8 @@ class MapDrops(
                 } catch (refused: MediaRefusedException) {
                     problem = problem ?: refused.message
                 } catch (stopped: CancellationException) {
+                    // Stopped partway: the ones in already won't be ideas, and their room is the map's again at once.
+                    maps.letGo(mapId, nodes.flatMap(::filesOf))
                     throw stopped
                 } catch (unreadable: Exception) {
                     Logs.warn(TAG, "Couldn't read one of the dropped pictures, videos or sounds", unreadable)
@@ -705,12 +765,26 @@ class MapDrops(
             }
 
             if (!stillTakes()) {
+                maps.letGo(mapId, nodes.flatMap(::filesOf))
                 return@copied
             }
 
+            if (ideaRemoved(idea)) {
+                maps.takeBack(mapId, nodes.flatMap(::filesOf))
+                return@copied
+            }
+
+            val target = idea.id
+
             val count = try {
                 page().request(PastedIdeas.serializer()) { job -> MapCommand.AddNodes(job, target, nodes) }.count
+            } catch (stopped: CancellationException) {
+                // Stopped as the page added them, which it may yet do: as below.
+                maps.letGo(mapId, nodes.flatMap(::filesOf))
+                throw stopped
             } catch (failed: PageException) {
+                // The page may yet have added them, late: their files stay, and take none of the map's room as coming in.
+                maps.letGo(mapId, nodes.flatMap(::filesOf))
                 tell(MapEvent.Snackbar(ShownText.Plain(failed.message.orEmpty())))
                 return@copied
             }
@@ -800,6 +874,56 @@ class MapDrops(
         job.join()
     }
 
+    /** True, saying so, when the idea a drop was let go on was removed while the drop came in: nothing of it is added. */
+    private fun ideaRemoved(idea: FollowedIdeas.Idea): Boolean {
+        if (idea.gone) {
+            tell(MapEvent.Snackbar(ShownText.Resource(R.string.drop_idea_gone)))
+        }
+
+        return idea.gone
+    }
+
+    /** What's said of a picture, video or sound whose idea was deleted while it came in: it wasn't added. */
+    @StringRes
+    private fun goneMessage(item: DroppedItem): Int = when (item) {
+        is DroppedItem.Video -> R.string.map_video_idea_gone
+        is DroppedItem.Sound -> R.string.map_sound_idea_gone
+        else -> R.string.map_picture_idea_gone
+    }
+
+    /**
+     * Puts what was copied in, `sources`, on its idea (`put`), and says
+     * whether it's there: false when the page says the idea isn't on the map
+     * now, when `gone` is said and the copies go; or when the page didn't
+     * say, when its reason is said and the copies are left for the tidying
+     * up, since a page that answers late may yet have put them there.
+     */
+    private suspend fun landed(sources: List<String>, gone: ShownText, put: suspend () -> Boolean): Boolean {
+        val taken = try {
+            put()
+        } catch (stopped: CancellationException) {
+            throw stopped
+        } catch (unanswered: PageException) {
+            Logs.warn(TAG, "The page didn't take what was let go: ${unanswered.message}")
+
+            if (unanswered.kind == PageException.Kind.Refused) {
+                maps.takeBack(mapId, sources)
+            } else {
+                maps.letGo(mapId, sources)
+            }
+
+            tell(MapEvent.Snackbar(ShownText.Plain(unanswered.message.orEmpty())))
+            return false
+        }
+
+        if (!taken) {
+            maps.takeBack(mapId, sources)
+            tell(MapEvent.Snackbar(gone))
+        }
+
+        return taken
+    }
+
     /** What says an item let go couldn't be read: a picture, a video or a sound. */
     @StringRes
     private fun unreadableMessage(item: DroppedItem): Int = when (item) {
@@ -851,6 +975,20 @@ internal fun mediaChange(field: String, value: String?): JsonObject = buildJsonO
 }
 
 /**
+ * The files a picture's, video's or sound's value from [pictureAttribute],
+ * [videoAttribute] or [soundAttribute] points at: the file, a video's
+ * poster, and a live photo's motion.
+ */
+internal fun filesIn(value: JsonObject): List<String> = listOfNotNull(
+    value["src"]?.jsonPrimitive?.contentOrNull,
+    value["thumbnail"]?.jsonPrimitive?.contentOrNull,
+    (value["motion"] as? JsonObject)?.get("src")?.jsonPrimitive?.contentOrNull,
+)
+
+/** The files a new idea made from what was let go points at: its picture's, video's or sound's ([filesIn]). */
+private fun filesOf(node: JsonObject): List<String> = listOf("image", "video", "audio").mapNotNull { node[it] as? JsonObject }.flatMap(::filesIn)
+
+/**
  * A live photo's motion as the page takes it: always `{ src }`, with where in
  * it the still was taken to the millisecond when that's known. Orbit writes
  * the address alone in the map when that's all there is, but an idea's
@@ -890,6 +1028,11 @@ fun droppedMaps(results: List<Pair<String?, ImportResult>>, words: Words): Impor
         (result as? ImportResult.Failed)?.let { failure -> name?.let { words.string(R.string.drop_file_problem, it, failure.reason) } ?: failure.reason }
     }
 
+    // A zip of maps that stopped partway says so by its name, as one that failed does.
+    val stopped = results.mapNotNull { (name, result) ->
+        (result as? ImportResult.ImportedMany)?.stopped?.let { stop -> name?.let { words.string(R.string.drop_file_problem, it, stop) } ?: stop }
+    }
+
     // Questions alone need nothing said after them; files that brought nothing at all say so.
     val summary = when {
         added > 0 || alreadyHere > 0 -> ImportResult.ImportedMany(
@@ -899,6 +1042,9 @@ fun droppedMaps(results: List<Pair<String?, ImportResult>>, words: Words): Impor
             privateAlreadyHere = privateAlreadyHere,
             filledIn = many.sumOf { it.filledIn },
             privateFilledIn = many.sumOf { it.privateFilledIn },
+            pastRoom = many.sumOf { it.pastRoom },
+            privatePastRoom = many.sumOf { it.privatePastRoom },
+            stopped = stopped.joinToString("\n").ifEmpty { null },
         )
         failed.isNotEmpty() -> ImportResult.Failed(failed.joinToString("\n"))
         otherVersions.isNotEmpty() -> null

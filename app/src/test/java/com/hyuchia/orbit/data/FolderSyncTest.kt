@@ -2,6 +2,8 @@ package com.hyuchia.orbit.data
 
 import com.hyuchia.orbit.FileWords
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Locale
 
@@ -225,8 +227,134 @@ class FolderSyncTest {
         assertEquals(listOf(SyncStep.DeleteFile(deleted)), planSync(folder, emptyList(), listOf(file("Plan.md", null)), listOf(deleted)))
 
         val changed = file("Plan.md", "# Plan\n- From the laptop")
-        assertEquals(listOf(SyncStep.Forget(deleted), SyncStep.Add(changed)), planSync(folder, emptyList(), listOf(changed), listOf(deleted)))
-        assertEquals(listOf(SyncStep.Forget(deleted)), planSync(folder, emptyList(), emptyList(), listOf(deleted)))
+        // Its deletion goes only once the file is a map here: with the step that brings it in.
+        assertEquals(listOf(SyncStep.Add(changed, forgets = listOf(deleted))), planSync(folder, emptyList(), listOf(changed), listOf(deleted)))
+    }
+
+    @Test
+    fun `a deleted map's changed file that a map here takes as its own forgets the deletion after that map takes it`() {
+        val deleted = SyncRecord(folder, "Plan.md", digest("# Plan"), 1, 1)
+        // A map's file renamed to the deleted map's name, over it.
+        val renamed = file("Plan.md", "# Notes")
+        val steps = planSync(folder, listOf(map("notes", "# Notes", file = "Notes.md")), listOf(renamed), listOf(deleted))
+        assertEquals(listOf(SyncStep.Link("notes", renamed), SyncStep.Forget(deleted)), steps)
+    }
+
+    @Test
+    fun `a deleted map's file gone from the folder keeps its deletion until a later sync agrees, as a map's file does`() {
+        val deleted = SyncRecord(folder, "Plan.md", digest("# Plan"), 1, 1)
+        assertEquals(listOf(SyncStep.MissingDeletion(deleted)), planSync(folder, emptyList(), emptyList(), listOf(deleted), now = now))
+
+        val missed = deleted.copy(missingSince = now - 4_000)
+        assertEquals(emptyList<SyncStep>(), planSync(folder, emptyList(), emptyList(), listOf(missed), now = now))
+
+        // Agreed: forgotten, after everything else the sync does; and anyway once it's been gone a day.
+        val agreed = deleted.copy(missingSince = now - MISSING_CONFIRMATION)
+        val trip = file("Trip.md", "# Trip")
+        assertEquals(listOf(SyncStep.Add(trip), SyncStep.Gone(agreed)), planSync(folder, emptyList(), listOf(trip), listOf(agreed), now = now))
+        val overdue = deleted.copy(missingSince = now - DELETION_PATIENCE)
+        assertEquals(listOf(SyncStep.Gone(overdue, overdue = true)), planSync(folder, emptyList(), emptyList(), listOf(overdue), now = now))
+
+        // Back meanwhile, as it was: it goes.
+        assertEquals(listOf(SyncStep.DeleteFile(missed)), planSync(folder, emptyList(), listOf(file("Plan.md", "# Plan")), listOf(missed), now = now))
+    }
+
+    @Test
+    fun `a deleted private map's file gone from where it was is a doubt about the files new to the maps`() {
+        val deleted = SyncRecord(folder, "Diary.md", digest("# Diary"), 1, 1, private = true)
+        // Renamed in the folder, and changed: nothing says which file it is now.
+        val renamed = file("Journal.md", "# Diary\n- Tonight")
+        val steps = planSync(folder, listOf(map("trip", "# Trip", file = "Trip.md")), listOf(renamed, file("Trip.md", null)), listOf(deleted), now = now)
+        assertEquals(listOf(SyncStep.MissingDeletion(deleted), SyncStep.Add(renamed, listOf(PrivateDoubt.Deleted(deleted)))), steps)
+
+        // An ordinary map's deletion says nothing of privacy.
+        val open = deleted.copy(private = null)
+        assertEquals(listOf(SyncStep.MissingDeletion(open), SyncStep.Add(renamed)), planSync(folder, listOf(map("trip", "# Trip", file = "Trip.md")), listOf(renamed, file("Trip.md", null)), listOf(open), now = now))
+    }
+
+    @Test
+    fun `a private map's file gone from where it was is a doubt about the files new to the maps, unless every file went`() {
+        val diary = LocalMap("diary", digest("# Diary"), SyncRecord(folder, "Diary.md", digest("# Diary"), 1, 1), private = true)
+        val renamed = file("Journal.md", "# Diary\n- Tonight")
+        val steps = planSync(folder, listOf(diary, map("trip", "# Trip", file = "Trip.md")), listOf(renamed, file("Trip.md", null)), emptyList(), now = now)
+        assertEquals(listOf(SyncStep.Missing("diary", diary.record!!), SyncStep.Add(renamed, listOf(PrivateDoubt.Here("diary")))), steps)
+
+        // Renamed as it was, it's found: the map follows it, and nothing else is in doubt.
+        val same = file("Journal.md", "# Diary")
+        assertEquals(listOf(SyncStep.Link("diary", same)), planSync(folder, listOf(diary, map("trip", "# Trip", file = "Trip.md")), listOf(same, file("Trip.md", null)), emptyList(), now = now))
+
+        // A folder emptied or swapped holds another folder's files.
+        val swapped = planSync(folder, listOf(diary, map("trip", "# Trip", file = "Trip.md")), listOf(renamed), emptyList(), now = now)
+        assertEquals(SyncStep.Add(renamed), swapped.last())
+    }
+
+    @Test
+    fun `a map whose details can't say where its file is links to one with its text, and otherwise is a doubt`() {
+        val untold = LocalMap("diary", digest("# Diary"), null, untold = true, private = true)
+        val same = file("Diary.md", "# Diary")
+        assertEquals(listOf(SyncStep.Link("diary", same)), planSync(folder, listOf(untold), listOf(same), emptyList()))
+
+        val changed = file("Diary.md", "# Diary\n- Tonight")
+        assertEquals(listOf(SyncStep.Write("diary", null), SyncStep.Add(changed, listOf(PrivateDoubt.Here("diary")))), planSync(folder, listOf(untold), listOf(changed), emptyList()))
+
+        // One whose text can't be read either has nothing to tell its file by: it's no doubt, now or ever.
+        val unreadable = untold.copy(readable = false)
+        assertEquals(listOf(SyncStep.Add(changed)), planSync(folder, listOf(unreadable), listOf(changed), emptyList()))
+    }
+
+    @Test
+    fun `a deleted map whose file couldn't be told deletes the one file with its text in its own folder, and is a doubt while it was private`() {
+        val deleted = SyncRecord.untoldDeletion(folder, digest("# Diary"), private = true)
+        val doubt = listOf(PrivateDoubt.Deleted(deleted))
+        val same = file("Diary.md", "# Diary")
+        val other = file("Trip.md", "# Trip")
+        assertEquals(listOf(SyncStep.DeleteFile(deleted, "Diary.md"), SyncStep.Add(other, doubt)), planSync(folder, emptyList(), listOf(same, other), listOf(deleted)))
+
+        // Changed, it can't be told from a new file: it's a doubt, and the deletion waits, as one whose file is gone does.
+        val changed = file("Diary.md", "# Diary\n- Tonight")
+        assertEquals(listOf(SyncStep.MissingDeletion(deleted), SyncStep.Add(changed, doubt)), planSync(folder, emptyList(), listOf(changed), listOf(deleted), now = now))
+        val agreed = deleted.copy(missingSince = now - MISSING_CONFIRMATION)
+        assertEquals(listOf(SyncStep.Gone(agreed)), planSync(folder, emptyList(), emptyList(), listOf(agreed), now = now))
+
+        // An ordinary map's: its file goes, and the others come in as they are.
+        val open = SyncRecord.untoldDeletion(folder, digest("# Diary"), private = false)
+        assertEquals(listOf(SyncStep.DeleteFile(open, "Diary.md"), SyncStep.Add(other)), planSync(folder, emptyList(), listOf(same, other), listOf(open)))
+    }
+
+    @Test
+    fun `a deletion whose file couldn't be told belongs to the folder the maps were kept in, not one chosen after`() {
+        val deleted = SyncRecord.untoldDeletion("content://old", digest("# Diary"), private = true)
+        val same = file("Diary.md", "# Diary")
+        val other = file("Trip.md", "# Trip")
+        assertEquals(listOf(SyncStep.Add(same), SyncStep.Add(other)), planSync(folder, emptyList(), listOf(same, other), listOf(deleted), now = now))
+    }
+
+    @Test
+    fun `two files with a deleted map's very text can't be told apart, and neither is deleted`() {
+        val deleted = SyncRecord.untoldDeletion(folder, digest("# Diary"), private = true)
+        val one = file("Diary.md", "# Diary")
+        val another = file("Diary copy.md", "# Diary")
+        val doubt = listOf(PrivateDoubt.Deleted(deleted))
+        assertEquals(listOf(SyncStep.MissingDeletion(deleted), SyncStep.Add(one, doubt), SyncStep.Add(another, doubt)), planSync(folder, emptyList(), listOf(one, another), listOf(deleted), now = now))
+    }
+
+    @Test
+    fun `a deletion that can't say which folder it was in is about the one the maps are kept in`() {
+        val damaged = SyncRecord(folder = "", file = "", hash = "", private = true)
+        val trip = file("Trip.md", "# Trip")
+        assertEquals(listOf(SyncStep.MissingDeletion(damaged), SyncStep.Add(trip, listOf(PrivateDoubt.Deleted(damaged)))), planSync(folder, emptyList(), listOf(trip), listOf(damaged), now = now))
+    }
+
+    @Test
+    fun `a file may be a map changed elsewhere when its center or half its ideas are the map's`() {
+        val diary = "# Diary\n- Today I met Ana\n- Dentist on Friday\n"
+        // Renamed and changed: the same center.
+        assertTrue(mayBeTheSameMap(diary, "# Diary\n- Today I met Ana\n- Ana told me her secret\n"))
+        // The center renamed too, its ideas mostly as they were.
+        assertTrue(mayBeTheSameMap(diary, "# Journal\n- Today I met Ana\n- Dentist on Friday\n- Gym\n"))
+        // Another map altogether, sharing at most a word or a mark.
+        assertFalse(mayBeTheSameMap(diary, "# Groceries\n- Bread\n- Milk\n- Eggs\n- Today\n"))
+        assertFalse(mayBeTheSameMap("# Diary\n- ...\n", "# Plans\n- ...\n"))
     }
 
     @Test

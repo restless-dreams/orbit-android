@@ -224,6 +224,43 @@ describe('a map shared as a web page', () => {
     expect(presenting()).toBe(false);
   });
 
+  test('keeps its controls while the keyboard is on them, where Enter and Space press the one it\'s on', async () => {
+    press('p');
+    await on('Sintra', '3 / 4');
+    const previous = document.querySelector<HTMLButtonElement>('[data-step="-1"]')!;
+    const close = document.querySelector<HTMLButtonElement>('[data-close]')!;
+
+    // Tab reaches Previous: the controls show, and stay as long as the keyboard is on them.
+    previous.focus();
+    expect(controlsShow()).toBe(true);
+    clock.advance(10_000);
+    expect(controlsShow()).toBe(true);
+
+    // Enter is the button's, which the browser presses: the presentation doesn't step on as well.
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    previous.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
+    expect(count()).toBe('3 / 4');
+    previous.click();
+    await on('Alfama', '2 / 4');
+
+    // So is Space, on Close.
+    close.focus();
+    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    close.dispatchEvent(space);
+    expect(space.defaultPrevented).toBe(false);
+    expect(count()).toBe('2 / 4');
+
+    // The keyboard back on the idea shown: the controls step aside after their moment, and its keys step again.
+    title.focus();
+    clock.advance(2_500);
+    expect(controlsShow()).toBe(false);
+    expect(press('Enter').defaultPrevented).toBe(true);
+    await on('Sintra', '3 / 4');
+    close.click();
+    expect(presenting()).toBe(false);
+  });
+
   test('stops when the browser leaves full screen by itself', async () => {
     presentButton.click();
     await on('Sintra', '3 / 4');

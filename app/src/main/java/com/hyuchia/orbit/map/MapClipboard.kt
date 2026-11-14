@@ -23,6 +23,20 @@ sealed interface Clip {
     data class Ideas(val text: String, val sourceMap: String?) : Clip
 }
 
+/** The clipboard as a map's screen uses it ([MapClipboard]): a test's map has one of its own. */
+interface IdeasClipboard {
+    val resolver: ContentResolver
+
+    /** What pasting would add, or null when there's nothing a map can take. */
+    fun pasteable(): Pasteable?
+
+    /** What was copied, for pasting it now. */
+    fun read(): Clip?
+
+    /** Copies an idea, from map `mapId`: false when it's too much for the clipboard to hold. */
+    fun copy(label: String, text: String, markdown: String, mapId: String, sensitive: Boolean): Boolean
+}
+
 /**
  * The clipboard, for copying ideas and pasting text and pictures onto maps.
  *
@@ -34,12 +48,12 @@ sealed interface Clip {
  * come back whole. Not in the description, which any app on screen could
  * read without Android saying so.
  */
-class MapClipboard(context: Context) {
+class MapClipboard(context: Context) : IdeasClipboard {
     private val manager = context.getSystemService(ClipboardManager::class.java)
-    val resolver: ContentResolver = context.contentResolver
+    override val resolver: ContentResolver = context.contentResolver
 
     /** What pasting would add, or null when there's nothing a map can take. */
-    fun pasteable(): Pasteable? {
+    override fun pasteable(): Pasteable? {
         val description = manager?.primaryClipDescription ?: return null
         val types = (0 until description.mimeTypeCount).map { description.getMimeType(it) }
 
@@ -51,7 +65,7 @@ class MapClipboard(context: Context) {
     }
 
     /** What was copied, for pasting it now. */
-    fun read(): Clip? {
+    override fun read(): Clip? {
         val clip = manager?.primaryClip ?: return null
 
         if (clip.itemCount == 0) {
@@ -84,9 +98,10 @@ class MapClipboard(context: Context) {
     }
 
     private fun isPicture(uri: Uri, description: ClipDescription): Boolean {
+        // Another app's provider answers for its clip's type: one that refuses, or breaks, leaves the clip's own description to say.
         val type = try {
             resolver.getType(uri)
-        } catch (refused: SecurityException) {
+        } catch (unanswered: RuntimeException) {
             null
         }
 
@@ -100,7 +115,7 @@ class MapClipboard(context: Context) {
      * and keyboards keep it out of their clipboard history. False when it's
      * too much for the clipboard to hold.
      */
-    fun copy(label: String, text: String, markdown: String, mapId: String, sensitive: Boolean): Boolean {
+    override fun copy(label: String, text: String, markdown: String, mapId: String, sensitive: Boolean): Boolean {
         val orbit = Intent().putExtra(EXTRA_MARKDOWN, markdown).putExtra(EXTRA_MAP, mapId)
         val clip = ClipData(label, arrayOf(ClipDescription.MIMETYPE_TEXT_PLAIN), ClipData.Item(text, orbit, null))
         return put(clip, sensitive, markdown.length + text.length)

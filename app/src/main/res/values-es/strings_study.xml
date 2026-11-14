@@ -96,4 +96,11 @@
 
     <string name="study_shortcuts">Al estudiar</string>
     <string name="study_shortcut_show">Mostrar lo que hay en la tarjeta</string>
+
+    <!-- Sobre una sesión de estudio, y sobre el mapa después, mientras las respuestas que el almacenamiento no aceptó esperan a guardarse -->
+    <string name="study_answers_unsaved_title">Tus últimas respuestas aún no están guardadas</string>
+    <string name="study_answers_unsaved_body">El almacenamiento de este dispositivo está lleno, así que solo se conservan mientras Orbit esté abierto. Libera algo de espacio y Orbit las guardará en cuanto pueda.</string>
+    <string name="study_answers_unsaved_newer_title">Estas respuestas no se pueden guardar</string>
+    <string name="study_answers_unsaved_newer">Una versión más reciente de Orbit guarda tus mapas, así que esta no puede guardar tus respuestas, y se pierden al cerrar Orbit. Cuando actualices Orbit, las respuestas que des se guardarán.</string>
+    <string name="study_answers_saved">Tus respuestas están guardadas.</string>
 </resources>

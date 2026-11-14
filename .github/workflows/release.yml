@@ -34,5 +34,14 @@ jobs:
         run: |
           version=${GITHUB_REF_NAME#v}
           gh release download "$GITHUB_REF_NAME" --pattern "orbit-$version-fdroid.apk" --dir release
+          # Orbit's release certificate (the same as fdroid/com.hyuchia.orbit.yml's AllowedAPKSigningKeys): an APK
+          # signed by anyone else fails here, before its contents are compared.
+          expected=b4fd505f255c406cd205a6c403898e2069968339ad40269d5c22be79d561a107
+          certificates=$(apksigner verify --print-certs "release/orbit-$version-fdroid.apk")
+          signers=$(echo "$certificates" | grep -E 'certificate SHA-256 digest:' | awk '{print $NF}' | sort -u)
+          if [ "$signers" != "$expected" ]; then
+              echo "orbit-$version-fdroid.apk isn't signed by Orbit's release certificate only. Expected $expected, found: ${signers:-no signer}" >&2
+              exit 1
+          fi
           pipx run apksigcopier==1.1.1 compare --unsigned "release/orbit-$version-fdroid.apk" app/build/outputs/apk/libre/release/app-libre-release-unsigned.apk
           echo "orbit-$version-fdroid.apk is this build of $GITHUB_REF_NAME, signed: F-Droid's build will match it."

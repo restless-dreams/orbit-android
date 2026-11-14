@@ -53,6 +53,7 @@ import com.hyuchia.orbit.container
 import com.hyuchia.orbit.data.AppSettings
 import com.hyuchia.orbit.data.ThemeMode
 import com.hyuchia.orbit.nearby.SENDER_NAME_LENGTH
+import com.hyuchia.orbit.nearby.rememberAddress
 import com.hyuchia.orbit.nearby.senderName
 import com.hyuchia.orbit.study.NewCardsADayChoice
 import com.hyuchia.orbit.theme.LocalAppSettings
@@ -220,22 +221,7 @@ fun SettingsScreen(onAbout: () -> Unit, onTrash: () -> Unit, onBack: () -> Unit)
 
             // The phone listens only while it takes maps (or shows one to a computer): only then has it an address.
             val listening by nearby.listening.collectAsStateWithLifecycle()
-            val address = remember(listening) { if (listening) nearby.address() else null }
-
-            val reach = when {
-                address != null -> stringResource(R.string.settings_this_device_address, address)
-                listening -> stringResource(R.string.settings_connect_to_wifi)
-                else -> null
-            }
-
-            if (reach != null) {
-                Text(
-                    reach,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
-                )
-            }
+            ServerAddress(listening) { nearby.address() }
 
             Heading(stringResource(R.string.common_your_maps))
             MapSafety(onTrash, snackbars)
@@ -309,6 +295,27 @@ private fun NearbyNameDialog(chosen: String?, deviceName: String, onSave: (Strin
         confirmButton = { TextButton(onClick = ::save) { Text(stringResource(R.string.settings_save)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) } },
     )
+}
+
+/**
+ * Where other devices reach this one, while it listens (`read` gives it,
+ * or null while there's no network they share): read again every second
+ * while it shows, so a phone that moves from one Wi-Fi to another, or to
+ * its own hotspot, shows the address that works now. Nothing while it
+ * doesn't listen.
+ */
+@Composable
+internal fun ServerAddress(listening: Boolean, read: () -> String?) {
+    if (listening) {
+        val address = rememberAddress(Unit, read)
+
+        Text(
+            if (address != null) stringResource(R.string.settings_this_device_address, address) else stringResource(R.string.settings_connect_to_wifi),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+        )
+    }
 }
 
 @Composable

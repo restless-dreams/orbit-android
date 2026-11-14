@@ -58,14 +58,15 @@ internal class FirstFrames(
     private val frame: (File) -> ByteArray? = ::firstFramePng,
 ) {
     /** Which files, as they are, are animations: so a still GIF or WebP is read through only once. */
-    private val animations = ConcurrentHashMap<String, Boolean>()
+    private val animated = ConcurrentHashMap<String, Boolean>()
 
     /**
      * The first frame of `file`, as a PNG, or a HEIC or HEIF picture as a
      * JPEG, kept in `directory`; null when it's neither, or can't be read.
-     * Throws [IOException] when it can't be kept there, as in a full cache.
+     * Without `animations`, only a HEIC or HEIF picture. Throws
+     * [IOException] when it can't be kept there, as in a full cache.
      */
-    fun of(file: File): File? = made(file, found = { it }) { kept, bytes ->
+    fun of(file: File, animations: Boolean = true): File? = made(file, animations, found = { it }) { kept, bytes ->
         directory.mkdirs()
         writeAtomically(kept, bytes)
         kept
@@ -75,9 +76,11 @@ internal class FirstFrames(
      * What the map's page gets in place of `file`: the picture [of] keeps, or,
      * when the cache can't keep it, full or unwritable, its bytes from
      * memory, made again each time it's asked for, so the page never goes
-     * without. Null when there's none, as for [of].
+     * without. Null when there's none, as for [of]. Without `animations`, an
+     * animation goes as it is, and only a HEIC or HEIF picture is made again,
+     * as the audience's screen, which plays animations, gets them.
      */
-    fun standIn(file: File): StandIn? = made(file, found = StandIn::kept) { kept, bytes ->
+    fun standIn(file: File, animations: Boolean = true): StandIn? = made(file, animations, found = StandIn::kept) { kept, bytes ->
         try {
             directory.mkdirs()
             writeAtomically(kept, bytes)
@@ -89,15 +92,15 @@ internal class FirstFrames(
     }
 
     /**
-     * The picture made of `file` for a page, as [of] says: `found` when it's
-     * in the cache already, else made and given to `keep` with the file it
-     * goes in there.
+     * The picture made of `file` for a page, as [of] says, an animation's
+     * first frame only with `animations`: `found` when it's in the cache
+     * already, else made and given to `keep` with the file it goes in there.
      */
-    private fun <T> made(file: File, found: (File) -> T, keep: (File, ByteArray) -> T): T? {
+    private fun <T> made(file: File, animations: Boolean, found: (File) -> T, keep: (File, ByteArray) -> T): T? {
         val extension = file.extension.lowercase()
         val heif = extension == "heic" || extension == "heif"
 
-        if (!heif && extension != "gif" && extension != "webp") {
+        if (!heif && (!animations || (extension != "gif" && extension != "webp"))) {
             return null
         }
 
@@ -109,7 +112,7 @@ internal class FirstFrames(
             return found(made)
         }
 
-        val moves = heif || animations.getOrPut(version) { runCatching { file.inputStream().buffered().use(::animationExtension) != null }.getOrDefault(false) }
+        val moves = heif || animated.getOrPut(version) { runCatching { file.inputStream().buffered().use(::animationExtension) != null }.getOrDefault(false) }
 
         if (!moves) {
             return null

@@ -11,6 +11,7 @@ import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.page.MapState
 import com.hyuchia.orbit.page.ViewMode
 import com.hyuchia.orbit.present.ShownMedia
+import com.hyuchia.orbit.study.AnswersUnsaved
 import com.hyuchia.orbit.study.Study
 
 /** What sits over the map: one menu or panel at a time. */
@@ -288,6 +289,9 @@ data class MapUi(
     /** The map's latest changes couldn't be written (the device's storage is full, say): they're kept here, and saved once they can be. */
     val unsaved: Boolean = false,
 
+    /** Answers given in study mode couldn't be written, and why: they're kept while Orbit runs, and tried again until they are. */
+    val answersUnsaved: AnswersUnsaved? = null,
+
     /** What Orbit couldn't read, in its words, when that's why. */
     val readProblem: String? = null,
 
@@ -329,6 +333,12 @@ data class MapUi(
 
     /** Whether an earlier version from the history is on the map: it's only looked at, and takes no changes. */
     val showingVersion: Boolean get() = history?.showing != null
+
+    /** Whether Undo takes a change back now: never on a map that can only be looked at, which takes no change. */
+    val undoable: Boolean get() = canUndo && readOnly == null
+
+    /** Whether Redo makes a change again now: never on a map that can only be looked at. */
+    val redoable: Boolean get() = canRedo && readOnly == null
 
     /**
      * Whether a press on the map can lead to an edit, its menu of changes:
@@ -390,6 +400,16 @@ data class SketchUi(
 
     /** The description the sketch starts with: its picture's, when it's drawn on further. */
     val description: String = "",
+
+    /** Whether the person is asked, as Done is tapped, to let the sketch take the place of a picture that landed while they drew. */
+    val confirming: Boolean = false,
+
+    /**
+     * Whether the page that drew the map stopped, or didn't load: the drawing
+     * waits, whole, with no planet up close, until a page draws the map again
+     * and brings it back up (see [Sketching.pageStopped]).
+     */
+    val held: Boolean = false,
 )
 
 /** One-off things the screen does for the map. */

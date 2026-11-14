@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.data.MapText
 import com.hyuchia.orbit.page.Diagnostic
 import com.hyuchia.orbit.ui.Hint
 
@@ -178,14 +179,39 @@ fun SourceEditor(model: MapViewModel, source: SourceState, readOnly: ReadOnly?, 
         }
 
         Diagnostics(source.diagnostics) { line ->
-            val offset = field.text.lineSequence().take(line - 1).sumOf { it.length + 1 }.coerceAtMost(field.text.length)
-            field = field.copy(selection = TextRange(offset))
+            field = field.copy(selection = TextRange(lineStart(field.text, line)))
         }
 
         // The screen's insets are used up by the map's screen, which knows the navigation bar's height:
         // the editor ends above the bar, or above the keyboard, which the bar's height is already taken from.
         Box(Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(bottom = navigationBar).imePadding())
     }
+}
+
+/**
+ * Where line `line` of `text` starts, counting from 1 as Orbit's notes about
+ * the text do: a line ends at a line feed, a carriage return and line feed
+ * (as Windows writes them), or a carriage return alone. Past the last line,
+ * the end of the text.
+ */
+internal fun lineStart(text: String, line: Int): Int {
+    var at = 0
+    var reached = 1
+
+    while (reached < line && at < text.length) {
+        val character = text[at]
+        at += 1
+
+        if (character == '\r' && text.getOrNull(at) == '\n') {
+            at += 1
+        }
+
+        if (character == '\n' || character == '\r') {
+            reached += 1
+        }
+    }
+
+    return at
 }
 
 /** Why the text can only be read, in the words of the note over a map that's only shown. */
@@ -283,10 +309,53 @@ private fun Diagnostics(diagnostics: List<Diagnostic>, onLine: (Int) -> Unit) {
 
 private val HEADING = Regex("""^( {0,3}#{1,6})(\s.*)?$""")
 private val ITEM = Regex("""^(\s*)([-*+]|\d+[.)])(\s+)(\[[ xX/]])?""")
-private val COMMENT = Regex("""<!--.*?(-->|$)""")
 private val HASHTAG = Regex("""(?<=\s)#[\p{L}\p{N}_][\p{L}\p{N}_/-]*""")
-private val LINK = Regex("""\[[^\]]*]\([^)]*\)""")
-private val YAML_KEY = Regex("""^(\s*-?\s*)([A-Za-z][\w-]*):""")
+
+/**
+ * A comment, from its `<!--` to its `-->`, or to the end of the line when
+ * it goes on to the next: then its group is empty.
+ */
+internal val COMMENT = Regex("""<!--.*?(-->|$)""")
+
+/** The characters from where it starts to a line separator in the middle of the line (a carriage return or U+2028), or to its end. */
+internal val UNTIL_SEPARATOR = Regex(""".*""")
+
+/** A YAML key, after the spaces and the dash before it. The spaces are read once: a long run of them costs one pass. */
+private val YAML_KEY = Regex("""^(\s*+(?:-\s*+)?)([A-Za-z][\w-]*+):""")
+
+/**
+ * The line's comments ([COMMENT]), as `findAll` finds them, read in one
+ * pass: a `<!--` that a line separator stops before both its `-->` and the
+ * line's end starts none, nor does any other before that separator, so the
+ * search goes on after it, rather than from each `<!--` (seconds for 20,000
+ * ahead of a carriage return). A pattern that reads to the `-->` in one
+ * pass would repeat a group for each character, which Android's patterns
+ * keep on a stack that runs out a few hundred thousand characters in.
+ */
+internal fun sourceComments(line: String): Sequence<MatchResult> = sequence {
+    var from = 0
+
+    while (true) {
+        val open = line.indexOf("<!--", from)
+
+        if (open < 0) {
+            break
+        }
+
+        val comment = COMMENT.matchAt(line, open)
+
+        if (comment != null) {
+            yield(comment)
+            from = comment.range.last + 1
+        } else {
+            // Past the separator that stopped it: the characters before it are the `<!--`'s and those `.` reads after.
+            from = (UNTIL_SEPARATOR.matchAt(line, open)?.range?.last ?: open) + 2
+        }
+    }
+}
+
+/** Where the YAML key a line starts with is, as `^(\s*-?\s*)([A-Za-z][\w-]*):` finds it, read in one pass. */
+internal fun sourceYamlKey(line: String): IntRange? = YAML_KEY.find(line)?.groups?.get(2)?.range
 
 /** Colors the text the way Orbit reads it; the text itself never changes. */
 private class SourceHighlighting(
@@ -312,8 +381,7 @@ private class SourceHighlighting(
             }
 
             when {
-                yaml -> YAML_KEY.find(line)?.let { match ->
-                    val key = match.groups[2]!!.range
+                yaml -> sourceYamlKey(line)?.let { key ->
                     addStyle(SpanStyle(color = structure, fontWeight = FontWeight.SemiBold), offset + key.first, offset + key.last + 1)
                 }
                 inFrontmatter -> {
@@ -343,15 +411,15 @@ private class SourceHighlighting(
                         match.groups[4]?.range?.let { box -> addStyle(SpanStyle(color = marks, fontWeight = FontWeight.Bold), offset + box.first, offset + box.last + 1) }
                     }
 
-                    LINK.findAll(line).forEach { link ->
-                        addStyle(SpanStyle(color = structure), offset + link.range.first, offset + link.range.last + 1)
+                    MapText.links(line).forEach { link ->
+                        addStyle(SpanStyle(color = structure), offset + link.first, offset + link.last + 1)
                     }
 
                     HASHTAG.findAll(line).forEach { tag ->
                         addStyle(SpanStyle(color = marks), offset + tag.range.first, offset + tag.range.last + 1)
                     }
 
-                    COMMENT.findAll(line).forEach { comment ->
+                    sourceComments(line).forEach { comment ->
                         addStyle(SpanStyle(color = attributes, fontStyle = FontStyle.Italic), offset + comment.range.first, offset + comment.range.last + 1)
 
                         if (!comment.value.endsWith("-->")) {

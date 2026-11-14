@@ -4,7 +4,8 @@ Each folder holds the files a release of Orbit for Android left in a phone's app
 - every map, picture, video, version, trashed map and setting has to be there;
 - opening them must write nothing;
 - they take changes without losing anything;
-- with a newer layout than the build knows, they're only read.
+- with a newer layout than the build knows, they're only read;
+- from 0.5.0, the reminders they kept come at their moment, and their records in the folder maps are kept in read as another device's.
 
 `web/releases.test.ts` reads their maps, versions and trashed maps with the Orbit the pages are built with, as the map's page does: none is locked or misread, each is saved as it was written, and their kinds of idea and goals are the app's.
 
@@ -16,15 +17,19 @@ Each folder holds the files a release of Orbit for Android left in a phone's app
 | `0.2.0` | 0.2.0 (code 3) | 0c296b7 |
 | `0.3.0` | 0.3.0 (code 4) | aff450a |
 | `0.4.0` | 0.4.0 (code 5) | 7be3b34 |
+| `0.5.0` | 0.5.0 (code 6) | c78d003 |
 
 A folder keeps only what's Orbit's in the app's `files/`:
 - `maps/`, with `.layout.json`;
 - `history/`;
 - `trash/`;
 - `datastore/settings.preferences_pb`;
-- from 0.4.0, this device's id in the folder maps are kept in, `folder-device`, and when the install that made it was installed, `folder-device-installed` (and `folder-deletions.json` and `folder-notes.json`, which last only until the next sync, if they're there).
+- from 0.4.0, this device's id in the folder maps are kept in, `folder-device`, and when the install that made it was installed, `folder-device-installed` (and `folder-deletions.json` and `folder-notes.json`, which last only until the next sync, if they're there);
+- from 0.5.0, the reminders ideas' dates make, `reminders.json`.
 
 WebView's and WorkManager's own files are left out.
+
+From 0.5.0, a folder also keeps, in `folder/`, the records the install keeps of itself in the folder maps are kept in: its `.orbit/`, with the device's record (`devices/<id>.json`) and its study records (`study/<id>/<map's file>.json`), both under the install's id in `folder-device`. The maps' files there are the maps' text and media again, so they're left out.
 
 Layouts before `.layout.json` (each map as a lone file, or history inside each map's folder) only existed under the app's earlier id, which no release used. Their steps are tested from made-up files in `MapRepositoryTest`.
 
@@ -55,10 +60,26 @@ Make its files with its own code, the same way as the others:
    8. In Settings: private maps lock again after 5 minutes, and Hide them while locked is on; Studying brings 5 new cards a day. On the list of maps, Got it on the note about where maps are kept.
    9. In Settings, Keep maps in a folder: make a new, empty folder in Documents and use it, with the PIN when Orbit asks to unlock the private map. Wait until Settings says it's in step. Then delete "Why mind maps should move" from its card's menu: the trash then holds a map that was in the folder, which takes its file there with it.
 
-   From the release after 0.4.0:
+   From 0.5.0:
 
-   10. Open "Lisbon in May", long-press "Night markets", then Add a date: the 20th of next month, Done. Long-press it again, then its date, Add a time: 18:30, Done (Not now if Orbit asks about notifications). Back until the list of maps shows, then in Settings turn Remind me of ideas' dates off.
-   11. Push the boarding pass too (`adb push scripts/release-data/boarding-pass.pdf /sdcard/Download/`). Open "Lisbon in May", long-press Food, Add a file, and pick `boarding-pass.pdf` from Downloads: Food holds it, as `media/file-boarding-pass.pdf`, a file of a kind no earlier release carries. Then Back until the list of maps shows.
+   10. Open "Lisbon in May", long-press "Night markets", then Add a date: the 20th of next month, Done. Long-press it again, then its date, Add a time: 18:30, Done, and Not now when Orbit asks about notifications (it asks on Android 13 and later: use one). Back until the list of maps shows, then in Settings turn Remind me of ideas' dates off.
+   11. Push the boarding pass too (`adb push scripts/release-data/boarding-pass.pdf /sdcard/Download/`). Open "Lisbon in May", long-press Food, Add a file, and pick `boarding-pass.pdf` from Downloads: Food holds it, as `media/file-boarding-pass.pdf`, a file of a kind no earlier release carries.
+   12. Still in "Lisbon in May", with Food open, long-press "Sardines", then Sketch, and draw a sardine in three strokes: its body, its tail and its eye. Done, describe it as "A sardine", and Done: Sardines' picture is the sketch, `media/sketch-<…>.svg`.
+   13. Back to the map's top. Long-press "Museums", Edit details, and type its note, pressing Enter at each line's end:
+
+       ```
+       Opening hours:
+
+       | Museum | Opens |
+       | --- | ---: |
+       | Azulejo | 10:00 |
+       | Gulbenkian | 10:00 |
+
+       - [ ] Buy tickets online
+       - [ ] Check Monday closures
+       ```
+
+       Close the editor, then open Museums' details (What Museums holds) and check "Buy tickets online" there. Then Back until the list of maps shows, and wait until Settings says the folder is in step.
 4. **Copy the files out.** Force-stop the app, then copy its files and keep only Orbit's:
 
    ```bash
@@ -70,6 +91,9 @@ Make its files with its own code, the same way as the others:
    # From 0.4.0. folder-deletions.json and folder-notes.json are there only between a deletion or a note and the
    # next sync, so copy them if they are:
    cp files/folder-device files/folder-device-installed <version>/files/
+   # From 0.5.0: the reminders, and the records this install keeps in the folder of step 9.
+   cp files/reminders.json <version>/files/
+   adb pull "/sdcard/Documents/<the folder>" folder && mkdir -p <version>/folder && cp -r folder/.orbit <version>/folder/
    ```
 
 5. **Add it to `RELEASES`** in `ReleasesTest`, by its versionCode, if it isn't there yet, and **run the tests:** `./gradlew testLibreDebugUnitTest --tests '*ReleaseDataTest*' --tests '*ReleasesTest*'`.

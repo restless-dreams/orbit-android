@@ -230,8 +230,8 @@ fun DetailsPanel(model: MapViewModel, ui: MapUi, node: MapNode, sheet: Boolean) 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun IdeaFacts(node: MapNode) {
-    // An idea of no kind is an idea like any other: it says nothing of it.
-    val kind = NodeKinds.firstOrNull { it.type != null && it.type.equals(node.type, ignoreCase = true) }
+    // An idea of no kind is an idea like any other: it says nothing of it, as of a kind the page draws as none.
+    val kind = kindOf(node)?.takeIf { it.type != null }
     val status = node.shownStatus
     val date = shownDate(node, rememberTimeWords())
     val tags = node.tags

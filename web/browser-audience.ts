@@ -36,10 +36,23 @@ const code = location.pathname.split('/').filter(Boolean)[0] ?? '';
 // Pictures come from the phone, next to this page.
 const base = new URL(`/${code}/`, location.href).href;
 const waiting = document.querySelector<HTMLElement>('.audience__waiting');
+const status = document.querySelector<HTMLElement>('.audience__status');
 
 const say = (text: string): void => {
   if (waiting) {
     waiting.textContent = text;
+  }
+};
+
+/**
+ * Says over the map that the page is finding the phone again, while it
+ * does: the waiting screen, which says so too, is under the map while one
+ * is shown, and the map stays as the presenter left it meanwhile.
+ */
+const lost = (looking: boolean): void => {
+  if (status) {
+    status.textContent = looking ? pageWords().looking : '';
+    status.hidden = !looking;
   }
 };
 
@@ -58,9 +71,14 @@ const follow = (): void => {
     receive(message.type === 'show' ? { ...message, baseUrl: base } : message);
   };
 
-  events.onopen = () => say(pageWords().waiting);
+  events.onopen = () => {
+    say(pageWords().waiting);
+    lost(false);
+  };
 
   events.onerror = () => {
+    lost(true);
+
     // The browser tries a dropped connection again by itself, but not one the phone refused: ask the phone why.
     if (events.readyState === EventSource.CLOSED) {
       void explain();
@@ -107,6 +125,7 @@ const explain = async (): Promise<void> => {
 };
 
 const turnAway = (why: TurnedAway): void => {
+  lost(false);
   receive({ type: 'end' });
   // Why, in the words the phone's join page uses for the same reasons.
   say(pageWords()[why]);

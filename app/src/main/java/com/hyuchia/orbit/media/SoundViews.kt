@@ -425,7 +425,8 @@ fun SoundPage(item: GalleryItem, sound: SoundState?, controls: SoundControls, so
             val bottom = if (sideways) 24.dp else 72.dp
             val height = maxHeight - top - bottom
             val width = maxWidth - 48.dp
-            val art = if (sideways) minOf(height, width * 0.4f) else minOf(width, height - 220.dp, 360.dp)
+            // On its side, the art takes what the buttons leave, side by side: in a narrow window, as beside another app's, none.
+            val art = if (sideways) minOf(height, width * 0.4f, width - 32.dp - SoundButtonsInARow) else minOf(width, height - 220.dp, 360.dp)
 
             val controlsColumn = @Composable { width: Modifier ->
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp), modifier = width) {
@@ -447,7 +448,10 @@ fun SoundPage(item: GalleryItem, sound: SoundState?, controls: SoundControls, so
             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = top, bottom = bottom)) {
                 if (sideways) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-                        SoundArt(item.look, state?.playing == true, source, Modifier.size(art), RoundedCornerShape(32.dp))
+                        if (art >= 96.dp) {
+                            SoundArt(item.look, state?.playing == true, source, Modifier.size(art), RoundedCornerShape(32.dp))
+                        }
+
                         controlsColumn(Modifier.widthIn(max = 420.dp))
                     }
                 } else {
@@ -467,18 +471,26 @@ fun SoundPage(item: GalleryItem, sound: SoundState?, controls: SoundControls, so
 /** A page shorter than this, wider than tall, is a phone on its side. */
 private val SidewaysPage = 500.dp
 
+/** The sound's four buttons side by side, as close as they go ([SoundButtons]). */
+private val SoundButtonsInARow = 240.dp
+
 /** The room between the sound's buttons, where there's room. */
 private val SoundButtonGap = 20.dp
 
 /** The least room between them, as a narrow window closes it up. */
 private val SoundButtonLeastGap = 4.dp
 
+/** The smallest a button gets in the narrowest window: a touch's least target. */
+private val SoundButtonLeast = 48.dp
+
 /**
  * Ten seconds back, play and pause, and ten on, with the sound's switch
  * beside them: play in the middle, under the sound's name and time, and the
  * switch at the end. A narrower window closes up the room between them, and
- * one too narrow for that has all four in a row, so none ever covers
- * another.
+ * one too narrow for that has all four in a row; narrower still, as in a
+ * window beside another app's, the switch goes under the other three, at the
+ * end, and they shrink as they must, play first, never below a touch's
+ * target. None ever covers another, nor leaves the window.
  */
 @Composable
 internal fun SoundButtons(item: GalleryItem, state: SoundState?, controls: SoundControls) {
@@ -519,12 +531,37 @@ internal fun SoundButtons(item: GalleryItem, state: SoundState?, controls: Sound
         },
         modifier = Modifier.fillMaxWidth(),
     ) { measurables, constraints ->
-        val buttons = measurables.map { it.measure(Constraints()) }
-        val (backButton, playButton, forwardButton, muteButton) = buttons
-        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else buttons.sumOf { it.width } + 3 * SoundButtonGap.roundToPx()
-        val rowHeight = buttons.maxOf { it.height }
         val gap = SoundButtonGap.roundToPx()
         val least = SoundButtonLeastGap.roundToPx()
+        val natural = measurables.map { it.maxIntrinsicWidth(Constraints.Infinity) }
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else natural.sum() + 3 * gap
+
+        if (width < natural.sum()) {
+            // Back, play and on in a row, shrunk as they must be, play first, and the switch under them at the end.
+            val touch = SoundButtonLeast.roundToPx()
+            val room = width - 2 * least
+            val play = (room - natural[0] - natural[2]).coerceIn(touch, natural[1])
+            val skip = ((room - play) / 2).coerceIn(touch, natural[0])
+            val (backButton, playButton, forwardButton) = listOf(skip, play, skip).mapIndexed { index, side -> measurables[index].measure(Constraints(maxWidth = side, maxHeight = side)) }
+            val muteButton = measurables[3].measure(Constraints())
+            val three = listOf(backButton, playButton, forwardButton)
+            val rowHeight = three.maxOf { it.height }
+            val between = ((width - three.sumOf { it.width }) / 2).coerceIn(0, gap)
+            var x = ((width - three.sumOf { it.width } - 2 * between) / 2).coerceAtLeast(0)
+
+            return@Layout layout(width, rowHeight + least + muteButton.height) {
+                for (button in three) {
+                    button.placeRelative(x, (rowHeight - button.height) / 2)
+                    x += button.width + between
+                }
+
+                muteButton.placeRelative(width - muteButton.width, rowHeight + least)
+            }
+        }
+
+        val buttons = measurables.map { it.measure(Constraints()) }
+        val (backButton, playButton, forwardButton, muteButton) = buttons
+        val rowHeight = buttons.maxOf { it.height }
         // Play in the middle, with the room between it and the skips that leaves the switch its own at the end.
         val beside = minOf(gap, width / 2 - playButton.width / 2 - forwardButton.width - muteButton.width - least)
 
@@ -541,7 +578,7 @@ internal fun SoundButtons(item: GalleryItem, state: SoundState?, controls: Sound
                 // Too narrow for that: the four in a row, as close as they must be, the row in the middle.
                 val row = buttons.sumOf { it.width }
                 val between = ((width - row) / 3).coerceIn(0, gap)
-                var x = ((width - row - 3 * between) / 2).coerceAtLeast(0)
+                var x = (width - row - 3 * between) / 2
 
                 for (button in buttons) {
                     button.placeAt(x)

@@ -8,11 +8,12 @@ package com.hyuchia.orbit.data
  * Every other chunk, among them a Broadcast Wave's originator and when it
  * was recorded, LIST's tags and labels, iXML, XMP, an ID3 tag and a peak
  * envelope with when it was made, becomes a JUNK chunk of the same size
- * with nothing in it, so the samples stay where they are. Tags after the
- * chunks stay out ([SoundTags]). A file cut short, as a recording that
- * stopped or a copy that didn't finish, goes as far as its last whole
- * sample, or its last whole chunk after its samples, and its sizes say
- * where it ends now, so players don't look past it.
+ * with nothing in it, so the samples stay where they are, and the byte of
+ * padding after a chunk of an odd size is a zero, whatever its writer left
+ * in it. Tags after the chunks stay out ([SoundTags]). A file cut short,
+ * as a recording that stopped or a copy that didn't finish, goes as far as
+ * its last whole sample, or its last whole chunk after its samples, and its
+ * sizes say where it ends now, so players don't look past it.
  */
 internal object WaveChunks {
     /** Whether a file's first twelve bytes are a WAV's. */
@@ -48,6 +49,14 @@ internal object WaveChunks {
             return patches to at
         }
 
+        // The byte of padding after a chunk of an odd size, just before `position`, a zero as RIFF has it: a writer may have left anything in it.
+        fun padEmptied() {
+            if (padded) {
+                patches += Patch(position - 1, 1)
+                padded = false
+            }
+        }
+
         while (position + CHUNK_HEADER <= end) {
             var header = bytes.read(position, CHUNK_HEADER)
 
@@ -55,7 +64,10 @@ internal object WaveChunks {
             if (!isChunkHeader(header) && padded && isChunkHeader(bytes.read(position - 1, CHUNK_HEADER))) {
                 position -= 1
                 header = bytes.read(position, CHUNK_HEADER)
+                padded = false
             }
+
+            padEmptied()
 
             if (!isChunkHeader(header)) {
                 // Zeros after the chunks say nothing, and tags the file ends in after its samples, cut short, stay out; anything else can't be told.
@@ -125,6 +137,9 @@ internal object WaveChunks {
             padded = size % 2 == 1L
             position = body + size + size % 2
         }
+
+        // The last chunk's, when the file has it: one past the end isn't written.
+        padEmptied()
 
         // A last chunk's padding byte may be missing; anything else left over has to say nothing, or start a chunk or tags the file ends in after its samples.
         if (position < end && SoundTags.zerosUntil(bytes, position, end) < end) {

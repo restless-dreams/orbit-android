@@ -203,6 +203,50 @@ class MapSoundsTest {
         assertEquals(listOf("memo-intro.mp4"), soundNamesIn(markdown))
     }
 
+    @Test(timeout = 5_000)
+    fun `thousands of attribute comments that never close are each read once`() {
+        // Read again from each to the end of the text, as the pattern did over all of it, 5,000 of these took seconds, on one line or on many.
+        val unclosed = "<!-- orbit".repeat(20_000)
+        val lines = "- Tram <!-- orbit audio: media/memo-tram.mp4 files: media/ticket.pdf\n".repeat(20_000)
+
+        assertEquals(listOf("memo-intro.mp4"), soundNamesIn("# Trip <!-- orbit audio: media/memo-intro.mp4 -->\n- $unclosed\n"))
+        assertEquals(emptyList<String>(), soundNamesIn("# Trip\n$lines"))
+        assertEquals(emptyList<String>(), fileNamesIn("# Trip\n$lines"))
+        assertEquals(listOf("ticket.pdf"), fileNamesIn("# Trip <!-- orbit files: media/ticket.pdf -->\n- files $unclosed\n"))
+    }
+
+    @Test(timeout = 5_000)
+    fun `a map of a million characters around its attribute comments is read whole`() {
+        // Android's patterns failed on these, past about 250,000 characters, with one that read to the `-->` in one pass.
+        val ideas = "- Tram\n".repeat(150_000)
+        val notes = "  note: Tram\n".repeat(80_000)
+
+        assertEquals(listOf("memo-intro.mp4"), soundNamesIn("# Trip <!-- orbit audio: media/memo-intro.mp4 -->\n- Tram <!-- orbit audio: media/memo-tram.mp4\n$ideas"))
+        assertEquals(listOf("ticket.pdf"), fileNamesIn("# Trip <!-- orbit files: media/ticket.pdf -->\n- Tram <!-- orbit files: media/map.pdf\n$ideas"))
+        assertEquals(listOf("memo-intro.mp4"), soundNamesIn("# Trip <!-- orbit\n  audio: media/memo-intro.mp4\n$notes-->\n$ideas"))
+    }
+
+    @Test
+    fun `the pattern attribute comments are read with repeats no group`() {
+        // Android's patterns keep a step on a stack of 8 MB each time a group repeats, so `<!--\s*+orbit\b((?:(?!-->).)*+)` failed on maps of about 250,000 characters. The JVM's don't: this reads the pattern itself.
+        assertFalse(OrbitAttributes.pattern, Regex("""\)[*+{]""").containsMatchIn(OrbitAttributes.pattern))
+    }
+
+    @Test
+    fun `attribute comments read up to the last close are the ones the pattern finds in the whole text`() {
+        // Over the whole text, the pattern took seconds on thousands of comments that never close.
+        val pattern = Regex("""<!--\s*orbit\b(.*?)-->""", RegexOption.DOT_MATCHES_ALL)
+        val pieces = listOf("<!--", "-->", "orbit", "orbits", "orbit_", " ", "\n", "\u2028", "\u00a0", "-", ">", "<", "!", "a", "audio: media/a.mp4", "\u00e9")
+        val random = java.util.Random(11)
+
+        repeat(20_000) {
+            val text = (0 until random.nextInt(14)).joinToString("") { pieces[random.nextInt(pieces.size)] }
+            val found = pattern.findAll(text).map { it.range to it.groups[1]?.range }.toList()
+
+            assertEquals(text, found, orbitAttributes(text).map { it.range to it.groups[1]?.range }.toList())
+        }
+    }
+
     @Test
     fun `this version carries sounds in the folder, and says so in its record there`() {
         assertTrue(carriedMediaTypes().containsAll(listOf("mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "flac", "weba")))

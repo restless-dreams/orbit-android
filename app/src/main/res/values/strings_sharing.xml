@@ -102,6 +102,11 @@
         <item quantity="one">Orbit couldn\'t take out what it may say beyond what it shows, such as who made it, when and where, so that would go with it.</item>
         <item quantity="other">Orbit couldn\'t take out what they may say beyond what they show, such as who made them, when and where, so that would go with them.</item>
     </plurals>
+    <!-- The question's first line when it asks again: a file the person answered about changed before it went (as a newer version arriving from a synced folder), so their answer is no longer about it. -->
+    <plurals name="sharing_as_they_are_changed">
+        <item quantity="one">It changed after you answered, so Orbit asks again.</item>
+        <item quantity="other">They changed after you answered, so Orbit asks again.</item>
+    </plurals>
     <!-- The choice the question starts on: the files stay on this device. -->
     <plurals name="sharing_leave_them_out">
         <item quantity="one">Leave it out</item>
@@ -137,8 +142,8 @@
     <string name="sharing_maps_stay_here_body">Orbit has no account and no cloud. To have your maps on your other devices too, keep them in a folder that a sync app or cloud drive keeps in step.</string>
     <string name="sharing_choose_a_folder">Choose a folder</string>
     <string name="sharing_where_on_this_device">On this device</string>
-    <!-- Android's backup to the cloud keeps the maps' text and settings, and their pictures, sounds and videos smallest first while they fit 25 MB; never their history, and private maps only when it's encrypted end to end. Export all maps keeps everything. -->
-    <string name="sharing_where_on_this_device_description">Orbit has no account and no cloud. Android\'s backup, if it\'s on, keeps the maps and settings, and pictures, sounds and videos while they fit, but not the history; private maps only if it\'s encrypted, as a screen lock makes it; otherwise a restore leaves them out. Export all maps keeps every map whole, private ones still private.</string>
+    <!-- Android's backup to the cloud keeps the maps' text and settings, and their pictures, sounds, videos and files smallest first while they fit 25 MB; never their history, and private maps only when it's encrypted end to end. Export all maps keeps everything. -->
+    <string name="sharing_where_on_this_device_description">Orbit has no account and no cloud. Android\'s backup, if it\'s on, keeps the maps and settings, and pictures, sounds, videos and files while they fit, but not the history; private maps only if it\'s encrypted, as a screen lock makes it; otherwise a restore leaves them out. Export all maps keeps every map whole, private ones still private.</string>
     <!-- After the settings' line about Android's backup, when its last backup to the cloud, 25 MB at most, had no room for some maps' text. -->
     <plurals name="sharing_backup_left_out">
         <item quantity="one">Android\'s last backup had no room for %1$d map. Export all maps keeps it.</item>

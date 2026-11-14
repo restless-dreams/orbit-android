@@ -11,14 +11,15 @@
  *
  * Printed, the page is the map laid out for paper (web/print.ts). The app
  * prints the same page through Android's print framework: then it holds
- * only that layout, and says when its pictures are in.
+ * only that layout, and says when its pictures are in, and how many
+ * couldn't be.
  */
 import { createOrbitMap, parseOrbit, renderPrintLayout } from '@restless-dreams/orbit';
 import type { OrbitNode } from '@restless-dreams/orbit';
 import { receive } from './audience';
 import { automaticRings, knownStyle, nodeTypeFor, nodeTypes, themeOption } from './look';
 import type { AppTheme } from './look';
-import { picturesLoaded, printColors, printOptions } from './print';
+import { picturesLoaded, printColors, printOptions, withoutPicturesLeftOut } from './print';
 import type { PrintRequest } from './print';
 import { pageWords, speak } from './words';
 import type { PageWords } from './words';
@@ -121,6 +122,7 @@ const layOutForPrint = (): void => {
   }
 
   renderPrintLayout(printed, parsed, options);
+  withoutPicturesLeftOut(printed);
 };
 
 /** The page as people explore and present it. */
@@ -136,6 +138,7 @@ const startExploring = (): void => {
   const count = document.querySelector<HTMLElement>('.page__count')!;
   const title = document.querySelector<HTMLElement>('.audience__title')!;
   const presentButton = document.querySelector<HTMLButtonElement>('button.page__present')!;
+  const controls = document.querySelector<HTMLElement>('.page__controls')!;
   const download = document.querySelector<HTMLAnchorElement>('.page__download');
 
   if (data.download && download) {
@@ -183,11 +186,25 @@ const startExploring = (): void => {
     count.textContent = `${index + 1} / ${order.length}`;
   };
 
+  /** Shows the controls, which step aside after a moment: not while the keyboard is on one of them, which they wait for to leave. */
   const showControls = (): void => {
+    // Focus leaving them as the presentation stops brings nothing back.
+    if (!presenting) {
+      return;
+    }
+
     page.classList.add('page--controls');
     window.clearTimeout(linger);
-    linger = window.setTimeout(() => page.classList.remove('page--controls'), CONTROLS_LINGER);
+
+    linger = window.setTimeout(() => {
+      if (!controls.contains(document.activeElement)) {
+        page.classList.remove('page--controls');
+      }
+    }, CONTROLS_LINGER);
   };
+
+  controls.addEventListener('focusin', showControls);
+  controls.addEventListener('focusout', showControls);
 
   presentButton.addEventListener('click', present);
   document.querySelector('[data-close]')?.addEventListener('click', stop);
@@ -215,6 +232,11 @@ const startExploring = (): void => {
 
     const forward = ['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'];
     const back = ['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'];
+
+    // On a control, Enter and Space press it, as anywhere on the web.
+    if ((event.key === 'Enter' || event.key === ' ') && (event.target as Element | null)?.closest?.('button, a[href]')) {
+      return;
+    }
 
     if (forward.includes(event.key)) {
       event.preventDefault();
@@ -267,9 +289,12 @@ const startExploring = (): void => {
 };
 
 if (data.print) {
-  // The app is printing the map: the page is only its layout, and the app prints once the pictures are in.
+  // The app is printing the map: the page is only its layout. It tells the app once that's done, so a big map's layout
+  // takes none of its pictures' time, and the app prints once the pictures are in, saying how many it goes without
+  // (`ready:2`), as pictures from the web the phone couldn't reach.
   layOutForPrint();
-  void picturesLoaded(printed).then(() => window.orbitPrint?.postMessage('ready'));
+  window.orbitPrint?.postMessage('laid-out');
+  void picturesLoaded(printed).then((missing) => window.orbitPrint?.postMessage(missing > 0 ? `ready:${missing}` : 'ready'));
 } else {
   startExploring();
   // Printed from a browser, the page is the map laid out for paper: before it prints, or once it's quiet.

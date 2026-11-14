@@ -60,6 +60,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -68,9 +69,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -79,6 +83,10 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent as ComposeKeyEvent
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreInterceptKeyBeforeSoftKeyboard
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -86,7 +94,9 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -100,6 +110,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
 import com.hyuchia.orbit.R
 import com.hyuchia.orbit.Words
 import com.hyuchia.orbit.data.MediaSummary
@@ -112,13 +123,15 @@ import com.hyuchia.orbit.page.MapNode
 import com.hyuchia.orbit.present.Audience
 import com.hyuchia.orbit.present.BrowserAddressSheet
 import com.hyuchia.orbit.present.CastButton
+import com.hyuchia.orbit.present.browserPresenting
 import com.hyuchia.orbit.present.rememberAudience
-import com.hyuchia.orbit.present.rememberBrowserPresenting
 import com.hyuchia.orbit.rememberWords
 import com.hyuchia.orbit.theme.LocalAppSettings
+import com.hyuchia.orbit.ui.ControlsStepAside
 import com.hyuchia.orbit.ui.Hint
 import com.hyuchia.orbit.ui.MarkdownNote
 import com.hyuchia.orbit.ui.controlsLinger
+import com.hyuchia.orbit.ui.pressesButton
 import com.hyuchia.orbit.ui.rememberAsTheyAre
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -144,16 +157,15 @@ private const val PACE_SLACK_SECONDS = 5
  * the screen stays on. With a second screen or a TV, the audience watches
  * there and this screen becomes the presenter's ([PresenterView]), which
  * shows them an idea's picture or video too; on this screen alone, they
- * open full screen over the presentation, and a step closes them.
+ * open full screen over the presentation, and a step closes them. `map`
+ * draws the map, asked to take no keyboard focus (`focusable` false): the
+ * presentation keeps the keys, and Tab goes through its controls.
  */
 @Composable
-fun PresentationMode(model: MapViewModel, ui: MapUi, background: Color, map: @Composable () -> Unit) {
+fun PresentationMode(model: MapViewModel, ui: MapUi, background: Color, map: @Composable (focusable: Boolean) -> Unit) {
     val presentation = ui.presentation ?: return
     val seconds = LocalAppSettings.current.presentationSeconds
     val view = LocalView.current
-    val focus = remember { FocusRequester() }
-    val scope = rememberCoroutineScope()
-    var holdsFocus by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         val window = (view.context as? Activity)?.window
@@ -174,13 +186,16 @@ fun PresentationMode(model: MapViewModel, ui: MapUi, background: Color, map: @Co
         }
     }
 
-    // Files that can't go clean stay on this phone unless the presenter chooses, as browsers or a TV join, to show them as they are.
-    val asTheyAre = rememberAsTheyAre()
+    // Files that can't go clean stay on this phone unless the presenter chooses, as browsers or a TV join, to show them as
+    // they are: a choice the map keeps while the presentation lasts, as it keeps the room in browsers. A question still
+    // open goes with this screen, and what its answer would start here: a screen made again asks afresh.
+    val asTheyAre = rememberAsTheyAre(model.presentingAsTheyAre)
     val uncleaned by produceState(Uncleaned(), ui.revision) { value = model.uncleaned() }
     // The TV that last joined: it gets the map once the presenter has answered for its pictures, if it's still there.
     val joiningTv = remember { mutableStateOf<Audience?>(null) }
 
-    val audience = rememberAudience(model.folder(), asTheyAre = { asTheyAre.chosen }) { made ->
+    // A TV can't be asked: a picture that changes while it watches stays on this phone, unless it goes clean.
+    val audience = rememberAudience(model.folder(), asTheyAre = { asTheyAre.chosen.lasting() }) { made ->
         joiningTv.value = made
 
         if (made != null && made.carriesPictures) {
@@ -194,35 +209,28 @@ fun PresentationMode(model: MapViewModel, ui: MapUi, background: Color, map: @Co
         }
     }
 
-    var inBrowsers by remember { mutableStateOf(false) }
     var showAddress by remember { mutableStateOf(false) }
-    val browsers = rememberBrowserPresenting(inBrowsers, model.folder(), asTheyAre = { asTheyAre.chosen }, model::setBrowserAudience)
+    val browsers by model.browserRoom.presenting.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val settings = LocalAppSettings.current
 
     fun showInBrowsers() = asTheyAre.then(uncleaned.inRoom) {
-        inBrowsers = true
+        val choice = model.presentingAsTheyAre
+        // Nor can a browser: a file that changes meanwhile stays here, unless it goes clean.
+        model.browserRoom.start { browserPresenting(context, settings, model.folder(), model.viewModelScope, asTheyAre = { choice.files.lasting() }) }
         showAddress = true
     }
 
+    // The map only shows the presentation: the keyboard's focus stays with the presentation and its controls, and Tab
+    // goes from one control to the next rather than into the map's page.
+    val shownMap: @Composable () -> Unit = {
+        Box(Modifier.fillMaxSize().focusProperties { canFocus = false }) {
+            map(false)
+        }
+    }
+
     CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(background)
-                // The presentation keeps the keys, so a clicker's first click steps: wherever the screen puts it as
-                // it starts, on a tablet a pane of its own, it takes the focus back once it's there.
-                .onPlaced {
-                    if (!holdsFocus) {
-                        scope.launch { focus.requestFocus() }
-                    }
-                }
-                .onFocusChanged { holdsFocus = it.hasFocus }
-                .focusRequester(focus)
-                .focusable()
-                // Before the keyboard and Android's touch mode see them, so the first key after a touch steps too;
-                // and as usual, for keys that come while the map's page has the focus.
-                .onPreInterceptKeyBeforeSoftKeyboard { event -> stepKeys(event, model, presentation, seconds) }
-                .onPreviewKeyEvent { event -> stepKeys(event, model, presentation, seconds) },
-        ) {
+        PresentationKeys(keys = { event -> stepKeys(event, model, presentation, seconds) }, modifier = Modifier.fillMaxSize().background(background)) { focus ->
             if (audience != null || browsers != null) {
                 PresenterView(
                     model,
@@ -233,11 +241,11 @@ fun PresentationMode(model: MapViewModel, ui: MapUi, background: Color, map: @Co
                     browsers,
                     seconds,
                     background,
-                    map,
+                    shownMap,
                     onBrowsers = ::showInBrowsers,
                 )
             } else {
-                OnThisScreen(model, ui, presentation, seconds, background, map, onBrowsers = ::showInBrowsers)
+                OnThisScreen(model, ui, presentation, seconds, background, shownMap, focus, onBrowsers = ::showInBrowsers)
             }
         }
     }
@@ -267,21 +275,95 @@ fun PresentationMode(model: MapViewModel, ui: MapUi, background: Color, map: @Co
         }
     }
 
-    if (showAddress && browsers != null) {
+    val room = browsers
+
+    if (showAddress && room != null) {
         // The room gets the map's pictures and videos: its sounds play from this phone. Those that can't go clean are named.
-        val chosen = asTheyAre.chosen
+        val chosen = asTheyAre.chosen.chosenIn(uncleaned)
         val media by produceState(MediaSummary(), ui.revision, uncleaned, chosen) { value = model.mediaSummary(leavingOut = uncleaned.names - chosen).copy(audio = 0) }
         BrowserAddressSheet(
-            browsers,
+            room,
             media,
             uncleaned.inRoom,
             chosen,
             onStop = {
-                inBrowsers = false
+                model.browserRoom.stop()
                 showAddress = false
             },
             onDismiss = { showAddress = false },
         )
+    }
+}
+
+/**
+ * What a presentation's keys tell what it shows ([PresentationKeys]):
+ * whether one of its controls has the keyboard's focus, and Tab or
+ * Shift+Tab with the focus on the presentation itself, for controls that
+ * stepped aside to come back with.
+ */
+@Stable
+internal class PresentationFocus {
+    /** One of the presentation's controls has the keyboard's focus (Tab went to it). */
+    var controlFocused by mutableStateOf(false)
+        internal set
+
+    /**
+     * Hears Tab (`forward`) or Shift+Tab with the focus on the presentation
+     * itself, and says whether it took the key: controls that stepped aside
+     * come back, the focus on the first of them or the last. Left as it is,
+     * Tab goes on to whatever control is there.
+     */
+    var onTab: (forward: Boolean) -> Boolean = { false }
+}
+
+/**
+ * Where a presentation takes the keys, around `content`. It keeps the
+ * keyboard's focus, so a clicker's first click steps: wherever the screen
+ * puts it as it starts, on a tablet a pane of its own, it takes the focus
+ * back once it's there. `keys` sees each key before the keyboard and
+ * Android's touch mode do, so the first key after a touch steps too. With
+ * one of the presentation's controls focused (Tab went to it), Space and
+ * Enter press that control instead, as a tap would, and the other keys
+ * stay the presentation's. `content` hears that one is, to keep it on
+ * screen, and Tab with the focus on the presentation itself
+ * ([PresentationFocus]).
+ */
+@Composable
+internal fun PresentationKeys(keys: (ComposeKeyEvent) -> Boolean, modifier: Modifier = Modifier, content: @Composable (PresentationFocus) -> Unit) {
+    val focus = remember { FocusRequester() }
+    val scope = rememberCoroutineScope()
+    var holdsFocus by remember { mutableStateOf(false) }
+    val presentationFocus = remember { PresentationFocus() }
+
+    fun presentationKeys(event: ComposeKeyEvent): Boolean {
+        val controlFocused = presentationFocus.controlFocused
+        val tab = event.type == KeyEventType.KeyDown && event.key == Key.Tab && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed
+
+        if (tab && holdsFocus && !controlFocused) {
+            return presentationFocus.onTab(!event.isShiftPressed)
+        }
+
+        return !(controlFocused && event.pressesButton()) && keys(event)
+    }
+
+    Box(
+        modifier
+            .onPlaced {
+                if (!holdsFocus) {
+                    scope.launch { focus.requestFocus() }
+                }
+            }
+            .onFocusChanged {
+                holdsFocus = it.hasFocus
+                presentationFocus.controlFocused = it.hasFocus && !it.isFocused
+            }
+            .focusRequester(focus)
+            .focusable()
+            // Before the keyboard and Android's touch mode see them, and as usual once they've let them by.
+            .onPreInterceptKeyBeforeSoftKeyboard(::presentationKeys)
+            .onPreviewKeyEvent(::presentationKeys),
+    ) {
+        content(presentationFocus)
     }
 }
 
@@ -364,25 +446,39 @@ private fun fullScreenStepKeys(event: KeyEvent, model: MapViewModel, seconds: In
  */
 fun Modifier.presentationGestures(rightToLeft: Boolean, onTap: () -> Unit, onStep: (Int) -> Unit): Modifier = this
     .pointerInput(Unit) { detectTapGestures(onTap = { onTap() }) }
-    .pointerInput(rightToLeft) {
-        val threshold = SwipeToStep.toPx()
-        val forward = if (rightToLeft) 1 else -1
-        var travelled = 0f
-        detectHorizontalDragGestures(
-            onDragStart = { travelled = 0f },
-            onDragEnd = {
-                if (abs(travelled) >= threshold) {
-                    onStep(if (travelled * forward > 0) 1 else -1)
-                }
-            },
-            onHorizontalDrag = { change, amount ->
-                change.consume()
-                travelled += amount
-            },
-        )
-    }
+    .stepSwipes(rightToLeft, onStep)
 
-/** The presentation on this screen: the map, its caption, and controls that step aside after a moment. */
+/**
+ * A swipe across steps to the next idea or back, the way pages turn: on the
+ * presentation, and on what's over it and takes touches of its own, as its
+ * caption, whose taps, links and scrolling stay as they are. A swipe that
+ * goes up or down first is the caption's to scroll.
+ */
+fun Modifier.stepSwipes(rightToLeft: Boolean, onStep: (Int) -> Unit): Modifier = pointerInput(rightToLeft) {
+    val threshold = SwipeToStep.toPx()
+    val forward = if (rightToLeft) 1 else -1
+    var travelled = 0f
+
+    detectHorizontalDragGestures(
+        onDragStart = { travelled = 0f },
+        onDragEnd = {
+            if (abs(travelled) >= threshold) {
+                onStep(if (travelled * forward > 0) 1 else -1)
+            }
+        },
+        onHorizontalDrag = { change, amount ->
+            change.consume()
+            travelled += amount
+        },
+    )
+}
+
+/**
+ * The presentation on this screen: the map, its caption, and controls that
+ * step aside after a moment, unless one of them has the keyboard's focus
+ * (`focus`). A tap brings them back, and so does Tab or Shift+Tab, which
+ * goes on to the first of them or the last.
+ */
 @Composable
 private fun OnThisScreen(
     model: MapViewModel,
@@ -391,6 +487,7 @@ private fun OnThisScreen(
     seconds: Int,
     background: Color,
     map: @Composable () -> Unit,
+    focus: PresentationFocus,
     onBrowsers: () -> Unit,
 ) {
     val node = ui.nodes[presentation.current]
@@ -403,18 +500,38 @@ private fun OnThisScreen(
     // The tap outlives this composition too.
     val lingering by rememberUpdatedState(linger)
 
-    LaunchedEffect(controls, touches, presentation.playing, linger) {
-        if (linger == null) {
-            controls = true
-        } else if (controls) {
-            delay(linger)
-            controls = false
-        }
-    }
+    // Their moment starts afresh with each touch, and as the presentation starts or stops playing on its own.
+    ControlsStepAside(controls, linger, focused = focus.controlFocused, running = true, moment = touches to presentation.playing) { controls = it }
 
     fun touch() {
         controls = true
         touches += 1
+    }
+
+    // Tab or Shift+Tab, with the controls stepped aside and the focus on the presentation: where it goes once they're back.
+    var tabbing by remember { mutableStateOf<FocusDirection?>(null) }
+    val focusManager = LocalFocusManager.current
+
+    DisposableEffect(focus) {
+        focus.onTab = { forward ->
+            if (controls) {
+                false
+            } else {
+                touch()
+                tabbing = if (forward) FocusDirection.Next else FocusDirection.Previous
+                true
+            }
+        }
+
+        onDispose { focus.onTab = { false } }
+    }
+
+    LaunchedEffect(tabbing) {
+        val direction = tabbing ?: return@LaunchedEffect
+        // Once they're laid out again.
+        withFrameNanos {}
+        focusManager.moveFocus(direction)
+        tabbing = null
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -466,6 +583,13 @@ private fun OnThisScreen(
                     onStep = { by -> model.step(by, pace) },
                 ),
         )
+
+        // A page that stopped, or didn't load, says so in the map's place, with the way to load it again: the
+        // presentation goes on from the idea on screen.
+        ui.pageProblem?.let { problem ->
+            PageProblemNotice(problem, onLoadAgain = model::reload, modifier = Modifier.align(Alignment.Center).safeDrawingPadding())
+        }
+
         val progress = stringResource(R.string.present_progress, presentation.index + 1, presentation.order.size)
         LinearProgressIndicator(
             progress = { (presentation.index + 1f) / presentation.order.size },
@@ -554,7 +678,7 @@ private fun OnThisScreen(
                 .onSizeChanged { captions = it },
         ) {
             if (captioned) {
-                Caption(model, node)
+                Caption(node, rightToLeft = besideAtLeft, onStep = { by -> model.step(by, pace) }, onNodeLink = { id -> model.focus(id) })
             }
 
             // As tall as the controls have been, larger type and the pace under the count included.
@@ -573,9 +697,15 @@ private fun OnThisScreen(
     }
 }
 
-/** The idea's name and note, fading from one idea to the next. The top of the map without a note needs none. */
+/**
+ * The idea's name and note, fading from one idea to the next. The top of the
+ * map without a note needs none. It's over the presentation, and a swipe
+ * across it steps as one across the map does (`onStep`), in the direction
+ * `rightToLeft` reading turns pages; a long note scrolls, and its links go
+ * to their ideas (`onNodeLink`).
+ */
 @Composable
-private fun Caption(model: MapViewModel, node: MapNode?) {
+internal fun Caption(node: MapNode?, rightToLeft: Boolean, onStep: (Int) -> Unit, onNodeLink: (String) -> Unit) {
     AnimatedContent(
         targetState = node,
         transitionSpec = { fadeIn(tween(320, delayMillis = 180)) togetherWith fadeOut(tween(160)) },
@@ -586,14 +716,15 @@ private fun Caption(model: MapViewModel, node: MapNode?) {
                 shape = RoundedCornerShape(28.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
                 contentColor = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.fillMaxWidth(),
+                // A surface keeps touches from what's under it: swipes across it step here.
+                modifier = Modifier.fillMaxWidth().stepSwipes(rightToLeft, onStep),
             ) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(current.label, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
 
                     current.note?.takeIf { it.isNotBlank() }?.let { note ->
                         Box(Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
-                            MarkdownNote(note, plain = current.noteFormat == "plain", onNodeLink = { id -> model.focus(id) })
+                            MarkdownNote(note, plain = current.noteFormat == "plain", onNodeLink = onNodeLink)
                         }
                     }
                 }

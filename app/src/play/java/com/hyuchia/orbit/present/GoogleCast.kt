@@ -30,6 +30,7 @@ import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.hyuchia.orbit.BuildConfig
 import com.hyuchia.orbit.Logs
+import com.hyuchia.orbit.data.AsTheyAreFiles
 import com.hyuchia.orbit.page.AudienceCommand
 import com.hyuchia.orbit.page.LanguageCommand
 import com.hyuchia.orbit.page.MapMessage
@@ -44,6 +45,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -126,7 +128,7 @@ class CastOptionsProvider : OptionsProvider {
 
 /** A TV Google Cast is connected to, which presentations reach in the language of `context`, the app's screen. */
 private class CastTv(private val session: CastSession, private val context: Context) : Tv {
-    override fun audience(mapFolder: File, scope: CoroutineScope, asTheyAre: () -> Set<String>): Audience =
+    override fun audience(mapFolder: File, scope: CoroutineScope, asTheyAre: () -> AsTheyAreFiles): Audience =
         CastAudience(session, mapFolder, scope, pageWords(context), asTheyAre)
 }
 
@@ -134,8 +136,12 @@ private class CastTv(private val session: CastSession, private val context: Cont
 internal interface TvChannel {
     val name: String?
 
-    /** Sends a message to the TV, from the main thread; it goes nowhere once the TV is gone. */
-    fun send(message: String)
+    /**
+     * Sends a message to the TV, from the main thread; it goes nowhere once
+     * the TV is gone. `failed` hears, on the main thread, when it didn't
+     * reach the TV, with Cast's status code.
+     */
+    fun send(message: String, failed: (Int) -> Unit)
 
     /** Hears each message the TV sends, until it's given null. */
     fun listen(listener: ((String) -> Unit)?)
@@ -145,8 +151,12 @@ internal interface TvChannel {
 private class SessionChannel(private val session: CastSession) : TvChannel {
     override val name: String? = session.castDevice?.friendlyName
 
-    override fun send(message: String) {
-        session.sendMessage(NAMESPACE, message)
+    override fun send(message: String, failed: (Int) -> Unit) {
+        session.sendMessage(NAMESPACE, message).setResultCallback { status ->
+            if (!status.isSuccess) {
+                failed(status.statusCode)
+            }
+        }
     }
 
     override fun listen(listener: ((String) -> Unit)?) {
@@ -180,14 +190,18 @@ private class SessionChannel(private val session: CastSession) : TvChannel {
  * still on its way: a command sent before it, waiting or being made ready,
  * such as a map whose pictures are being shrunk as a private map locks,
  * never reaches the TV. The TV stays connected, for the next presentation.
+ *
+ * A message that doesn't reach the TV, as Cast says, leaves it out of step
+ * with the presenter: the presenter hears it ([trouble]), and can send the
+ * presentation again ([loadAgain]).
  */
 class CastAudience internal constructor(
     private val channel: TvChannel,
     scope: CoroutineScope,
-    words: PageWords,
+    private val words: PageWords,
     private val withPictures: (String) -> String,
 ) : Audience {
-    constructor(session: CastSession, mapFolder: File, scope: CoroutineScope, words: PageWords, asTheyAre: () -> Set<String>) :
+    constructor(session: CastSession, mapFolder: File, scope: CoroutineScope, words: PageWords, asTheyAre: () -> AsTheyAreFiles) :
         this(SessionChannel(session), scope, words, { markdown -> inlinePictures(markdown, mapFolder, TV_PICTURE_SIDE, asTheyAre(), most = TV_PICTURES_MOST) })
 
     override val name: String? = channel.name
@@ -212,14 +226,26 @@ class CastAudience internal constructor(
     @Volatile
     private var mediaListener: ((MapMessage.MediaState) -> Unit)? = null
 
+    private val troubled = MutableStateFlow<ScreenTrouble?>(null)
+
+    /** Whether something sent to the TV didn't reach it, since the presentation was last sent to it whole. */
+    override val trouble: StateFlow<ScreenTrouble?> = troubled.asStateFlow()
+
+    /** How many times the presentation was sent to the TV again: a message from before that didn't reach it is mended since. */
+    @Volatile
+    private var sendings = 0
+
+    /** Whether the presentation is over on this TV: what doesn't reach it from then on doesn't matter. */
+    @Volatile
+    private var closed = false
+
     /** The commands on their way to the TV, in order, until the audience closes. */
     private val delivery: Job
 
     init {
         channel.listen { message -> watch.heard(message)?.let { report -> mediaListener?.invoke(report) } }
         // Before anything of a presentation, an end that goes at once included.
-        deliver(protocolJson.encodeToString(SenderHello.serializer(), SenderHello(AUDIENCE_PROTOCOL, BuildConfig.VERSION_NAME)))
-        deliver(protocolJson.encodeToString(LanguageCommand.serializer(), LanguageCommand(words)))
+        greet()
 
         delivery = scope.launch {
             for (sent in queue) {
@@ -270,13 +296,31 @@ class CastAudience internal constructor(
         mediaListener = listener
     }
 
+    /**
+     * After something didn't reach the TV: the hello and the app's language
+     * go again, which the TV may have missed too, and the presentation then
+     * catches the TV up. What didn't reach it before is mended by that.
+     */
+    override fun loadAgain() {
+        sendings += 1
+        troubled.value = null
+        greet()
+    }
+
     /** The TV stays connected, back on its waiting screen, ready for the next presentation. */
     override fun close() {
         // The screen's work ends with the presentation: what's still on its way is dropped, and the TV hears the end now.
         delivery.cancel()
         queue.close()
+        closed = true
         end()
         channel.listen(null)
+    }
+
+    /** The phone's hello, with the protocol it speaks, and the app's language and words. */
+    private fun greet() {
+        deliver(protocolJson.encodeToString(SenderHello.serializer(), SenderHello(AUDIENCE_PROTOCOL, BuildConfig.VERSION_NAME)))
+        deliver(protocolJson.encodeToString(LanguageCommand.serializer(), LanguageCommand(words)))
     }
 
     /** The presentation ends on the TV now: what was sent before, still waiting or being made ready, never goes. */
@@ -286,15 +330,32 @@ class CastAudience internal constructor(
     }
 
     private fun deliver(json: String) {
+        val sending = sendings
+        val failed = { status: Int -> missed(status, sending) }
+
         if (json.length <= CAST_PART_LENGTH) {
-            channel.send(json)
+            channel.send(json, failed)
             return
         }
 
         val parts = castParts(json)
 
         parts.forEachIndexed { index, text ->
-            channel.send(protocolJson.encodeToString(CastPart.serializer(), CastPart(index, parts.size, text)))
+            channel.send(protocolJson.encodeToString(CastPart.serializer(), CastPart(index, parts.size, text)), failed)
+        }
+    }
+
+    /**
+     * A message didn't reach the TV, as Cast says with `status`: the TV may
+     * not show what the presenter does, which the presenter hears. Not when
+     * the presentation went to the TV again since (`sending`), nor once it's
+     * over there.
+     */
+    private fun missed(status: Int, sending: Int) {
+        Logs.warn(TAG, "A message didn't reach the TV (Cast status $status)")
+
+        if (sending == sendings && !closed) {
+            troubled.value = ScreenTrouble.Missed
         }
     }
 }

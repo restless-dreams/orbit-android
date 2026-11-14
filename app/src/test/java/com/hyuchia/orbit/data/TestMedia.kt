@@ -21,6 +21,45 @@ internal object TestMedia {
         return type + movie + data
     }
 
+    /**
+     * A live photo's movie as an iPhone records its sound: its type, then a
+     * movie whose sound track says it has `frames` frames of 16-bit sound on
+     * `channels` channels at `rate`, uncompressed (`sowt`), in one chunk of
+     * the media data, which holds `samples`, as many as are there.
+     */
+    fun liveMovie(samples: ByteArray, frames: Int, channels: Int = 2, rate: Int = 48_000): ByteArray {
+        fun box(type: String, vararg content: ByteArray): ByteArray {
+            val body = content.fold(ByteArray(0)) { all, part -> all + part }
+            return ByteBuffer.allocate(8).putInt(8 + body.size).put(type.toByteArray(Charsets.ISO_8859_1)).array() + body
+        }
+
+        fun int(value: Int): ByteArray = ByteBuffer.allocate(4).putInt(value).array()
+
+        fun short(value: Int): ByteArray = ByteBuffer.allocate(2).putShort(value.toShort()).array()
+
+        fun full(vararg content: ByteArray): ByteArray = ByteArray(4) + content.fold(ByteArray(0)) { all, part -> all + part }
+
+        // QuickTime's first version of a sound description: its channels, bits and rate, in 16.16.
+        val description = box("sowt", ByteArray(6), short(1), short(0), short(0), int(0), short(channels), short(16), short(0), short(0), int(rate shl 16))
+
+        val movie = { chunkAt: Int ->
+            val table = box(
+                "stbl",
+                box("stsd", full(int(1)), description),
+                box("stts", full(int(1), int(frames), int(1))),
+                box("stsc", full(int(1), int(1), int(frames), int(1))),
+                box("stsz", full(int(1), int(frames))),
+                box("stco", full(int(1), int(chunkAt))),
+            )
+
+            box("moov", box("trak", box("mdia", box("hdlr", full(int(0), "soun".toByteArray(Charsets.ISO_8859_1), ByteArray(12), byteArrayOf(0))), box("minf", table))))
+        }
+
+        val type = box("ftyp", "qt  ".toByteArray(Charsets.ISO_8859_1), int(0), "qt  ".toByteArray(Charsets.ISO_8859_1))
+        val chunkAt = type.size + movie(0).size + 8
+        return type + movie(chunkAt) + ByteBuffer.allocate(8).putInt(8 + frames * channels * 2).put("mdat".toByteArray(Charsets.ISO_8859_1)).array() + samples
+    }
+
     /** A JPEG of `width` by `height` pixels, of colors that change across it, or of `noise`, which takes far more bytes. */
     fun picture(width: Int = 24, height: Int = 16, noise: Long? = null): ByteArray {
         val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)

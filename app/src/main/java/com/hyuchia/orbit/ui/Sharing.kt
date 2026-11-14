@@ -80,37 +80,58 @@ fun shareMapFile(context: Context, mapId: String, file: File, mimeType: String, 
  * and opens it in the app the phone has for `mimeType` rather than the
  * share sheet: only while the map doesn't show locked, as it is right
  * before it would. One that locked while the file was made opens nothing,
- * and the file goes. What makes a big file says how big it is first, to its
+ * and the file goes. A private map's file goes as private maps lock
+ * ([com.hyuchia.orbit.privacy.PrivateCopies]), as an idea's file opened in
+ * another app does. What makes a big file says how big it is first, to its
  * [ExportRoom]. Says whether an app opened it. Throws when the file can't
  * be made whole: [com.hyuchia.orbit.data.OutputFailed] when there's no room
  * for it.
  */
 suspend fun openMapExport(context: Context, mapId: String, name: String, mimeType: String, write: suspend ExportRoom.(OutputStream) -> Unit): Boolean {
-    val file = makeExport(context, name) { output ->
-        write(output)
-        true
-    }
+    val container = context.container
 
-    if (context.container.privateMaps.hidesNow(mapId)) {
-        forgetExport(checkNotNull(file))
-        return false
-    }
-
-    return openFile(context, sharedFileUri(context, checkNotNull(file)) ?: throw IOException("An export landed outside the exports"), mimeType)
+    return openExport(
+        File(context.cacheDir, EXPORTS),
+        name,
+        write,
+        hides = { container.privateMaps.hidesNow(mapId) },
+        isPrivate = { container.maps.summary(mapId)?.metadata?.isPrivate == true },
+        keep = container.privateCopies::keep,
+    ) { file -> openFile(context, sharedFileUri(context, file) ?: throw IOException("An export landed outside the exports"), mimeType) }
 }
 
 /**
- * Opens a file of the map `mapId` itself, with all it says, in the app the
- * phone has for `mimeType`, only while the map doesn't show locked: for a
- * file the person chose to hand over as it is. Says whether an app opened
- * it.
+ * [openMapExport] into `exports`: the file is made, then let go when the
+ * map `hides` now, else kept until private maps lock (`keep`) when it
+ * `isPrivate`, and opened (`open`).
  */
-fun openMapFile(context: Context, mapId: String, file: File, mimeType: String): Boolean {
-    if (context.container.privateMaps.hidesNow(mapId)) {
+internal suspend fun openExport(
+    exports: File,
+    name: String,
+    write: suspend ExportRoom.(OutputStream) -> Unit,
+    hides: () -> Boolean,
+    isPrivate: () -> Boolean,
+    keep: (File) -> Unit,
+    open: (File) -> Boolean,
+): Boolean {
+    val file = checkNotNull(
+        makeExport(exports, name) { output ->
+            write(output)
+            true
+        },
+    )
+
+    if (hides()) {
+        forgetExport(file)
         return false
     }
 
-    return sharedFileUri(context, file)?.let { openFile(context, it, mimeType) } ?: false
+    // The app it opens in reads it while it's open: a private map's goes as soon as private maps lock.
+    if (isPrivate()) {
+        keep(file)
+    }
+
+    return open(file)
 }
 
 /** Opens a file in the app the phone has for `mimeType`, with leave to read it. False when no app opens it. */
@@ -186,9 +207,10 @@ private const val EXPORTS = "exports"
 /**
  * The address another app is given to read `file`, or null for a file Orbit
  * never hands out. The app's file provider reaches all of the maps' folder,
- * since a video in a map can open in the phone's video app as it is, once
- * the person chose so for one Orbit couldn't clean ([openMapFile]); this
- * gives out only an export in the cache or a picture, video or sound in a
+ * as older versions handed a video Orbit couldn't clean to the phone's video
+ * app as the map's own file; every way out now hands out a copy in the
+ * exports instead ([openMapExport]). This gives out only an export in the
+ * cache or a picture, video or sound in a
  * map's media folder ([sharesFile]), never a map's text, its versions or
  * its details.
  */

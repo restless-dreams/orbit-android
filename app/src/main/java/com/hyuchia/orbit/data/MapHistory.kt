@@ -86,6 +86,23 @@ internal class MapHistory(store: MapStore) : MapPart(store) {
         }
     }
 
+    /**
+     * Keeps `text` set aside, as the newest version of the history in the
+     * folder `history`, one of its own: a map's in the trash. It's named by
+     * the clock, after any version there, and not thinned out.
+     */
+    fun keepAsideIn(history: File, text: String) {
+        val times = history.list().orEmpty().mapNotNull { VERSION_NAME.matchEntire(it)?.groupValues?.get(1)?.toLongOrNull() }.toSet()
+        var now = clock()
+
+        while (now in times) {
+            now += 1
+        }
+
+        writeAtomically(File(history, "$now.md"), text)
+        recordReason(history, "$now.md", VersionReason.Aside)
+    }
+
     /** Keeps `text` in the map's history, set aside; storage that's full or gone leaves it out, which the log says. */
     fun keepAsideLocked(id: String, text: String) {
         try {
@@ -119,10 +136,11 @@ internal class MapHistory(store: MapStore) : MapPart(store) {
 
     /**
      * Keeps `text` in the map's history for `reason`, unless it's `unless`
-     * (the text about to replace it) or the same as the latest version; then
-     * thins the history out as it ages (see [versionsToKeep]). The latest
-     * version being `text` already, a big change's reason is its own from
-     * then on, so thinning keeps it as one, and the history says why.
+     * (the text about to replace it) or the same as the latest version, one
+     * that can't be read counting as another text; then thins the history
+     * out as it ages (see [versionsToKeep]). The latest version being
+     * `text` already, a big change's reason is its own from then on, so
+     * thinning keeps it as one, and the history says why.
      */
     fun keepVersionText(id: String, text: String, unless: String? = null, reason: VersionReason) {
         val history = File(historyDirectory, id)
@@ -133,7 +151,14 @@ internal class MapHistory(store: MapStore) : MapPart(store) {
             return
         }
 
-        if (latest != null && latest.isFile && latest.readTextSafely() == text) {
+        // A latest version that can't be read may not be this text: this one is kept all the same, rather than lost.
+        val latestText = try {
+            latest?.takeIf { it.isFile }?.readTextSafely()
+        } catch (unreadable: IOException) {
+            null
+        }
+
+        if (latest != null && latestText == text) {
             if (isBigChange(reason)) {
                 keptBeforeBigChange(history, latest.name, reason)
             }

@@ -59,7 +59,7 @@
         <item quantity="other">%1$d dias</item>
     </plurals>
     <string name="settings_export_all_maps">Exportar todos os mapas</string>
-    <string name="settings_export_all_maps_description">Um backup: todos os mapas, com imagens, vídeos e histórico exatamente como estão, em um só arquivo para guardar onde quiser</string>
+    <string name="settings_export_all_maps_description">Um backup: todos os mapas, com imagens, vídeos, áudios, arquivos e histórico exatamente como estão, em um só arquivo para guardar onde quiser</string>
     <string name="settings_exporting">Exportando seus mapas…</string>
     <string name="settings_all_maps_file_name">Mapas do Orbit %1$s</string>
     <plurals name="settings_exported_maps">
@@ -69,6 +69,8 @@
     </plurals>
     <string name="settings_could_not_write_file">O Orbit não conseguiu gravar esse arquivo. Tente outro lugar.</string>
     <string name="settings_not_allowed_to_write">O Orbit não tem permissão para gravar lá. Tente outro lugar.</string>
+    <string name="settings_export_file_unreadable">O Orbit não conseguiu ler um dos arquivos dos seus mapas, então não gravou um arquivo zip sem ele.</string>
+    <string name="settings_export_file_unreadable_in">O Orbit não conseguiu ler um dos arquivos de “%1$s”, então não gravou um arquivo zip sem ele.</string>
     <string name="settings_import_maps">Importar mapas</string>
     <string name="settings_import_maps_description">De um arquivo de mapas exportado aqui ou em outro dispositivo. Os mapas que já estão aqui continuam como estão.</string>
     <string name="settings_importing">Importando mapas…</string>
@@ -83,7 +85,7 @@
     <string name="settings_keep_maps_in_folder_description">Cada mapa como um arquivo markdown em uma pasta que você escolher, sincronizada nos dois sentidos: as mudanças feitas lá, por um app de sincronização ou em um computador, voltam para cá.</string>
     <string name="settings_your_folder">Sua pasta</string>
     <string name="settings_check_folder_now">Verificar a pasta agora</string>
-    <string name="settings_folder_how_it_works">Lá, cada mapa é um arquivo markdown, e as imagens e os vídeos vão para uma pasta “media” ao lado deles. Seu progresso no modo de estudo também vai para lá, para que seus outros dispositivos continuem de onde você parou. Um mapa alterado tanto aqui quanto lá é guardado duas vezes, para que nada se perca.</string>
+    <string name="settings_folder_how_it_works">Lá, cada mapa é um arquivo markdown, e as imagens, os vídeos, os áudios e os arquivos vão para uma pasta “media” ao lado deles. Seu progresso no modo de estudo também vai para lá, para que seus outros dispositivos continuem de onde você parou. Um mapa alterado tanto aqui quanto lá é guardado duas vezes, para que nada se perca.</string>
     <string name="settings_folder_syncing">Sincronizando seus mapas e a pasta…</string>
     <string name="settings_folder_checking">Verificando a pasta…</string>
     <string name="settings_folder_in_step">Sincronizada com seus mapas, verificada %1$s</string>
@@ -117,6 +119,11 @@
         <item quantity="one">Salvo para um Orbit mais novo que o de alguns dispositivos desta pasta, então eles só podem mostrá-lo: %1$s. Atualize o Orbit neles para alterá-lo lá também.</item>
         <item quantity="many">Salvos para um Orbit mais novo que o de alguns dispositivos desta pasta, então eles só podem mostrá-los: %1$s. Atualize o Orbit neles para alterá-los lá também.</item>
         <item quantity="other">Salvos para um Orbit mais novo que o de alguns dispositivos desta pasta, então eles só podem mostrá-los: %1$s. Atualize o Orbit neles para alterá-los lá também.</item>
+    </plurals>
+    <plurals name="settings_folder_came_in_private">
+        <item quantity="one">Chegou como privado, porque o Orbit não conseguiu diferenciá-lo do arquivo de um mapa privado que foi renomeado ou alterado em outro lugar: %1$s. Se não for esse mapa, desative Privado no menu dele.</item>
+        <item quantity="many">Chegaram como privados, porque o Orbit não conseguiu diferenciá-los do arquivo de um mapa privado que foi renomeado ou alterado em outro lugar: %1$s. Se não forem esse mapa, desative Privado no menu de cada um.</item>
+        <item quantity="other">Chegaram como privados, porque o Orbit não conseguiu diferenciá-los do arquivo de um mapa privado que foi renomeado ou alterado em outro lugar: %1$s. Se não forem esse mapa, desative Privado no menu de cada um.</item>
     </plurals>
     <string name="settings_quoted_map_title">“%1$s”</string>
     <string name="settings_got_it">Entendi</string>

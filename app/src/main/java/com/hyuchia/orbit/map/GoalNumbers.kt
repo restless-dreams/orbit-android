@@ -16,6 +16,20 @@ import kotlin.math.roundToInt
 
 private val NOT_A_DIGIT = Regex("[^0-9]")
 
+/** Spaces and apostrophes group digits in some languages (1 250, 1'250): as marks, any space is this one. */
+private const val SPACE = ' '
+private const val APOSTROPHE = '\''
+
+/** Spaces one after another, as one. */
+private val SPACES = Regex(" {2,}")
+
+/** `char` as a mark between digits: any space as [SPACE], and a straight or curly apostrophe as [APOSTROPHE]. */
+private fun asMark(char: Char): Char = when {
+    char.isWhitespace() || Character.isSpaceChar(char) -> SPACE
+    char == '\'' || char == '’' -> APOSTROPHE
+    else -> char
+}
+
 /** What a number field holds: nothing, a number, or why it isn't one. */
 sealed interface NumberReading {
     data object Empty : NumberReading
@@ -47,14 +61,15 @@ fun interface Shortener {
 object GoalNumbers {
     /**
      * Reads a number as typed: with the language's decimal point and its
-     * thousands grouped or not. With no decimal point of the language, a
-     * lone `.` or `,` that doesn't group three digits is taken for one, as
+     * thousands grouped or not, by the language's mark, a comma, a point, a
+     * space or an apostrophe. With no decimal point of the language, a lone
+     * `.` or `,` that doesn't group three digits is taken for one, as
      * keyboards that only offer the other one type it: 12.5 on a German phone.
      */
     fun read(text: String, locale: Locale = Locale.getDefault()): NumberReading {
         val symbols = DecimalFormatSymbols.getInstance(locale)
-        // Spaces and apostrophes group digits in some languages, and mean nothing else.
-        var rest = text.filterNot { it.isWhitespace() || Character.isSpaceChar(it) || it == '\'' || it == '’' }
+        // Spaces around it mean nothing; between its digits, they group them as other marks do (see ungrouped).
+        var rest = SPACES.replace(text.map(::asMark).joinToString(""), " ").trim(SPACE)
 
         if (rest.isEmpty()) {
             return NumberReading.Empty
@@ -63,20 +78,21 @@ object GoalNumbers {
         val negative = rest.first() == '-' || rest.first() == '−'
 
         if (negative || rest.first() == '+') {
-            rest = rest.drop(1)
+            rest = rest.drop(1).trimStart(SPACE)
         }
 
         // Digits in any script count as their value.
         val digits = rest.map { char -> Character.digit(char, 10).takeIf { it >= 0 }?.let { '0' + it } ?: char }.joinToString("")
-        val plain = plainNumber(digits, symbols.decimalSeparator, symbols.groupingSeparator)
+        val plain = plainNumber(digits, asMark(symbols.decimalSeparator), asMark(symbols.groupingSeparator))
             ?: return NumberReading.NotANumber(field(BigDecimal("12.5"), locale))
-        val value = BigDecimal(plain).let { if (negative) it.negate() else it }
+        // As the map keeps it: rounded to the digits it holds, which can take 999999999999999.9 to 1e15, past what readers take.
+        val value = tidy(BigDecimal(plain).let { if (negative) it.negate() else it })
 
         if (value.abs() >= BigDecimal("1e15")) {
             return NumberReading.TooBig
         }
 
-        return NumberReading.Number(tidy(value))
+        return NumberReading.Number(value)
     }
 
     /**
@@ -86,7 +102,7 @@ object GoalNumbers {
      * people group them (see [ungrouped]).
      */
     private fun plainNumber(text: String, decimal: Char, grouping: Char): String? {
-        val marks = setOf(decimal, grouping, '.', ',')
+        val marks = setOf(decimal, grouping, '.', ',', SPACE, APOSTROPHE)
 
         if (text.none { it in '0'..'9' } || text.any { it !in '0'..'9' && it !in marks }) {
             return null
@@ -108,7 +124,8 @@ object GoalNumbers {
 
         val mark = text.indexOfFirst { it !in '0'..'9' }
 
-        if (mark >= 0 && text.count { it !in '0'..'9' } == 1 && text.length - mark - 1 != 3) {
+        // A space or an apostrophe is never a decimal point: one that groups nothing makes no number (1 2, 1'2).
+        if (mark >= 0 && text[mark] in ".," && text.count { it !in '0'..'9' } == 1 && text.length - mark - 1 != 3) {
             return "${text.substring(0, mark).ifEmpty { "0" }}.${text.substring(mark + 1).ifEmpty { "0" }}"
         }
 
@@ -116,11 +133,11 @@ object GoalNumbers {
     }
 
     /**
-     * Digits grouped by one mark, as plain digits: in threes (1,250,000), or
-     * in twos before the last three as in India (12,34,567), the first group
-     * no longer than the others. Null for marks anywhere else (1.2.3, 12,34,
-     * 1,2345), or two kinds of mark at once: a number typed another way,
-     * which reading would make another number.
+     * Digits grouped by one mark, as plain digits: in threes (1,250,000 or
+     * 1 250 000), or in twos before the last three as in India (12,34,567),
+     * the first group no longer than the others. Null for marks anywhere else
+     * (1.2.3, 12,34, 1,2345, 1 2), or two kinds of mark at once: a number
+     * typed another way, which reading would make another number.
      */
     private fun ungrouped(text: String): String? {
         if (text.isEmpty()) {

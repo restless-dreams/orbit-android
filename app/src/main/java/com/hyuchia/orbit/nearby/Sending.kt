@@ -10,32 +10,71 @@ import com.hyuchia.orbit.data.MediaSummary
 import com.hyuchia.orbit.data.decodeText
 import com.hyuchia.orbit.data.fileNamesIn
 import com.hyuchia.orbit.data.soundNamesIn
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
+import java.io.Closeable
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.util.zip.ZipFile
 
-/** How often a sender asks whether its map was taken. */
-private const val CHECK_MILLISECONDS = 1_000L
-/** How long a sender waits for the other device to answer. */
-private const val ANSWER_WAIT_MILLISECONDS = 3 * 60 * 1000L
+/**
+ * How long a sender waits for the other device's answer once the map is
+ * there: as long as any release keeps a map waiting for one (Orbit 0.5.0
+ * and earlier, ten minutes), and a little more, to hear the device say
+ * itself that its time ran out. So no answer means the device went quiet,
+ * never that the map can still be opened there.
+ */
+internal const val ANSWER_WAIT_MILLISECONDS = ANSWER_LIFETIME_UP_TO_0_5_0 + 30_000L
 private const val CONNECT_MILLISECONDS = 5_000
 private const val READ_MILLISECONDS = 60_000
 /** The most of an answer a sender reads: answers are a line of JSON. */
 private const val ANSWER_BYTES_LIMIT = 64 * 1024
 /** The ports a device can listen on. */
 internal val PORTS = 1..65_535
+
+/**
+ * How long each wait of a send lasts, in milliseconds, measured in time
+ * however long each request in it takes: a device that stops answering, or
+ * answers a byte at a time, holds no request past its time, nor the wait.
+ */
+internal data class SendTimes(
+    /** How often a sender asks where its offer is. */
+    val check: Long = 1_000L,
+
+    /** How long it waits for the other device's answer once the map is there. */
+    val answer: Long = ANSWER_WAIT_MILLISECONDS,
+
+    /** How long it waits, while both devices show the code, for the person sending to say they match: the other device stops waiting for the map then. */
+    val confirming: Long = CONFIRMING_LIFETIME_MILLISECONDS,
+
+    /** The most one ask of where the offer is takes, from connecting to the last of its answer. */
+    val ask: Long = 10_000L,
+
+    /** The most its key, the hello or the half of the code take, each. */
+    val request: Long = 60_000L,
+
+    /** The most telling the other device the map won't come takes, as sending stops. */
+    val cancel: Long = 5_000L,
+)
 
 /** Where a map on its way to another device is. */
 sealed interface SendState {
@@ -90,13 +129,14 @@ data class OlderThere(val staysHere: MediaSummary, val showsOnly: Boolean)
  * answer: [onState] hears each step, ending with opened, declined,
  * cancelled or failed.
  */
-suspend fun sendMap(
+internal suspend fun sendMap(
     address: String,
     key: String?,
     version: Int?,
     from: String,
     bundle: File,
     confirm: suspend (check: String) -> Boolean,
+    times: SendTimes = SendTimes(),
     onState: (SendState) -> Unit,
 ) {
     val name = senderName(from).orEmpty()
@@ -114,7 +154,7 @@ suspend fun sendMap(
 
     try {
         val agreed = try {
-            withContext(Dispatchers.IO) { agree(address, key, version, name, sealed) { id -> offered = id } }
+            withContext(Dispatchers.IO) { agree(address, key, version, name, sealed, times) { id -> offered = id } }
         } catch (tooBig: TooBigThere) {
             // The offer it said hello with goes as sending ends, below: the other device never shows its code.
             onState(SendState.TooBigThere(sealed))
@@ -123,6 +163,8 @@ suspend fun sendMap(
             onState(SendState.Failed(refused.reason))
             return
         } catch (failure: IOException) {
+            // Sending stopped, as the sheet closed: the request's connection closed with it, and there's no one to tell.
+            currentCoroutineContext().ensureActive()
             onState(SendState.Failed(R.string.nearby_send_could_not_reach))
             return
         }
@@ -130,7 +172,7 @@ suspend fun sendMap(
         val older = withContext(Dispatchers.IO) { olderThere(bundle, agreed.reads) }
         onState(SendState.Confirming(agreed.check, older))
 
-        when (checked(address, agreed, confirm)) {
+        when (checked(address, agreed, confirm, times)) {
             Checked.Cancelled -> {
                 onState(SendState.Cancelled)
                 return
@@ -143,13 +185,15 @@ suspend fun sendMap(
         }
 
         val delivered = try {
-            withContext(Dispatchers.IO) { deliver(address, agreed, bundle) }
+            deliver(address, agreed, bundle)
         } catch (refused: Refusal) {
             onState(SendState.Failed(refused.reason))
             return
         } catch (failure: IOException) {
+            // Sending stopped, as the sheet closed: the map's connection closed with it, and there's no one to tell.
+            currentCoroutineContext().ensureActive()
             // The other device may have hung up as it declined, while the map was on its way.
-            val state = runCatching { withContext(Dispatchers.IO) { state(address, agreed) } }.getOrNull()
+            val state = askState(address, agreed, times.ask)
             onState(if (state == "declined") SendState.Declined else SendState.Failed(R.string.nearby_send_could_not_reach))
             return
         }
@@ -158,34 +202,42 @@ suspend fun sendMap(
 
         if (!delivered) {
             // A device that proves what it says says itself that it declined: from anyone else, it's no answer.
-            val declined = !agreed.proves || runCatching { withContext(Dispatchers.IO) { state(address, agreed) } }.getOrNull() == "declined"
+            val declined = !agreed.proves || askState(address, agreed, times.ask) == "declined"
             onState(if (declined) SendState.Declined else SendState.Failed(R.string.nearby_send_could_not_reach))
             return
         }
 
         onState(SendState.Waiting(agreed.check))
-        var waited = 0L
 
-        while (waited < ANSWER_WAIT_MILLISECONDS) {
-            delay(CHECK_MILLISECONDS)
-            waited += CHECK_MILLISECONDS
-            val state = runCatching { withContext(Dispatchers.IO) { state(address, agreed) } }.getOrNull()
-
-            when (state) {
-                "opened" -> return onState(SendState.Opened)
-                "declined" -> return onState(SendState.Declined)
-            }
+        when (waitForState(times.answer, times.check, setOf("opened", "declined")) { askState(address, agreed, times.ask) }) {
+            "opened" -> onState(SendState.Opened)
+            "declined" -> onState(SendState.Declined)
+            else -> onState(SendState.Failed(R.string.nearby_send_no_answer))
         }
-
-        onState(SendState.Failed(R.string.nearby_send_no_answer))
     } finally {
         val id = offered
 
         if (!sent && id != null) {
-            // Sending stopped before the map went, the sheet closed say: the other device stops waiting for it.
-            withContext(NonCancellable + Dispatchers.IO) { runCatching { cancelOffer(address, id) } }
+            // Sending stopped before the map went, the sheet closed say: the other device stops waiting for it, if it hears in time.
+            withContext(NonCancellable) { runCatching { cancelOffer(address, id, times.cancel) } }
         }
     }
+}
+
+/**
+ * Asks `ask` every `every` milliseconds until it says one of `wanted`, for
+ * `within` milliseconds in all, however long each ask takes: what it said,
+ * or null when the time ran out first.
+ */
+internal suspend fun waitForState(within: Long, every: Long, wanted: Set<String>, ask: suspend () -> String?): String? = withTimeoutOrNull(within) {
+    var said: String? = null
+
+    while (said !in wanted) {
+        delay(every)
+        said = ask()
+    }
+
+    said
 }
 
 /** What came of checking the codes. */
@@ -195,9 +247,9 @@ private enum class Checked { Matched, Cancelled, Declined }
  * Whether the person sending says the codes match, or not, while the other
  * device keeps waiting for the map: it may decline, or stop waiting, first.
  */
-private suspend fun checked(address: String, agreed: Agreed, confirm: suspend (String) -> Boolean): Checked = coroutineScope {
+private suspend fun checked(address: String, agreed: Agreed, confirm: suspend (String) -> Boolean, times: SendTimes): Checked = coroutineScope {
     val answer = async { confirm(agreed.check) }
-    val gone = async { stoppedWaiting(address, agreed) }
+    val gone = async { stoppedWaiting(address, agreed, times) }
 
     select {
         answer.onAwait { matched ->
@@ -212,18 +264,9 @@ private suspend fun checked(address: String, agreed: Agreed, confirm: suspend (S
     }
 }
 
-/** Returns once the device declined the offer, or stopped waiting for its map. */
-private suspend fun stoppedWaiting(address: String, agreed: Agreed) {
-    var waited = 0L
-
-    while (waited < CONFIRMING_LIFETIME_MILLISECONDS) {
-        delay(CHECK_MILLISECONDS)
-        waited += CHECK_MILLISECONDS
-
-        if (runCatching { withContext(Dispatchers.IO) { state(address, agreed) } }.getOrNull() == "declined") {
-            return
-        }
-    }
+/** Returns once the device declined the offer, or stopped waiting for its map, as it does once its time to come is up. */
+private suspend fun stoppedWaiting(address: String, agreed: Agreed, times: SendTimes) {
+    waitForState(times.confirming, times.check, setOf("declined")) { askState(address, agreed, times.ask) }
 }
 
 /**
@@ -251,21 +294,21 @@ private class TooBigThere : Exception()
  * on its key settles it. A device whose advertisement has no version is
  * asked for it with its key.
  */
-private fun agree(address: String, advertised: String?, version: Int?, from: String, size: Long, onOffered: (String) -> Unit): Agreed {
+private suspend fun agree(address: String, advertised: String?, version: Int?, from: String, size: Long, times: SendTimes, onOffered: (String) -> Unit): Agreed {
     val advertisedKey = DeviceKey.read(advertised)?.takeIf { version != null }
     version?.let(::checkVersion)
-    val key = advertisedKey ?: askKey(address)
+    val key = advertisedKey ?: askKey(address, times)
 
     return try {
-        greet(address, key, from, size, onOffered)
+        greet(address, key, from, size, times, onOffered)
     } catch (notOpened: NotOpened) {
-        val current = if (advertisedKey != null) askKey(address) else throw notOpened
+        val current = if (advertisedKey != null) askKey(address, times) else throw notOpened
 
         if (current.text == key.text) {
             throw notOpened
         }
 
-        greet(address, current, from, size, onOffered)
+        greet(address, current, from, size, times, onOffered)
     }
 }
 
@@ -278,8 +321,8 @@ private fun checkVersion(version: Int) {
 }
 
 /** The key the device at `address` takes maps sealed to, asked of it, with the version of offers it takes. */
-private fun askKey(address: String): DeviceKey {
-    val (status, body) = exchange(address, "GET", "/key")
+private suspend fun askKey(address: String, times: SendTimes): DeviceKey {
+    val (status, body) = request(address, "GET", "/key", times.request)
 
     if (status == 403) {
         throw Refusal(R.string.nearby_send_not_taking_maps)
@@ -300,13 +343,13 @@ private fun askKey(address: String): DeviceKey {
  * sealed, past what the device's answer says it takes throws [TooBigThere]
  * before the half is revealed, so the device never shows its code.
  */
-private fun greet(address: String, key: DeviceKey, from: String, size: Long, onOffered: (String) -> Unit): Agreed {
+private suspend fun greet(address: String, key: DeviceKey, from: String, size: Long, times: SendTimes, onOffered: (String) -> Unit): Agreed {
     val session = OfferSession.forSender(key)
     val senderNonce = randomBytes(CHECK_NONCE_BYTES)
     val hello = OfferHead(from, session.commitment(senderNonce)).bytes()
     val headers = mapOf("Content-Type" to "application/octet-stream", VERSION_HEADER to OFFER_VERSION.toString(), KEY_HEADER to session.senderKey.text)
 
-    val (status, body) = exchange(address, "POST", "/offer", headers, sealedLength(hello.size.toLong())) { output ->
+    val (status, body) = request(address, "POST", "/offer", times.request, headers, sealedLength(hello.size.toLong())) { output ->
         session.seal(hello.inputStream(), hello.size.toLong(), output)
     }
 
@@ -332,7 +375,7 @@ private fun greet(address: String, key: DeviceKey, from: String, size: Long, onO
     }
 
     val reveal = offerJson.encodeToString(Reveal.serializer(), Reveal(base64Url(senderNonce))).toByteArray()
-    val (revealed, _) = exchange(address, "POST", "/offer/${answer.id}", mapOf("Content-Type" to "application/json"), reveal.size.toLong()) { it.write(reveal) }
+    val (revealed, _) = request(address, "POST", "/offer/${answer.id}", times.request, mapOf("Content-Type" to "application/json"), reveal.size.toLong()) { it.write(reveal) }
 
     if (revealed != 200) {
         throw Refusal(R.string.nearby_send_could_not_open)
@@ -370,14 +413,20 @@ internal fun olderThere(bundle: File, reads: DeviceReads, readsHere: Int = MAP_F
 
 /**
  * Sends the map, sealed in the agreed offer's session. True once the device
- * has it, false when it declined, or stopped waiting for it, first.
+ * has it, false when it declined, or stopped waiting for it, first. Its
+ * connection closes the moment sending is cancelled, as when the sheet
+ * closes: a map on its way stops there and then, rather than go on to its
+ * end for no one.
  */
-private fun deliver(address: String, agreed: Agreed, bundle: File): Boolean {
+private suspend fun deliver(address: String, agreed: Agreed, bundle: File): Boolean {
     val length = bundle.length()
     val headers = mapOf("Content-Type" to "application/octet-stream")
+    val socket = Socket()
 
-    val (status, _) = exchange(address, "POST", "/offer/${agreed.id}/map", headers, sealedLength(length)) { output ->
-        bundle.inputStream().use { agreed.session.sealMap(it, length, output) }
+    val status = closedOnCancel(socket) {
+        exchange(address, "POST", "/offer/${agreed.id}/map", headers, sealedLength(length), socket) { output ->
+            bundle.inputStream().use { agreed.session.sealMap(it, length, output) }
+        }.first
     }
 
     return when (status) {
@@ -390,20 +439,50 @@ private fun deliver(address: String, agreed: Agreed, bundle: File): Boolean {
     }
 }
 
-/** Tells the device the map won't come, so it stops showing the code. */
-private fun cancelOffer(address: String, id: String) {
-    exchange(address, "POST", "/offer/$id/cancel")
+/**
+ * Runs `write`, which blocks on `connection`, closing `connection` the moment
+ * the caller is cancelled: a write under way stops only as its connection
+ * closes, since an interrupt doesn't reach it. What closes it is in place
+ * before `write` starts, rather than waiting for a thread of `closer` to run
+ * it first: cancelled before any had, it would never close, and the write
+ * would go on to its end.
+ */
+internal suspend fun <T> closedOnCancel(connection: Closeable, closer: CoroutineDispatcher = Dispatchers.IO, write: () -> T): T = coroutineScope {
+    val closing = launch(closer, start = CoroutineStart.UNDISPATCHED) {
+        try {
+            awaitCancellation()
+        } finally {
+            runCatching { connection.close() }
+        }
+    }
+
+    try {
+        runInterruptible(Dispatchers.IO, write)
+    } finally {
+        closing.cancel()
+    }
+}
+
+/** Tells the device the map won't come, so it stops showing the code, within `within` milliseconds. */
+private suspend fun cancelOffer(address: String, id: String, within: Long) {
+    request(address, "POST", "/offer/$id/cancel", within)
 }
 
 /**
- * Where the offer is, as the device says: opened, declined, or still going.
- * A device that proves what it says is believed only with its proof, so no
- * one else on the Wi-Fi can say the map was opened, or declined, in its
- * place; Orbit 0.3.0 and 0.4.0 prove nothing, and are taken at their word,
- * as before. Null when it says nothing, or nothing proven.
+ * Where the offer is, as the device says within `within` milliseconds:
+ * opened, declined, or still going. A device that proves what it says is
+ * believed only with its proof, so no one else on the Wi-Fi can say the
+ * map was opened, or declined, in its place; Orbit 0.3.0 and 0.4.0 prove
+ * nothing, and are taken at their word, as before. Null when it says
+ * nothing, nothing proven, or nothing in time.
  */
-private fun state(address: String, agreed: Agreed): String? {
-    val (status, body) = exchange(address, "GET", "/offer/${agreed.id}")
+private suspend fun askState(address: String, agreed: Agreed, within: Long): String? {
+    val (status, body) = try {
+        request(address, "GET", "/offer/${agreed.id}", within)
+    } catch (failure: IOException) {
+        return null
+    }
+
     val answer = (if (status == 200) runCatching { offerJson.decodeFromString(StateAnswer.serializer(), body) }.getOrNull() else null) ?: return null
 
     if (!agreed.proves) {
@@ -415,11 +494,34 @@ private fun state(address: String, agreed: Agreed): String? {
 }
 
 /**
+ * One request to the other device, as [exchange] makes it, in at most
+ * `within` milliseconds from connecting to the last of its answer: past
+ * that, or as sending is cancelled, its connection closes there and then,
+ * and one out of time throws [SocketTimeoutException], as a device that
+ * can't be reached does.
+ */
+private suspend fun request(
+    address: String,
+    method: String,
+    path: String,
+    within: Long,
+    headers: Map<String, String> = emptyMap(),
+    length: Long = 0,
+    body: ((OutputStream) -> Unit)? = null,
+): Pair<Int, String> {
+    val socket = Socket()
+
+    return withTimeoutOrNull(within) { closedOnCancel(socket) { exchange(address, method, path, headers, length, socket, body) } }
+        ?: throw SocketTimeoutException("No answer from $address in $within milliseconds")
+}
+
+/**
  * One request to another device's Orbit, over a plain socket: Android keeps
  * its HTTP clients off plain HTTP, and can't allow just the local network,
  * which is all this ever talks to. What travels is sealed where it matters
- * (see [OfferSession]). `body` writes exactly `length` bytes. Returns the
- * status and the body.
+ * (see [OfferSession]). `body` writes exactly `length` bytes. It goes over
+ * `socket`, which it closes: closing it from elsewhere stops it. Returns
+ * the status and the body.
  */
 private fun exchange(
     address: String,
@@ -427,12 +529,17 @@ private fun exchange(
     path: String,
     headers: Map<String, String> = emptyMap(),
     length: Long = 0,
+    socket: Socket = Socket(),
     body: ((OutputStream) -> Unit)? = null,
 ): Pair<Int, String> {
     val host = address.substringBeforeLast(':')
-    val port = address.substringAfterLast(':').toIntOrNull()?.takeIf { it in PORTS } ?: throw IOException("No port in $address")
 
-    Socket().use { socket ->
+    val port = address.substringAfterLast(':').toIntOrNull()?.takeIf { it in PORTS } ?: run {
+        socket.close()
+        throw IOException("No port in $address")
+    }
+
+    socket.use {
         socket.connect(InetSocketAddress(host, port), CONNECT_MILLISECONDS)
         socket.soTimeout = READ_MILLISECONDS
 

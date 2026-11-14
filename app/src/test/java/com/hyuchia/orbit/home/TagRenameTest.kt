@@ -1,6 +1,7 @@
 package com.hyuchia.orbit.home
 
 import com.hyuchia.orbit.FileWords
+import com.hyuchia.orbit.R
 import com.hyuchia.orbit.data.MapEditResult
 import com.hyuchia.orbit.data.MapMetadata
 import com.hyuchia.orbit.data.MapOutline
@@ -10,10 +11,19 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import java.util.Locale
 
-/** What Home says, and shows, when a tag renamed or taken out of every map stays on some of them. */
+/**
+ * What Home says, and shows, when a tag renamed or taken out of every map stays on some of them, and when the page
+ * couldn't rename, tag or duplicate a map.
+ */
 class TagRenameTest {
     private val english = FileWords(Locale.US)
     private val spanish = FileWords(Locale.forLanguageTag("es-MX"))
+    private val portuguese = FileWords(Locale.forLanguageTag("pt-BR"))
+
+    /** Why the page couldn't make a change, as the app's page says it in each language. */
+    private fun tooOld(words: FileWords) = MapEditResult.PageFailed(words.string(R.string.page_webview_too_old))
+
+    private fun stopped(words: FileWords) = MapEditResult.PageFailed(words.string(R.string.page_stopped))
 
     private fun map(title: String, private: Boolean = false) = MapSummary(title.lowercase(), MapOutline(title, branches = 0, ideas = 0, tags = listOf("work")), 0, MapMetadata(isPrivate = private), "", "")
 
@@ -92,5 +102,45 @@ class TagRenameTest {
             "A newer version of Orbit keeps these maps: update Orbit to change them.",
             keptTagMessage(listOf(map("Trip") to MapEditResult.Refused, map("Plan") to MapEditResult.Refused), english, readOnly = true),
         )
+    }
+
+    @Test
+    fun `maps the page couldn't change keep the tag, and Home says why as the page did`() {
+        assertEquals(
+            "The tag stays on “Trip”. The page stopped.",
+            keptTagMessage(listOf(map("Trip") to stopped(english)), english, readOnly = false),
+        )
+        // The maps after it weren't tried: they keep the tag for the same reason, which comes before the others.
+        assertEquals(
+            "The tag stays on 3 maps. This device's WebView is too old to draw maps. Update it from your app store.",
+            keptTagMessage(listOf(map("Trip") to MapEditResult.NotWritten, map("Plan") to tooOld(english), map("Home") to tooOld(english)), english, readOnly = false),
+        )
+        assertEquals(
+            "The tag stays on 1 map. The page stopped.",
+            keptTagMessage(listOf(map("Journal", private = true) to stopped(english)), english, readOnly = false),
+        )
+        assertEquals(
+            "La etiqueta se queda en 2 mapas. El WebView de este dispositivo es demasiado antiguo para dibujar mapas. Actualízalo desde tu tienda de apps.",
+            keptTagMessage(listOf(map("Viaje") to tooOld(spanish), map("Casa") to tooOld(spanish)), spanish, readOnly = false),
+        )
+        assertEquals(
+            "A etiqueta continua em “Viagem”. A página parou.",
+            keptTagMessage(listOf(map("Viagem") to stopped(portuguese)), portuguese, readOnly = false),
+        )
+    }
+
+    @Test
+    fun `a map the page couldn't rename, tag or duplicate says what didn't happen, then why`() {
+        assertEquals(
+            "Orbit couldn’t rename the map. This device's WebView is too old to draw maps. Update it from your app store.",
+            notMadeMessage(R.string.home_map_not_renamed, tooOld(english), english),
+        )
+        assertEquals("Orbit couldn’t change the map’s tags. The page stopped.", notMadeMessage(R.string.home_map_tags_not_changed, stopped(english), english))
+        assertEquals("Orbit couldn’t duplicate the map. The page stopped.", notMadeMessage(R.string.home_map_not_copied, stopped(english), english))
+        assertEquals(
+            "Orbit no pudo duplicar el mapa. El WebView de este dispositivo es demasiado antiguo para dibujar mapas. Actualízalo desde tu tienda de apps.",
+            notMadeMessage(R.string.home_map_not_copied, tooOld(spanish), spanish),
+        )
+        assertEquals("O Orbit não conseguiu renomear o mapa. A página parou.", notMadeMessage(R.string.home_map_not_renamed, stopped(portuguese), portuguese))
     }
 }

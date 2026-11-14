@@ -32,21 +32,24 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.hyuchia.orbit.R
+import com.hyuchia.orbit.data.AsTheyAreFiles
 import com.hyuchia.orbit.data.MediaSummary
 import com.hyuchia.orbit.data.Uncleaned
+import com.hyuchia.orbit.privacy.privateSheetProperties
 import com.hyuchia.orbit.rememberWords
+import com.hyuchia.orbit.ui.AsTheyAre
 import com.hyuchia.orbit.ui.EscapeCloses
 import com.hyuchia.orbit.ui.MediaWords
 import com.hyuchia.orbit.ui.WhatGoes
-import com.hyuchia.orbit.ui.rememberAsTheyAre
 
 /**
  * Before a map with pictures, videos or audio goes to Android's share sheet:
  * what goes with it, and the choice of sending just its text, a markdown
  * file, or a YAML one for a map whose text is YAML (`yaml`). All its own
  * files are `media`; the zip carries those that go `clean`, and asks before
- * it carries those that can't (`uncleaned`) as they are. `onShare` says
- * which way, with its files or not, and those of them that go as they are.
+ * it carries those that can't (`uncleaned`) as they are, with `asTheyAre`,
+ * whose questions show where it was made. `onShare` says which way, with its
+ * files or not, and those of them that go as they are.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,14 +58,15 @@ fun ShareMapSheet(
     media: MediaSummary,
     clean: MediaSummary,
     uncleaned: Uncleaned,
-    onShare: (withFiles: Boolean, asTheyAre: Set<String>) -> Unit,
+    asTheyAre: AsTheyAre,
+    onShare: (withFiles: Boolean, asTheyAre: AsTheyAreFiles) -> Unit,
     onDismiss: () -> Unit,
     yaml: Boolean = false,
 ) {
     val words = rememberWords()
-    val asTheyAre = rememberAsTheyAre()
 
     ModalBottomSheet(
+        properties = privateSheetProperties(),
         onDismissRequest = onDismiss,
         sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)),
     ) {
@@ -91,14 +95,14 @@ fun ShareMapSheet(
                 ),
                 container = MaterialTheme.colorScheme.primaryContainer,
                 content = MaterialTheme.colorScheme.onPrimaryContainer,
-            ) { asTheyAre.then(uncleaned) { names -> onShare(true, names) } }
+            ) { asTheyAre.then(uncleaned) { files -> onShare(true, files) } }
             ShareChoice(
                 icon = Icons.Outlined.Description,
                 headline = stringResource(R.string.sharing_just_the_text),
                 supporting = listOfNotNull(stringResource(if (yaml) R.string.sharing_yaml_file else R.string.sharing_markdown_file), MediaWords.staysHere(media, words)),
                 container = MaterialTheme.colorScheme.surfaceContainerHigh,
                 content = MaterialTheme.colorScheme.onSurface,
-            ) { onShare(false, emptySet()) }
+            ) { onShare(false, AsTheyAreFiles.NONE) }
 
             if (clean.pictures > 0 || clean.videos > 0 || clean.audio > 0) {
                 WhatGoes(

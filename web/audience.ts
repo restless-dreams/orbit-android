@@ -191,33 +191,48 @@ export const playWithSound = (): void => {
   }
 };
 
+/**
+ * A new map, in place of the one on screen. What it needs is read first: a
+ * command that can't be followed, as one malformed or cut short on its way,
+ * leaves the map on screen as it was.
+ */
 const show = (command: Extract<AudienceCommand, { type: 'show' }>): void => {
+  // As it came, from a TV's channel say, rather than as it should be.
+  const sent = command as { markdown?: unknown; theme?: unknown; focus?: unknown };
+
+  if (typeof sent.markdown !== 'string' || typeof sent.theme !== 'object' || sent.theme === null || (sent.focus != null && typeof sent.focus !== 'string')) {
+    throw new TypeError('A map to show needs its markdown and the app\'s colors');
+  }
+
+  const focus = command.focus;
+  const parsed = parseOrbit(command.markdown, { untitled: pageWords().untitledMap });
+  const style = knownStyle(parsed.options.theme);
+  const dark = style ? isDark(themeTokens(style).surface) : command.theme.dark;
+  const colors = themeOption(command.theme, style);
   end();
-  baseUrl = command.baseUrl ?? undefined;
+  baseUrl = typeof command.baseUrl === 'string' ? command.baseUrl : undefined;
   captionsOn = command.captions ?? true;
   tallestCaption = 0;
   captionsBegun = false;
-  const parsed = parseOrbit(command.markdown, { untitled: pageWords().untitledMap });
-  const style = knownStyle(parsed.options.theme);
-  page.classList.toggle('audience--dark', style ? isDark(themeTokens(style).surface) : command.theme.dark);
+  page.classList.toggle('audience--dark', dark);
   map = createOrbitMap(mapElement, parsed, {
     interactive: false,
     showControls: false,
     showActionButtons: false,
     showDetailSheet: false,
-    focus: command.focus ?? undefined,
+    focus: focus ?? undefined,
     view: 'focus',
     baseUrl,
-    theme: themeOption(command.theme, style),
+    theme: colors,
     nodeTypes: nodeTypes(),
     nodeTypeFor: nodeTypeFor(() => automaticRings(parsed)),
     onMediaState: mediaState,
   });
   page.classList.add('audience--showing');
-  destination = command.focus ?? null;
+  destination = focus ?? null;
 
-  if (command.focus) {
-    fillCaption(command.focus);
+  if (focus) {
+    fillCaption(focus);
   }
 
   layout();
@@ -255,6 +270,9 @@ const step = (id: string, index: number, total: number): void => {
 
 const end = (): void => {
   closeMedia();
+  // A caption on its way for the map that goes never comes: the next map's own shows.
+  swap += 1;
+  caption.classList.remove('audience__caption--swapping');
   map?.destroy();
   map = null;
   destination = null;
@@ -311,7 +329,9 @@ const playback = (playing: boolean): void => {
     return;
   }
 
-  reckoned = { at: presenterTime(), since: performance.now() };
+  // Played at its end, the video starts over, as the phone reckons it does (present/ShownMedia.kt) and as a video
+  // played at its end does in a browser: the clock goes on from there, never from the end of the time before.
+  reckoned = { at: playing && atEnd() ? 0 : presenterTime(), since: performance.now() };
   shown = { ...shown, playing };
 
   if (playing) {
@@ -329,6 +349,19 @@ const seek = (at: number): void => {
   }
 
   reckoned = { at, since: performance.now() };
+
+  // A poster in the video's place has nothing to move.
+  if (!still.hidden) {
+    return;
+  }
+
+  // Until the video knows its length, Orbit's player would put it back where it opened as it does: it opens again
+  // from here instead.
+  if (lastState?.duration == null) {
+    map.openMedia(shown.id, { kind: 'video', autoplay: shown.playing, startAt: at > 0 ? at : undefined });
+    return;
+  }
+
   map.seekMedia(at);
 };
 
@@ -344,10 +377,29 @@ const closeMedia = (): void => {
   tellWatchers();
 };
 
-/** Where the presenter's video is now, in seconds, from the commands this page heard. */
+/** Where the presenter's video is now, in seconds, from the commands this page heard: never past its end, once its length is known. */
 const presenterTime = (): number => {
+  const length = videoLength();
+  const time = reckonedTime();
+  return length === null ? time : Math.min(time, length);
+};
+
+/** Where the commands this page heard put the presenter's video now, in seconds, its end aside. */
+const reckonedTime = (): number => {
   const played = shown?.playing ? (performance.now() - reckoned.since) / 1000 : 0;
   return Math.max(0, reckoned.at + played);
+};
+
+/** Whether the presenter's video is at its end: this page's ended, or the time it plays for has run out. */
+const atEnd = (): boolean => {
+  const length = videoLength();
+  return lastState?.ended === true || (length !== null && reckonedTime() >= length);
+};
+
+/** How long the video is, in seconds, once this page knows. */
+const videoLength = (): number | null => {
+  const length = lastState?.duration;
+  return length != null && Number.isFinite(length) && length > 0 ? length : null;
 };
 
 const mediaState = (state: OrbitMediaState): void => {

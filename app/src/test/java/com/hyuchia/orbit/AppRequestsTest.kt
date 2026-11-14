@@ -102,6 +102,21 @@ class AppRequestsTest {
     }
 
     @Test
+    fun textAloneSharedToAttachToAnIdeaJoinsItAsText() {
+        // Android offers "Attach to an Orbit idea" for any share, a browser's page included: text, and its subject.
+        val attach = Intent(Intent.ACTION_SEND).setClassName(context, "com.hyuchia.orbit.AttachFiles")
+        val page = Intent(attach).putExtra(Intent.EXTRA_TEXT, "https://example.com/lisbon").putExtra(Intent.EXTRA_SUBJECT, "Lisbon in three days")
+
+        assertEquals(AppRequest.AttachText("https://example.com/lisbon", "Lisbon in three days"), appRequestOf(context, page))
+        assertEquals(AppRequest.AttachText("Call the hotel", null), appRequestOf(context, Intent(attach).putExtra(Intent.EXTRA_TEXT, "Call the hotel")))
+        // A file shared there is the file, with text or not.
+        assertEquals(AppRequest.AttachFiles(listOf(file)), appRequestOf(context, Intent(attach).putExtra(Intent.EXTRA_STREAM, file).putExtra(Intent.EXTRA_TEXT, "Trip")))
+        // Neither, or only blanks: nothing.
+        assertNull(appRequestOf(context, attach))
+        assertNull(appRequestOf(context, Intent(attach).putExtra(Intent.EXTRA_TEXT, "  ")))
+    }
+
+    @Test
     fun anythingElseAsksNothing() {
         assertNull(appRequestOf(context, null))
         assertNull(appRequestOf(context, Intent()))

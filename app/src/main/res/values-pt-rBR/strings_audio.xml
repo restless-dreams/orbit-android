@@ -54,10 +54,12 @@
     <string name="audio_needs_the_microphone">O Orbit precisa do microfone para gravar uma nota de voz. Você pode permitir o acesso nas Configurações.</string>
     <string name="audio_no_microphone">Este dispositivo não tem um microfone que o Orbit possa usar para gravar.</string>
     <string name="audio_recording_failed">A gravação parou. Talvez outro app esteja usando o microfone.</string>
+    <string name="audio_sound_is_taken">O Orbit não pode gravar durante uma ligação nem enquanto outro app ocupa o som. Tente de novo quando terminar.</string>
     <string name="audio_longest_memo">Uma nota de voz não pode ser mais longa que isso, então a gravação parou aí.</string>
     <string name="audio_map_room_reached">Esse é todo o espaço que ainda resta neste mapa, então a gravação parou aí.</string>
     <string name="audio_map_full">As imagens, os vídeos e os áudios deste mapa somam %1$s, tudo o que um mapa pode levar em um compartilhamento ou backup. Remova algum deles para abrir espaço para uma nota de voz.</string>
     <string name="audio_memo_saved">Nota de voz salva em %1$s</string>
+    <string name="audio_memo_idea_gone">A nota de voz não foi salva: a ideia dela não existe mais</string>
     <string name="audio_ready_to_save">Pronta para salvar</string>
 
     <!-- Áudios que um mapa não aceita -->

@@ -38,6 +38,7 @@
     <string name="data_yaml_unreadable">Orbit no pudo leer todo ese YAML, así que no hizo un mapa con él: %1$s</string>
     <string name="data_yaml_unreadable_at_line">Orbit no pudo leer todo ese YAML, así que no hizo un mapa con él: %1$s (línea %2$d)</string>
     <string name="data_newer_version_keeps_maps">Una versión más reciente de Orbit guarda estos mapas: actualiza Orbit para cambiarlos.</string>
+    <string name="data_map_changed_since_answered">Este mapa cambió después de que respondiste, así que no se actualizó. Responde de nuevo.</string>
     <string name="data_could_not_add_map">Orbit no pudo agregar el mapa. ¿Está lleno el almacenamiento de este dispositivo?</string>
     <string name="data_could_not_change_map">Orbit no pudo cambiar el mapa.</string>
     <string name="data_could_not_save_change">Orbit no pudo guardar ese cambio. ¿Está lleno el almacenamiento de este dispositivo?</string>
@@ -59,6 +60,16 @@
         <item quantity="one">Una carpeta de ese archivo zip no tenía ningún mapa, así que se dejó fuera.</item>
         <item quantity="many">%1$d carpetas de ese archivo zip no tenían ningún mapa, así que se dejaron fuera.</item>
         <item quantity="other">%1$d carpetas de ese archivo zip no tenían ningún mapa, así que se dejaron fuera.</item>
+    </plurals>
+    <plurals name="data_zip_files_past_map_room">
+        <item quantity="one">Un archivo habría hecho que su mapa pasara del máximo de %2$s que puede llevar un mapa, así que se quedó en el archivo zip.</item>
+        <item quantity="many">%1$d archivos habrían hecho que sus mapas pasaran del máximo de %2$s que puede llevar un mapa, así que se quedaron en el archivo zip.</item>
+        <item quantity="other">%1$d archivos habrían hecho que sus mapas pasaran del máximo de %2$s que puede llevar un mapa, así que se quedaron en el archivo zip.</item>
+    </plurals>
+    <plurals name="data_zip_files_stayed_private">
+        <item quantity="one">Una versión o un archivo se quedó en el archivo zip: es de un mapa que allí es privado y aquí no.</item>
+        <item quantity="many">%1$d versiones o archivos se quedaron en el archivo zip: son de mapas que allí son privados y aquí no.</item>
+        <item quantity="other">%1$d versiones o archivos se quedaron en el archivo zip: son de mapas que allí son privados y aquí no.</item>
     </plurals>
 
     <!-- Imágenes y videos que un mapa no admite -->

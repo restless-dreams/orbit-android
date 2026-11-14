@@ -130,6 +130,15 @@ fun carriedNames(text: String): List<String> {
     return (media + files).distinct()
 }
 
+/**
+ * The names of the map's own files that go with it to other people, in a
+ * shared zip, sending, a web page or a room's browsers: those it carries
+ * ([carriedNames]), but those its text names only in code, which the map
+ * shows as words ([MediaNames.withoutCode]). The map keeps them all here,
+ * and its backups and the folder maps are kept in take them all.
+ */
+fun sharedNames(text: String): List<String> = carriedNames(MediaNames.withoutCode(text))
+
 /** Whether a name in a map's media folder is one the map carries, by its kind or as one of its ideas' files: see [carriedNames]. */
 internal fun isCarriedName(name: String, fileNames: Collection<String>): Boolean = isMediaName(name) || (name in fileNames && MediaNames.NAME.matches(name))
 
@@ -256,7 +265,7 @@ private fun fileValues(text: String): List<IntRange> {
         return valuesIn(yamlKeys(lines), startsOf(lines, 0), text, text.length)
     }
 
-    return OrbitAttributes.findAll(text).flatMap { attributes ->
+    return orbitAttributes(text).flatMap { attributes ->
         val content = attributes.groups[1] ?: return@flatMap emptyList()
         val lines = content.value.split('\n')
         valuesIn(lines, startsOf(lines, content.range.first), text, content.range.last + 1)

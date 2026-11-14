@@ -449,9 +449,18 @@ sealed interface MapCommand {
     /**
      * `changes` holds the attributes to set; `null` removes one. Its `attrs`
      * are merged into the node's custom attributes, where `null` removes one.
+     * With `onto`, it's made only while the node's picture, video, sound or
+     * page each of its keys names is still the file it gives (its `src`;
+     * null for none), as a live photo's motion goes only onto the picture it
+     * was taken with: the page leaves it otherwise. With `job`, the app
+     * waits to hear what came of it, and the page answers: true once the
+     * idea took the change, its save posted first; false when the map has
+     * no idea `id` now (removed, or renamed, meanwhile), `onto` no longer
+     * holds, or the map can't be changed now; Orbit's reason, as an error,
+     * when it declined the change.
      */
     @Serializable @SerialName("update")
-    data class Update(val id: String, val changes: JsonObject) : MapCommand
+    data class Update(val id: String, val changes: JsonObject, val onto: Map<String, String?>? = null, val job: Int? = null) : MapCommand
 
     /**
      * Adds `amount` to goal `id`'s current number, or takes it off when it's
@@ -472,10 +481,12 @@ sealed interface MapCommand {
     /**
      * Adds `files` to idea `id`'s, after the ones it has. The page adds them
      * to the files it has now, so files added one after another all stay, and
-     * one it has already, by its address, isn't added again.
+     * one it has already, by its address, isn't added again. With `job`, the
+     * page answers it as it does an [Update]'s: true once the idea has them
+     * all, false when the map has no idea `id` now.
      */
     @Serializable @SerialName("addFiles")
-    data class AddFiles(val id: String, val files: List<MapFile>) : MapCommand
+    data class AddFiles(val id: String, val files: List<MapFile>, val job: Int? = null) : MapCommand
 
     /** Takes the file at `src` off idea `id`, its other files as they are. */
     @Serializable @SerialName("removeFile")
@@ -589,10 +600,13 @@ sealed interface MapCommand {
      * Adds the ideas in `text` to a map's text, under `parentId` or its top:
      * a line each, nested as pasting nests them, a long one named by its
      * start and kept whole as its note. Answers with the text as Orbit writes
-     * it. Fails for a map Orbit can't read all of, or one a newer Orbit made.
+     * it, or with `markdown` as it was when Orbit reads no idea in `text`.
+     * Fails for a map Orbit can't read all of, or one a newer Orbit made.
+     * `baseUrl` is where the map's pictures are, which the page's own drawing
+     * of it, out of sight, asks for there and nowhere else.
      */
     @Serializable @SerialName("addIdeas")
-    data class AddIdeas(val job: Int, val markdown: String, val text: String, val parentId: String? = null) : MapCommand
+    data class AddIdeas(val job: Int, val markdown: String, val text: String, val parentId: String? = null, val baseUrl: String? = null) : MapCommand
 
     /**
      * A map's text with a new `title` or new `tags`, or both (null leaves

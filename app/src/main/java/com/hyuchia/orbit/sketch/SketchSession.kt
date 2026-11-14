@@ -27,8 +27,12 @@ enum class TouchTool {
 
 /** A touch on the canvas, as the screen hands it on, in sketch units. */
 sealed interface SketchTouch {
-    /** A pointer touched down. `palm` says the screen took it for one (its contact too big for a finger). */
-    data class Down(val pointer: Int, val tool: TouchTool, val sample: InkSample, val palm: Boolean = false) : SketchTouch
+    /**
+     * A pointer touched down. `palm` says the screen took it for one (its
+     * contact too big for a finger). `first` says no other is down: one the
+     * session still has down was let go where it didn't see.
+     */
+    data class Down(val pointer: Int, val tool: TouchTool, val sample: InkSample, val palm: Boolean = false, val first: Boolean = false) : SketchTouch
 
     /** A pointer moved through `samples`, oldest first, and is `predicted` to go on through those. */
     data class Move(val pointer: Int, val samples: List<InkSample>, val predicted: List<InkSample> = emptyList()) : SketchTouch
@@ -122,6 +126,11 @@ class SketchSession(
         val sample = touch.sample
         val stylus = touch.tool == TouchTool.Stylus || touch.tool == TouchTool.StylusEraser
 
+        // Nothing else is down: a stroke still going was let go unseen, as while the canvas took no touches. It's kept as drawn.
+        if (touch.first) {
+            finishInk()
+        }
+
         if (stylus) {
             // Near until it lifts: if it draws nothing here, as off the paper, for a moment at least.
             stylusNearUntil = maxOf(stylusNearUntil, sample.time + STYLUS_GRACE)
@@ -194,6 +203,17 @@ class SketchSession(
                 record(current.before)
             }
         }
+    }
+
+    /**
+     * Keeps the stroke being drawn as it is, as if its pointer were let go
+     * where it last was, and what the eraser took so far: before the drawing
+     * changes hands, as Done or closing take it while a pointer is still
+     * down. That pointer draws nothing more, and the next stroke can start.
+     */
+    fun finishInk() {
+        val current = active ?: return
+        up(SketchTouch.Up(current.pointer, null))
     }
 
     /** The stroke being drawn goes, and what an eraser took comes back. */

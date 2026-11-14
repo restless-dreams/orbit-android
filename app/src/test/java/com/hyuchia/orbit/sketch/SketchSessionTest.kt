@@ -194,6 +194,53 @@ class SketchSessionTest {
     }
 
     @Test
+    fun `a stroke still being drawn as the drawing changes hands is kept as drawn, and its pointer draws no more`() {
+        val sketching = session()
+        sketching.draw(200f to 500f, 800f to 500f, lift = false)
+
+        sketching.finishInk()
+        assertEquals(1, sketching.strokes.size)
+        assertNull(sketching.ink)
+        assertTrue(sketching.canUndo)
+
+        // The finger that drew it moves on, and lifts: nothing more comes of it.
+        sketching.touch(SketchTouch.Move(0, listOf(sample(900f, 900f, 400))))
+        sketching.touch(SketchTouch.Up(0, sample(900f, 900f, 420)))
+        assertEquals(1, sketching.strokes.size)
+
+        // The next stroke draws.
+        sketching.draw(200f to 300f, 800f to 300f, start = 1_000)
+        assertEquals(2, sketching.strokes.size)
+    }
+
+    @Test
+    fun `a sweep of the eraser still going as the drawing changes hands is one step undo takes back`() {
+        val sketching = session()
+        sketching.draw(200f to 500f, 800f to 500f)
+        sketching.erasing = true
+        sketching.draw(500f to 300f, 500f to 700f, start = 1_000, lift = false)
+        assertEquals(0, sketching.strokes.size)
+
+        sketching.finishInk()
+        assertNull(sketching.ink)
+        sketching.undo()
+        assertEquals(1, sketching.strokes.size)
+    }
+
+    @Test
+    fun `a stroke let go where the session didn't see doesn't keep the next one from drawing`() {
+        val sketching = session()
+        // Its finger lifted while the canvas took no touches: the session still has it down.
+        sketching.draw(200f to 500f, 800f to 500f, lift = false)
+
+        // The next touch is the first down: the one before was let go, and is kept as drawn.
+        sketching.touch(SketchTouch.Down(3, TouchTool.Finger, sample(200f, 300f, 1_000), first = true))
+        sketching.touch(SketchTouch.Move(3, (1..20).map { step -> sample(200f + step * 30f, 300f, 1_000 + step * 8L) }))
+        sketching.touch(SketchTouch.Up(3, sample(800f, 300f, 1_200)))
+        assertEquals(2, sketching.strokes.size)
+    }
+
+    @Test
     fun `undo goes back a hundred changes`() {
         val sketching = session()
 

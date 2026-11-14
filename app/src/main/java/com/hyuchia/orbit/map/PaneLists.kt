@@ -6,12 +6,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -29,8 +32,16 @@ private const val SETTLED_MILLISECONDS = 250L
  * list first measured during that pass goes on measuring only the rows it
  * had then: it scrolls to their edge and no further, by touch, wheel or keys
  * (Compose 1.12, Material 3 adaptive 1.3). One made once the panes are still
- * gets no lookahead pass and scrolls as any other, so the list is made again
- * then, at the same place: [list] is a new state, and the list is keyed on it.
+ * scrolls as any other, so the list is made again then, at the same place:
+ * [list] is a new state, and the list is keyed on it.
+ *
+ * Every list in the scaffold is measured in a lookahead pass first, the one
+ * made again too, and again each time its rows change (results as a search
+ * is typed, the outline as the map changes). Those passes measure it as it
+ * already is on screen, so only a pass that measures it otherwise counts as
+ * the panes moving: counting them all made the list again every quarter
+ * second for as long as the panel was open, which took TalkBack's place in
+ * it, and the keyboard's.
  */
 @Stable
 class PaneListState internal constructor(list: LazyListState = LazyListState()) {
@@ -43,6 +54,9 @@ class PaneListState internal constructor(list: LazyListState = LazyListState()) 
      * move. The first comes before anything listens, so it waits to be heard.
      */
     internal val lookahead = Channel<Unit>(Channel.CONFLATED)
+
+    /** How the list was last measured on screen, which a lookahead pass that isn't the panes moving measures it as. */
+    internal var onScreen: Constraints? = null
 
     internal fun startAfresh() {
         list = LazyListState(list.firstVisibleItemIndex, list.firstVisibleItemScrollOffset)
@@ -61,20 +75,61 @@ class PaneListState internal constructor(list: LazyListState = LazyListState()) 
 @Composable
 fun rememberPaneListState(): PaneListState {
     val state = rememberSaveable(saver = PaneListState.Saver) { PaneListState() }
+    StartsAfreshOnceStill(state)
+    return state
+}
 
+/**
+ * Where a list in a panel is, kept above the panel ([rememberPaneListState]):
+ * the first row in view, and how far into it. A panel moves between a sheet
+ * over the map and the map's side as a phone or tablet turns, and its list is
+ * made anew there: made from this, it starts where the last one was. The list
+ * writes it as it scrolls, and nothing is drawn again for that.
+ */
+class ListPlace(index: Int = 0, offset: Int = 0) {
+    var index = index
+        internal set
+
+    var offset = offset
+        internal set
+}
+
+/** A [PaneListState] that starts at `place`, and keeps it where the list is. */
+@Composable
+fun rememberPaneListState(place: ListPlace): PaneListState {
+    val state = remember(place) { PaneListState(LazyListState(place.index, place.offset)) }
+
+    LaunchedEffect(state) {
+        snapshotFlow { state.list.firstVisibleItemIndex to state.list.firstVisibleItemScrollOffset }.collect { (index, offset) ->
+            place.index = index
+            place.offset = offset
+        }
+    }
+
+    StartsAfreshOnceStill(state)
+    return state
+}
+
+/** Makes [state]'s list again once the panes around it stop moving (see [PaneListState]). */
+@Composable
+private fun StartsAfreshOnceStill(state: PaneListState) {
     LaunchedEffect(state) {
         state.lookahead.receiveAsFlow().collectLatest {
             delay(SETTLED_MILLISECONDS)
             state.startAfresh()
         }
     }
-
-    return state
 }
 
-/** Tells [state] each time the list is measured in a lookahead pass, as the panes around it move. */
+/**
+ * Tells [state] each time the list is measured in a lookahead pass as the
+ * panes around it move: one that measures it otherwise than on screen now,
+ * or before it's been on screen.
+ */
 fun Modifier.paneList(state: PaneListState): Modifier = layout { measurable, constraints ->
-    if (isLookingAhead) {
+    if (!isLookingAhead) {
+        state.onScreen = constraints
+    } else if (constraints != state.onScreen) {
         state.lookahead.trySend(Unit)
     }
 

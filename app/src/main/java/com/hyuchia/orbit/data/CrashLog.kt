@@ -4,6 +4,7 @@ import java.io.File
 import java.io.FileDescriptor
 import java.io.FileOutputStream
 import java.io.PrintStream
+import java.nio.file.FileAlreadyExistsException
 import java.time.Instant
 import java.util.IdentityHashMap
 import kotlin.system.exitProcess
@@ -29,10 +30,45 @@ private val QUOTING = listOf("kotlinx.serialization.", "java.util.regex.")
 private val ADDRESS = Regex("""\b[A-Za-z][A-Za-z0-9+.-]*://\S+""")
 /** Paths to files: /data/user/0/…/maps/trip/map.md. */
 private val PATH = Regex("""(?:/[^\s/:'"“”]+){2,}/?""")
-/** Text in double, curly or single quotes: a title, a line of a map. An apostrophe inside a word, as in "can't", isn't one. */
-private val QUOTED = Regex(""""[^"]*"|“[^”]*”|«[^»]*»|‘[^’]*’|(?<![\p{L}\p{N}])'[^'\n]*'(?![\p{L}\p{N}])""")
+/** An apostrophe inside a word, as in "can't", "it's" or "Ana's": not a quote, unlike any other single quote mark. */
+private const val APOSTROPHE = """(?<=[\p{L}\p{N}])'(?i:t|s|d|m|ll|re|ve)(?![\p{L}\p{N}])"""
 
-/** A crash kept on the phone: when it was, and its report. */
+/** A single quote mark that isn't such an apostrophe, wherever it is: right after a letter too, as in x'Ana's diary'. */
+private const val SINGLE_QUOTE = """(?!$APOSTROPHE)'"""
+
+/**
+ * Quoted text, a title or a line of a map, in any of the quotes messages
+ * use: double, curly, low („…“), angled, corner, backticks or single. Each
+ * runs from its opening mark to the last closing one after it, across
+ * lines, as what's quoted can have quotes and line breaks of its own
+ * ('Ana's notes'), or to the end when none closes it, as a message cut
+ * short. When in doubt it takes more, never less: two quotes and the words
+ * between them go as one.
+ */
+private val QUOTED = Regex(
+    listOf(
+        """"[\s\S]*"""",
+        """“[\s\S]*”""",
+        """„[\s\S]*[“”]""",
+        """«[\s\S]*»""",
+        """‹[\s\S]*›""",
+        """‘[\s\S]*’""",
+        """「[\s\S]*」""",
+        """『[\s\S]*』""",
+        """`[\s\S]*`""",
+        """$SINGLE_QUOTE[\s\S]*$SINGLE_QUOTE""",
+        """(?:["“„«‹‘「『`]|$SINGLE_QUOTE)[\s\S]*""",
+    ).joinToString("|"),
+)
+
+/**
+ * A crash kept on the phone: its place among them, `time`, and its report.
+ * Its place is when it was, in milliseconds since 1970, unless the clock
+ * says that's no later than the latest one's (two crashes in a millisecond,
+ * or a clock set back): then it's just after it, so each one keeps its own
+ * report and the latest is always the last one. Its report says when it
+ * was, by the clock.
+ */
 class CrashReport(val time: Long, val file: File) {
     fun text(): String = file.readText()
 }
@@ -99,11 +135,27 @@ class CrashLog(
             describe(error, masked, this)
         }
 
-        folder.mkdirs()
-        val file = File(folder, "$PREFIX$time$SUFFIX")
-        writeAtomically(file, report)
-        reports().drop(KEPT).forEach { it.file.delete() }
-        return file
+        // Threads that crash at once take their places one after the other.
+        synchronized(this) {
+            folder.mkdirs()
+            // After the latest report, and after the one the home screen showed last, even when that one is gone: never
+            // in an earlier one's place, where it would hide, or take its name and write over it.
+            var place = maxOf(time, (reports().firstOrNull()?.time ?: Long.MIN_VALUE) + 1, seen() + 1)
+
+            while (true) {
+                val file = File(folder, "$PREFIX$place$SUFFIX")
+
+                try {
+                    writeNew(file) { output -> output.write(report.toByteArray()) }
+                } catch (taken: FileAlreadyExistsException) {
+                    place += 1
+                    continue
+                }
+
+                reports().drop(KEPT).forEach { it.file.delete() }
+                return file
+            }
+        }
     }
 
     /** The reports kept, the latest first. */
@@ -113,11 +165,10 @@ class CrashLog(
             .sortedByDescending { it.time }
 
     /** The latest crash, unless the home screen showed it already. */
-    fun unseen(): CrashReport? {
-        val latest = reports().firstOrNull() ?: return null
-        val seen = runCatching { File(folder, SEEN).readText().trim().toLong() }.getOrDefault(0L)
-        return latest.takeIf { it.time > seen }
-    }
+    fun unseen(): CrashReport? = reports().firstOrNull()?.takeIf { it.time > seen() }
+
+    /** The place of the latest report the home screen showed, or 0 before it showed any. */
+    private fun seen(): Long = runCatching { File(folder, SEEN).readText().trim().toLong() }.getOrDefault(0L)
 
     /** The home screen showed `report`: it isn't offered again. */
     fun markSeen(report: CrashReport) {
@@ -125,9 +176,15 @@ class CrashLog(
         writeAtomically(File(folder, SEEN), report.time.toString())
     }
 
-    fun delete(report: CrashReport) {
-        markSeen(report)
-        report.file.delete()
+    /** Deletes `report`, which isn't offered again; false when it couldn't be deleted, and stays offered as it was. */
+    fun delete(report: CrashReport): Boolean {
+        if (!report.file.delete() && report.file.exists()) {
+            return false
+        }
+
+        // It's gone: an older one the home screen never showed isn't offered in its place, where the phone can keep that.
+        runCatching { markSeen(report) }
+        return true
     }
 
     private fun describe(error: Throwable, masked: Collection<String>, report: StringBuilder) {

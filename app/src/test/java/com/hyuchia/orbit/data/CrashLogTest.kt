@@ -162,4 +162,132 @@ class CrashLogTest {
             Thread.setDefaultUncaughtExceptionHandler(before)
         }
     }
+
+    @Test
+    fun `quoted text goes whole, with apostrophes and line breaks of its own, or with no quote to close it`() {
+        assertEquals("Couldn't read \"…\"", CrashLog.maskMessage("Couldn't read 'Alice's diary: the lawyer'", emptyList()))
+        assertEquals("Couldn't read \"…\"", CrashLog.maskMessage("Couldn't read 'first line\nsecond line'", emptyList()))
+        assertEquals("Couldn't read \"…\" at 3", CrashLog.maskMessage("Couldn't read 'James' notes' at 3", emptyList()))
+        assertEquals("Couldn't read \"…\"", CrashLog.maskMessage("Couldn't read \"She said \"call\" twice\"", emptyList()))
+        assertEquals("Couldn't read \"…\"", CrashLog.maskMessage("Couldn't read ‘Ana’s list’", emptyList()))
+        // A message cut short, its quote never closed: what follows it goes.
+        assertEquals("Couldn't read \"…\"", CrashLog.maskMessage("Couldn't read 'Call the lawyer", emptyList()))
+        assertEquals("Couldn't read \"…\"", CrashLog.maskMessage("Couldn't read “Call the\nlawyer", emptyList()))
+        // Every other kind of quote, and a single quote right after a letter, which only an apostrophe in a word would be.
+        assertEquals("Couldn't read x\"…\"", CrashLog.maskMessage("Couldn't read x'Ana's diary'", emptyList()))
+        assertEquals("Couldn't read 3\"…\" at 4", CrashLog.maskMessage("Couldn't read 3'Ana' at 4", emptyList()))
+        assertEquals("Couldn't read \"…\" at 4", CrashLog.maskMessage("Couldn't read ‹Ana's list› at 4", emptyList()))
+        assertEquals("Couldn't read \"…\" at 4", CrashLog.maskMessage("Couldn't read `Ana's list` at 4", emptyList()))
+        assertEquals("Couldn't read \"…\" at 4", CrashLog.maskMessage("Couldn't read 「アナの日記」 at 4", emptyList()))
+        assertEquals("Couldn't read \"…\" at 4", CrashLog.maskMessage("Couldn't read 『アナの日記』 at 4", emptyList()))
+        assertEquals("Couldn't read \"…\" at 4", CrashLog.maskMessage("Couldn't read „Annas Tagebuch“ at 4", emptyList()))
+        assertEquals("Couldn't read \"…\" at 4", CrashLog.maskMessage("Couldn't read „Dziennik Anny” at 4", emptyList()))
+        assertEquals("Couldn't read \"…\"", CrashLog.maskMessage("Couldn't read `Ana's list", emptyList()))
+        // Apostrophes inside words, and quotes that close, leave the rest as it was.
+        assertEquals("Can't read \"…\" or \"…\": it isn't there", CrashLog.maskMessage("Can't read 'a' or \"b\": it isn't there", emptyList()))
+    }
+
+    @Test
+    fun `quoted text with apostrophes and line breaks reaches neither the report nor Android`() {
+        val before = Thread.getDefaultUncaughtExceptionHandler()
+        val passed = mutableListOf<Throwable>()
+        Thread.setDefaultUncaughtExceptionHandler { _, error -> passed += error }
+
+        try {
+            log.install()
+            val crashes = Thread.getDefaultUncaughtExceptionHandler()!!
+            val cause = IOException("Couldn't read 'the codicil\nand its secret'")
+            crashes.uncaughtException(Thread.currentThread(), IllegalStateException("Couldn't open 'Alice's diary: the will'", cause))
+
+            val report = log.reports().single().text()
+            val printed = StringWriter().also { passed.single().printStackTrace(PrintWriter(it)) }.toString()
+
+            for (said in listOf(report, printed)) {
+                assertTrue(said.contains("java.lang.IllegalStateException: Couldn't open \"…\"\n"))
+                assertTrue(said.contains("Caused by: java.io.IOException: Couldn't read \"…\"\n"))
+                assertFalse(said.contains("diary"))
+                assertFalse(said.contains("codicil"))
+                assertFalse(said.contains("secret"))
+            }
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(before)
+        }
+    }
+
+    @Test
+    fun `a report that won't delete stays offered, and its card with it`() {
+        log.record("main", IllegalStateException("broken"))
+        val report = log.unseen()!!
+
+        // Storage that fails, or a file that won't go.
+        val undeletable = object : File(report.file.path) {
+            override fun delete(): Boolean = false
+        }
+
+        assertFalse(log.delete(CrashReport(report.time, undeletable)))
+        assertTrue(report.file.exists())
+        assertEquals(report.time, log.unseen()?.time)
+
+        assertTrue(log.delete(report))
+        assertNull(log.unseen())
+        assertFalse(report.file.exists())
+    }
+
+    @Test
+    fun `crashes in the same millisecond keep a report each, the latest last`() {
+        val first = log.record("main", IllegalStateException("first"))
+        val second = log.record("worker", IllegalStateException("second"))
+
+        assertEquals(listOf(second, first), log.reports().map { it.file })
+        assertTrue(first.readText().contains("IllegalStateException: first\n"))
+        assertTrue(second.readText().contains("IllegalStateException: second\n"))
+        // Both say when they were, by the clock.
+        assertTrue(second.readText().contains("Time: 2025-10-09T08:53:20Z\n"))
+        assertEquals(second, log.unseen()?.file)
+    }
+
+    @Test
+    fun `a crash after the clock went back is offered, and kept over the earlier ones`() {
+        repeat(KEPT_REPORTS) {
+            now += 1_000
+            log.record("main", IllegalStateException("before"))
+        }
+
+        log.markSeen(log.unseen()!!)
+        // Set back a day, by hand or by the network.
+        now -= 86_400_000L
+        val after = log.record("main", IllegalStateException("after the clock went back"))
+
+        assertEquals(after, log.unseen()?.file)
+        assertEquals(after, log.reports().first().file)
+        assertEquals(KEPT_REPORTS, log.reports().size)
+        assertTrue(after.readText().contains("Time: 2025-10-08T08:53:25Z\n"))
+
+        // Deleted, it isn't offered, and the next crash comes after it all the same.
+        log.delete(log.unseen()!!)
+        now -= 1_000
+        val next = log.record("main", IllegalStateException("again"))
+
+        assertEquals(next, log.unseen()?.file)
+    }
+
+    @Test
+    fun `reports earlier versions kept read as they did, and new ones come after them`() {
+        folder.mkdirs()
+        // As every version before this one named them: by the time of the crash.
+        val earlier = File(folder, "crash-1760000005000.txt").apply { writeText("Orbit crash report\nOrbit 0.5.0 (50), release build\n") }
+        File(folder, "seen").writeText("1760000005000")
+
+        assertEquals(listOf(1_760_000_005_000L), log.reports().map { it.time })
+        assertNull(log.unseen())
+
+        val next = log.record("main", IllegalStateException("broken"))
+
+        assertEquals(listOf(next, earlier), log.reports().map { it.file })
+        assertEquals("crash-1760000005001.txt", next.name)
+        assertEquals(next, log.unseen()?.file)
+    }
 }
+
+/** How many reports are kept. */
+private const val KEPT_REPORTS = 5

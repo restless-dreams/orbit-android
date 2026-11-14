@@ -118,6 +118,8 @@ import com.hyuchia.orbit.media.barsOf
 import com.hyuchia.orbit.media.rememberVoiceRecorder
 import com.hyuchia.orbit.media.soundTime
 import com.hyuchia.orbit.page.MapNode
+import com.hyuchia.orbit.privacy.CountsOverTheMap
+import com.hyuchia.orbit.privacy.privateSheetProperties
 import com.hyuchia.orbit.rememberWords
 import com.hyuchia.orbit.theme.LocalAppSettings
 import com.hyuchia.orbit.ui.EscapeCloses
@@ -245,6 +247,7 @@ fun RecorderSheet(model: MapViewModel, node: MapNode, onDismiss: () -> Unit) {
     }
 
     ModalBottomSheet(
+        properties = privateSheetProperties(),
         onDismissRequest = {
             if (holdsTake) {
                 recorder.pause()
@@ -382,19 +385,30 @@ fun RecorderSheet(model: MapViewModel, node: MapNode, onDismiss: () -> Unit) {
     }
 
     if (asking) {
-        AlertDialog(
-            onDismissRequest = { asking = false },
-            title = { Text(stringResource(R.string.audio_discard_title)) },
-            text = { Text(stringResource(R.string.audio_discard_body)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    asking = false
-                    close()
-                }) { Text(stringResource(R.string.audio_discard)) }
+        DiscardTakeDialog(
+            onDiscard = {
+                asking = false
+                close()
             },
-            dismissButton = { TextButton(onClick = { asking = false }) { Text(stringResource(R.string.audio_keep_it)) } },
+            onKeep = { asking = false },
         )
     }
+}
+
+/** Whether to let the take go, as the sheet closes before it's saved. */
+@Composable
+internal fun DiscardTakeDialog(onDiscard: () -> Unit, onKeep: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onKeep,
+        title = {
+            // A window of its own over the map: a lock covers it.
+            CountsOverTheMap()
+            Text(stringResource(R.string.audio_discard_title))
+        },
+        text = { Text(stringResource(R.string.audio_discard_body)) },
+        confirmButton = { TextButton(onClick = onDiscard) { Text(stringResource(R.string.audio_discard)) } },
+        dismissButton = { TextButton(onClick = onKeep) { Text(stringResource(R.string.audio_keep_it)) } },
+    )
 }
 
 /** The take's time, big, and what the recorder is doing, for everyone and for TalkBack. */

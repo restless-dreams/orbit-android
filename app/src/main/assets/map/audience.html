@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Orbit</title>
 <style>
 /* The audience's page: what a second screen, a TV or a shared web page shows while a map is presented. */
@@ -235,6 +235,62 @@ body {
   min-width: 0;
 }
 
+/* A browser in the room finding the phone again says so over the map, which stays as the presenter left it. */
+.audience__status {
+  position: fixed;
+  top: calc(clamp(3px, 0.5vmin, 6px) + var(--audience-margin) / 2);
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  box-sizing: border-box;
+  max-width: calc(100vw - 2 * var(--audience-margin));
+  margin: 0;
+  padding: 0.6em 1.1em;
+  border-radius: 999px;
+  background: var(--audience-card);
+  box-shadow: var(--audience-shadow);
+  color: var(--audience-text);
+  font-size: clamp(14px, 2.2vmin, 28px);
+  line-height: 1.3;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  transform: translateX(-50%);
+}
+
+.audience__status::before {
+  content: "";
+  flex: none;
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  background: var(--audience-accent);
+  animation: audience-looking 1.2s ease-in-out infinite alternate;
+}
+
+/* Without a map, the waiting screen says it in the middle. */
+.audience__status[hidden],
+.audience:not(.audience--showing) .audience__status {
+  display: none;
+}
+
+@keyframes audience-looking {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .audience__status::before {
+    animation: none;
+  }
+}
+
 .audience__idle {
   position: fixed;
   inset: 0;
@@ -396,6 +452,7 @@ body {
     <p class="audience__still-text"></p>
   </figcaption>
 </figure>
+<p class="audience__status" role="status" hidden></p>
 <div class="audience__idle">
   <svg class="audience__glyph" viewBox="0 0 200 200" aria-hidden="true">
     <circle class="audience__glyph-ring" cx="100" cy="100" r="70"/>

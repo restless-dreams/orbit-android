@@ -58,6 +58,10 @@ class FolderApp : ContentProvider() {
                 Bundle().apply { putParcelable(EXTRA_URI, DocumentsContract.buildDocumentUriUsingTree(tree, idOf(made))) }
             }
             DELETE_DOCUMENT -> {
+                if (refusesDeleting) {
+                    throw UnsupportedOperationException("This app doesn't delete documents")
+                }
+
                 target.deleteRecursively()
                 Bundle()
             }
@@ -136,11 +140,17 @@ class FolderApp : ContentProvider() {
         /** Runs as a document is about to be opened, with its file and how (`r`, `wt`…): another app writing right then. */
         var beforeOpening: ((File, String) -> Unit)? = null
 
+        /** Whether it refuses to delete documents, as some cloud drives' apps do. */
+        var refusesDeleting = false
+
         /** The folder as the system's folder picker gives it. */
         val tree: Uri get() = DocumentsContract.buildTreeDocumentUri(AUTHORITY, ROOT)
 
         /** The folder's files, in `disk`'s `root`, as another app sees them. */
         val folder: File get() = File(disk, ROOT)
+
+        /** The document for the file `name` in the folder, as the system's save screen gives one. */
+        fun document(name: String): Uri = DocumentsContract.buildDocumentUriUsingTree(tree, idOf(File(folder, name)))
 
         /** Starts again with an empty folder in `disk`, and an app that says every file's time and size and names files as the device's storage does. */
         fun reset(disk: File) {
@@ -151,6 +161,7 @@ class FolderApp : ContentProvider() {
             naming = ::storageName
             afterListing = null
             beforeOpening = null
+            refusesDeleting = false
         }
 
         private fun fileOf(uri: Uri): File = File(disk, DocumentsContract.getDocumentId(uri))

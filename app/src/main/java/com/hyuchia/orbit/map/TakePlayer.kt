@@ -56,14 +56,15 @@ internal class TakePlayer(private val context: Context, private val scope: Corou
 
     fun load(file: File) {
         release()
+        val player = MediaPlayer()
 
-        val player = try {
-            MediaPlayer().apply {
-                setAudioAttributes(TakeSound)
-                setDataSource(file.path)
-                prepare()
-            }
+        try {
+            player.setAudioAttributes(TakeSound)
+            player.setDataSource(file.path)
+            player.prepare()
         } catch (unreadable: Exception) {
+            // A take the phone can't read: its player goes too, and with it what it held of the phone's decoders.
+            player.release()
             return
         }
 

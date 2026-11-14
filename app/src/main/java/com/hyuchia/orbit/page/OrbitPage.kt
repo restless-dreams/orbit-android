@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.MutableContextWrapper
 import android.graphics.Color
+import android.os.Handler
+import android.os.Looper
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -23,6 +25,9 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebResourceErrorCompat
 import androidx.webkit.WebViewAssetLoader
@@ -45,6 +50,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import java.io.File
+import java.security.SecureRandom
 import kotlin.time.Duration.Companion.seconds
 
 /** The longest a map waits for its page's first frame before it shows anyway (see [OrbitPage.drawn]). */
@@ -74,8 +80,31 @@ internal const val PAGE_POLICY = "default-src 'none'; script-src 'self'; style-s
     "img-src 'self' https: data: blob:; media-src 'self' https: blob:; font-src 'self' data:; connect-src 'self' https: data: blob:; " +
     "frame-src $PLAYER_FRAMES; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests"
 
-/** A job the page couldn't do. */
-class PageException(message: String) : Exception(message)
+/** A job the page couldn't do, and why ([kind]): the page can't do any, or couldn't do this one. */
+class PageException(message: String, val kind: Kind = Kind.JobFailed) : Exception(message) {
+    enum class Kind(
+        /** Whether no page can do jobs for a while: another try now, or for the next map, would fail the same. */
+        val lasting: Boolean,
+    ) {
+        /** The phone's WebView is too old to draw maps: no page does anything. */
+        TooOld(lasting = true),
+
+        /** The page didn't load. */
+        DidNotLoad(lasting = true),
+
+        /** The page didn't answer in time: it's stuck, or the phone is too busy for it. */
+        DidNotAnswer(lasting = true),
+
+        /** The page's process stopped, or the page closed: a new page can do the job. */
+        Stopped(lasting = false),
+
+        /** The page answered this job with an error of its own, in its words, maybe not the app's language. */
+        Refused(lasting = false),
+
+        /** The page answered this job with nothing, or with what the app can't read. */
+        JobFailed(lasting = false),
+    }
+}
 
 /**
  * A WebView with Orbit's page loaded, and the channel to it. Pages are made
@@ -89,7 +118,14 @@ class PageException(message: String) : Exception(message)
  * the map's page, or the audience's ([AUDIENCE_URL]). Either speaks the
  * app's language ([speak]).
  */
-class OrbitPage internal constructor(private val application: Context, mapsDirectory: File, private val pageUrl: String = PAGE_URL) : MapPage {
+class OrbitPage internal constructor(
+    private val application: Context,
+    mapsDirectory: File,
+    private val pageUrl: String = PAGE_URL,
+
+    /** Whether Orbit is in sight: the page's watchdogs count only that time. */
+    private val sight: Lifecycle = ProcessLifecycleOwner.get().lifecycle,
+) : MapPage {
     /** The page's path: the only one of the app's own this view loads as a page. */
     private val pagePath: String? = pageUrl.toUri().path
 
@@ -117,16 +153,22 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
     /** The map whose pictures the audience's page shows, while it shows one. */
     private var audienceMap: String? = null
 
-    /** The maps jobs are drawing pictures of, by job, while they do. */
-    private val jobMaps = mutableMapOf<Int, String>()
-
     /**
-     * The maps whose pictures and videos the page may load: the one it shows,
-     * and the ones it's drawing pictures of. Read as files are asked for, off
-     * the main thread.
+     * The maps whose pictures and videos the page may load at their own
+     * addresses: the one it shows, and the audience's. Read as files are
+     * asked for, off the main thread.
      */
     @Volatile
     private var readableMaps: Set<String> = emptySet()
+
+    /**
+     * The maps jobs are drawing pictures of, by the key each job was given,
+     * while it lasts: a job reads its own map's pictures, at its own address
+     * ([jobBaseUrl]), and none of another map's, whatever its text points at
+     * and whatever else the page does meanwhile. Read off the main thread too.
+     */
+    @Volatile
+    private var jobGrants: Map<String, JobGrant> = emptyMap()
 
     /** Who hears the page's messages: the screen showing it. */
     override var listener: ((MapMessage) -> Unit)? = null
@@ -146,6 +188,37 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
 
     /** Whether the view is destroyed already: by the page's process stopping, or by [destroy]. */
     private var destroyed = false
+
+    /** Where the waits for the page run: the main thread's own, since a view out of every window, as the spare page is, runs none of its own. */
+    private val watching = Handler(Looper.getMainLooper())
+
+    /**
+     * Gives up on a page that hasn't said hello by now: its HTML may load but its script never run, or the page
+     * never finish loading. Waited for from the page's start ([START_WAIT]), and for less once it has loaded
+     * ([HELLO_WAIT]), when the hello should be on its way already. Only time Orbit is in sight counts.
+     */
+    private val notStarted = SightedWait(watching) { if (!ready) didNotLoad("The page didn't say hello") }
+
+    /** Gives up on a page that hasn't said the map it was sent is ready ([READY_WAIT]), as one stuck drawing it. */
+    private val notReady = SightedWait(watching) { didNotLoad("The page didn't say the map was ready") }
+
+    /** Pauses the waits while Orbit is out of sight, and counts again once it's back. */
+    private val sightWatcher = LifecycleEventObserver { _, event ->
+        when (event) {
+            Lifecycle.Event.ON_STOP -> {
+                notStarted.pause()
+                notReady.pause()
+            }
+            Lifecycle.Event.ON_START -> {
+                notStarted.resume()
+                notReady.resume()
+            }
+            else -> Unit
+        }
+    }
+
+    /** Whether Orbit is in sight now: the waits count. */
+    private val inSight: Boolean get() = sight.currentState.isAtLeast(Lifecycle.State.STARTED)
 
     /** The listener waiting for the window's focus to bring the keyboard up, while one waits. */
     private var focusWaiter: Pair<ViewTreeObserver, ViewTreeObserver.OnWindowFocusChangeListener>? = null
@@ -170,6 +243,11 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
 
     init {
         speak()
+
+        if (drawsMaps) {
+            sight.addObserver(sightWatcher)
+            notStarted.start(START_WAIT.inWholeMilliseconds, inSight)
+        }
     }
 
     override fun send(command: MapCommand) {
@@ -196,10 +274,44 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
 
         updateReadableMaps()
         sendEncoded(protocolJson.encodeToString(MapCommand.serializer(), command), kind, job)
+
+        if (kind == WaitingCommands.Kind.NewMap) {
+            awaitReady()
+        }
     }
 
     private fun updateReadableMaps() {
-        readableMaps = setOfNotNull(showing, audienceMap) + jobMaps.values
+        readableMaps = setOfNotNull(showing, audienceMap)
+    }
+
+    /** A job's map, which it may read while it lasts. */
+    private class JobGrant(val job: Int, val mapId: String)
+
+    /** The map whose picture or video the page asks for at `path`, when it may read it: see [readableMaps] and [jobGrants]. */
+    private fun readable(path: String): MapMedia? {
+        mapMedia(path)?.let { media -> return media.takeIf { it.mapId in readableMaps } }
+        val asked = jobMedia(path) ?: return null
+        return jobGrants[asked.key]?.let { MapMedia(it.mapId, asked.name) }
+    }
+
+    /**
+     * Calls off the jobs drawing pictures of maps `hides` names, as private
+     * maps lock: what they were given to read, they read no more, and whoever
+     * waits for them hears they stopped. Nothing of a private map is read
+     * once it's locked, however long a picture of it takes.
+     */
+    fun revokeJobs(hides: (mapId: String) -> Boolean) {
+        val revoked = jobGrants.filterValues { hides(it.mapId) }
+
+        if (revoked.isEmpty()) {
+            return
+        }
+
+        jobGrants = jobGrants - revoked.keys
+
+        for (grant in revoked.values) {
+            jobs[grant.job]?.completeExceptionally(PageException(application.getString(R.string.page_stopped)))
+        }
     }
 
     /**
@@ -254,6 +366,18 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
         channel(encoded)
     }
 
+    /**
+     * Waits for the page to say the map it's sent is ready ([MapMessage.Ready]), or why it can't draw it
+     * ([MapMessage.Error]), from when it's sent: once the page said hello. A map unloaded waits for nothing.
+     */
+    private fun awaitReady() {
+        notReady.cancel()
+
+        if (ready && expectedMap != null && isAlive) {
+            notReady.start(READY_WAIT.inWholeMilliseconds, inSight)
+        }
+    }
+
     /** Sends a command on the page's channel, which exists only where WebView has message listeners: the page loads nowhere else. */
     private fun post(channel: JavaScriptReplyProxy, encoded: String) {
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
@@ -264,15 +388,15 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
     /** Sends a job and waits for its answer. */
     override suspend fun <T> request(answer: DeserializationStrategy<T>, command: (job: Int) -> MapCommand): T {
         if (stopped) {
-            throw PageException(application.getString(R.string.page_stopped))
+            throw PageException(application.getString(R.string.page_stopped), PageException.Kind.Stopped)
         }
 
         if (!drawsMaps) {
-            throw PageException(tooOld)
+            throw PageException(tooOld, PageException.Kind.TooOld)
         }
 
         if (loadFailed) {
-            throw PageException(application.getString(R.string.page_did_not_load))
+            throw PageException(application.getString(R.string.page_did_not_load), PageException.Kind.DidNotLoad)
         }
 
         val job = nextJob++
@@ -280,10 +404,18 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
         jobs[job] = result
         // Pictures, conversions and ideas caught on the go name what they make up, and say what went wrong, in the app's language.
         speak()
-        val sent = command(job)
+        val asked = command(job)
 
-        // A picture of a map loads that map's pictures, and only while it's being drawn.
-        (sent as? MapCommand.Snapshot)?.baseUrl?.let(::mapIdOf)?.let { jobMaps[job] = it }
+        // A picture of a map, or ideas caught for it, loads that map's pictures, and only while it's being drawn: from an address of its own.
+        val sent = jobBaseUrl(asked)?.let(::mapIdOf)?.let { mapId ->
+            val granted = grant(job, mapId)
+
+            when (asked) {
+                is MapCommand.Snapshot -> asked.copy(baseUrl = granted)
+                is MapCommand.AddIdeas -> asked.copy(baseUrl = granted)
+                else -> asked
+            }
+        } ?: asked
 
         // An answer that never comes (a message lost, a page stuck) is given up on, rather than waited for forever.
         val value = try {
@@ -291,7 +423,7 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
             withTimeout(REQUEST_TIMEOUT) { result.await() }
         } catch (late: TimeoutCancellationException) {
             Logs.warn(TAG, "The page didn't answer job $job in $REQUEST_TIMEOUT")
-            throw PageException(application.getString(R.string.page_did_not_answer))
+            throw PageException(application.getString(R.string.page_did_not_answer), PageException.Kind.DidNotAnswer)
         } finally {
             // Answered, given up on, or no longer wanted by whoever asked: a job left behind would keep the page busy for good.
             val unanswered = jobs.remove(job) != null
@@ -302,16 +434,30 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
                 sendEncoded(protocolJson.encodeToString(MapCommand.serializer(), MapCommand.Cancel(job)), WaitingCommands.Kind.Map)
             }
 
-            if (jobMaps.remove(job) != null) {
-                updateReadableMaps()
-            }
+            jobGrants = jobGrants.filterValues { it.job != job }
 
             if (jobs.isEmpty()) {
                 onIdle?.invoke()
             }
         }
 
-        return protocolJson.decodeFromJsonElement(answer, value ?: throw PageException(application.getString(R.string.page_sent_nothing_back)))
+        val answered = value ?: throw PageException(application.getString(R.string.page_sent_nothing_back))
+
+        // An answer the app can't read fails as the page's, as one that never came does: whoever asked says the job didn't happen.
+        return try {
+            protocolJson.decodeFromJsonElement(answer, answered)
+        } catch (unreadable: IllegalArgumentException) {
+            Logs.error(TAG, "The page's answer to job $job can't be read")
+            Logs.warn(TAG, "Unreadable answer from the page", unreadable)
+            throw PageException(application.getString(R.string.page_sent_unreadable_answer))
+        }
+    }
+
+    /** Gives job `job` its map `mapId` to read, at an address of its own, by a key no one could guess: the address. */
+    private fun grant(job: Int, mapId: String): String {
+        val key = ByteArray(16).also(keys::nextBytes).joinToString("") { "%02x".format(it) }
+        jobGrants = jobGrants + (key to JobGrant(job, mapId))
+        return jobBaseUrl(key)
     }
 
     private var attachment = 0
@@ -344,18 +490,50 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
 
     fun destroy() {
         detach()
-        abandon(application.getString(R.string.page_closed))
+        abandon(application.getString(R.string.page_closed), PageException.Kind.Stopped)
         destroyView()
         stopped = true
         listener = null
     }
 
-    /** Destroys the view once: a page whose process stopped destroyed it already, and older WebViews don't take a second. */
+    /**
+     * Destroys the view once: a page whose process stopped destroyed it already, and older WebViews don't take a
+     * second. Nothing waits on the page from then on: a watchdog would touch a view that's gone.
+     */
     private fun destroyView() {
         if (!destroyed) {
             destroyed = true
+            stopWatching()
             webView.destroy()
         }
+    }
+
+    /** Stops waiting for the page to start, or to say its map is ready. */
+    private fun stopWatching() {
+        notStarted.cancel()
+        notReady.cancel()
+        sight.removeObserver(sightWatcher)
+    }
+
+    /**
+     * The page won't draw maps: it didn't load, or it loaded but never started or never drew its map. What waits
+     * for it fails now, what's asked of it later fails at once, and the screen showing it says so, with the way to
+     * load it again, rather than waiting for the map for good. What the page says from then on goes nowhere: a map
+     * it says is ready after all, or a save, would come to a screen that has given it up, and whose commands it no
+     * longer takes. `why` is for the log alone.
+     */
+    private fun didNotLoad(why: String) {
+        if (!isAlive || destroyed) {
+            return
+        }
+
+        Logs.warn(TAG, why)
+        loadFailed = true
+        ready = false
+        channel = null
+        stopWatching()
+        abandon(application.getString(R.string.page_did_not_load))
+        listener?.invoke(MapMessage.DidNotLoad)
     }
 
     /**
@@ -364,6 +542,11 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
      * window's focus, and Android ignores the keyboard until it comes back.
      */
     fun showKeyboard() {
+        // A view that's gone has no field to type in.
+        if (destroyed) {
+            return
+        }
+
         val view = webView
 
         val show = Runnable {
@@ -409,6 +592,11 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
      * [DRAWN_WAIT] whatever happens.
      */
     override suspend fun drawn() {
+        // A view that's gone draws nothing more, and never says so.
+        if (destroyed) {
+            return
+        }
+
         val drawn = CompletableDeferred<Unit>()
 
         webView.postVisualStateCallback(
@@ -438,6 +626,11 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
      * a page would.
      */
     internal fun receive(data: String, reply: (String) -> Unit) {
+        // A page given up on says nothing more (see [didNotLoad]).
+        if (loadFailed) {
+            return
+        }
+
         val element = try {
             protocolJson.parseToJsonElement(data).jsonObject
         } catch (error: IllegalArgumentException) {
@@ -463,13 +656,17 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
             MapMessage.Hello -> {
                 channel = reply
                 ready = true
+                notStarted.cancel()
                 waiting.take().forEach(reply)
+                // A map sent before the hello reaches the page only now.
+                awaitReady()
             }
+            is MapMessage.Ready, is MapMessage.Error -> notReady.cancel()
             is MapMessage.Result -> {
                 val job = jobs.remove(message.job) ?: return
 
                 if (message.error != null) {
-                    job.completeExceptionally(PageException(message.error))
+                    job.completeExceptionally(PageException(message.error, PageException.Kind.Refused))
                 } else {
                     job.complete(message.value)
                 }
@@ -495,9 +692,12 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
         Logs.warn(TAG, "Unreadable message from the page", error)
     }
 
-    /** The page will do nothing more: every job fails with `reason`, and nothing waits for a hello that won't come. */
-    private fun abandon(reason: String) {
-        jobs.values.forEach { it.completeExceptionally(PageException(reason)) }
+    /**
+     * The page will do nothing more: every job fails with `reason`, as `kind` (a page that didn't load, unless it
+     * stopped or closed), and nothing waits for a hello that won't come.
+     */
+    private fun abandon(reason: String, kind: PageException.Kind = PageException.Kind.DidNotLoad) {
+        jobs.values.forEach { it.completeExceptionally(PageException(reason, kind)) }
         jobs.clear()
         waiting.clear()
     }
@@ -511,8 +711,9 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
             .addPathHandler("/res/", WebViewAssetLoader.ResourcesPathHandler(application))
             .build()
         // The map's page draws an animated picture's first frame: drawn moving, its planet would keep the page drawing.
-        // The audience's screen, like the room's browsers and web pages, plays it.
-        val files = MapFiles(mapsDirectory, FirstFrames(File(application.cacheDir, FIRST_FRAMES_DIRECTORY)).takeIf { pageUrl != AUDIENCE_URL })
+        // The audience's screen, like the room's browsers and web pages, plays it. Both draw a HEIC picture as a JPEG,
+        // which Chromium draws, as web pages, prints and a TV carry it.
+        val files = MapFiles(mapsDirectory, FirstFrames(File(application.cacheDir, FIRST_FRAMES_DIRECTORY)), animations = pageUrl != AUDIENCE_URL)
 
         return object : WebView(context) {
             override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
@@ -618,9 +819,9 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
             val url = request.url
 
-            if (url.host == PAGE_HOST && url.path.orEmpty().startsWith(MAPS_PATH)) {
+            if (url.host == PAGE_HOST && url.path.orEmpty().let { it.startsWith(MAPS_PATH) || it.startsWith(JOBS_PATH) }) {
                 val range = request.requestHeaders?.entries?.firstOrNull { it.key.equals("Range", ignoreCase = true) }?.value
-                return files.answer(url, range) { it in readableMaps }
+                return files.answer(url, range, ::readable)
             }
 
             val response = assets.shouldInterceptRequest(url) ?: return null
@@ -661,7 +862,7 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
             stopped = true
             ready = false
             channel = null
-            abandon(application.getString(R.string.page_stopped))
+            abandon(application.getString(R.string.page_stopped), PageException.Kind.Stopped)
             stopWaitingForFocus()
             (view.parent as? ViewGroup)?.removeView(view)
             destroyView()
@@ -674,10 +875,14 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceErrorCompat) {
             if (request.isForMainFrame && isAlive) {
                 val code = if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_RESOURCE_ERROR_GET_CODE)) error.errorCode else null
-                Logs.warn(TAG, "The page didn't load (error $code)")
-                loadFailed = true
-                abandon(application.getString(R.string.page_did_not_load))
-                listener?.invoke(MapMessage.DidNotLoad)
+                didNotLoad("The page didn't load (error $code)")
+            }
+        }
+
+        // The page loaded, its script with it, which says hello as it runs: one that hasn't soon after never will.
+        override fun onPageFinished(view: WebView, url: String) {
+            if (!ready && isAlive && !destroyed && url.toUri().path == pagePath) {
+                notStarted.start(HELLO_WAIT.inWholeMilliseconds, inSight)
             }
         }
     }
@@ -685,8 +890,20 @@ class OrbitPage internal constructor(private val application: Context, mapsDirec
     private companion object {
         const val TAG = "OrbitPage"
 
+        /** Where jobs' keys come from: no map's text can guess one. */
+        val keys = SecureRandom()
+
         /** How long a job may take before the page is taken for stuck: the biggest maps draw in seconds on slow phones, never a minute. */
         val REQUEST_TIMEOUT = 60.seconds
+
+        /** How long a page has to say hello from its start: it loads from the app itself, in a second or two even on a slow phone. */
+        val START_WAIT = 90.seconds
+
+        /** How long a page that has loaded has to say hello: its script says it as it runs, before the page has loaded. */
+        val HELLO_WAIT = 15.seconds
+
+        /** How long the page has to say the map it was sent is ready: the biggest draw in seconds on slow phones, never a minute and a half. */
+        val READY_WAIT = 90.seconds
     }
 }
 

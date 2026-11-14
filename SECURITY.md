@@ -15,4 +15,4 @@ Please don't open a public issue for a suspected vulnerability. Report it privat
 
 Reports are answered as soon as possible, and you'll hear how the fix is going until it's released. Reporters are credited in the release notes if they'd like to be.
 
-The parts that face other devices are the most sensitive: the servers the app runs on the local network to send maps and to present in browsers, and the encryption of maps sent between devices. How they work is in [docs/architecture.md](docs/architecture.md).
+The parts that face other devices are the most sensitive: the servers the app runs on the local network to send maps and to present in browsers, and the encryption of maps sent between devices. How they work is in [docs/architecture.md](docs/architecture.md), mostly in [between devices](docs/architecture/between-devices.md) and [pages, and what crosses the app's edge](docs/architecture/pages-and-boundaries.md).

@@ -13,6 +13,11 @@
         <item quantity="many">%2$d arquivos adicionados a “%1$s”</item>
         <item quantity="other">%2$d arquivos adicionados a “%1$s”</item>
     </plurals>
+    <plurals name="files_idea_gone">
+        <item quantity="one">%d arquivo não foi adicionado: a ideia dele não existe mais</item>
+        <item quantity="many">%d arquivos não foram adicionados: a ideia deles não existe mais</item>
+        <item quantity="other">%d arquivos não foram adicionados: a ideia deles não existe mais</item>
+    </plurals>
     <string name="files_copying">Copiando %1$s…</string>
     <!-- Never 0: only while more files follow. -->
     <plurals name="files_left">

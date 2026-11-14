@@ -101,4 +101,12 @@
     <!-- The keyboard shortcuts while studying. -->
     <string name="study_shortcuts">Studying</string>
     <string name="study_shortcut_show">Show what’s under the card</string>
+
+    <!-- Over a study session, and over the map after one, while answers the device's storage couldn't take wait to be written. -->
+    <string name="study_answers_unsaved_title">Your latest answers aren’t saved yet</string>
+    <string name="study_answers_unsaved_body">This device’s storage is full, so they’re only kept while Orbit is open. Free up some space, and Orbit saves them as soon as it can.</string>
+    <!-- When a newer version of Orbit keeps the maps, which this one can't change: these answers are lost when Orbit closes, as updating it does. -->
+    <string name="study_answers_unsaved_newer_title">These answers can’t be saved</string>
+    <string name="study_answers_unsaved_newer">A newer version of Orbit keeps your maps, so this one can’t save your answers, and they’re lost when Orbit closes. Once you update Orbit, the answers you give are saved.</string>
+    <string name="study_answers_saved">Your answers are saved.</string>
 </resources>

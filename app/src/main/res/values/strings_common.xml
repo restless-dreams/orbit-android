@@ -55,4 +55,9 @@
         <item quantity="one">Added %1$d map. %2$d were here already.</item>
         <item quantity="other">Added %1$d maps. %2$d were here already.</item>
     </plurals>
+    <!-- A zip of maps that stopped partway: what stopped it comes first, then what came in before, then this. %1$s is the reason Android gives, in English, such as “No space left on device”. -->
+    <string name="common_import_stopped">Orbit had to stop partway through that file: %1$s.</string>
+    <string name="common_import_stopped_without_reason">Orbit had to stop partway through that file.</string>
+    <!-- After what came in before it stopped: the maps that came are whole, and bringing in the same file again adds only what's missing. -->
+    <string name="common_import_again_for_the_rest">Importing it again brings in the rest, and leaves what came in as it is.</string>
 </resources>

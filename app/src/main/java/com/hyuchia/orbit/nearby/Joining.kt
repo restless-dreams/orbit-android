@@ -340,8 +340,15 @@ class Joining(
         return when (val admission = admit(request.from, name = null)) {
             is Admission.Out -> form(status(admission.state), message(admission.state), admission.state)
             is Admission.In -> {
-                val page = content(admission.member, emptyList())
-                if (page is Response.Bytes) page.withHeaders(mapOf("Set-Cookie" to cookieFor(admission.token))) else page
+                // The session goes with the page, whichever way the page is sent, so what the page asks for next, its
+                // zip say, and the page loaded again, are this member's.
+                val session = mapOf("Set-Cookie" to cookieFor(admission.token))
+
+                when (val page = content(admission.member, emptyList())) {
+                    is Response.Bytes -> page.withHeaders(session)
+                    is Response.FromFile -> page.withHeaders(session)
+                    is Response.Events -> page
+                }
             }
         }
     }
@@ -352,7 +359,7 @@ class Joining(
         }
 
         // Another site's page posting the form is no one joining.
-        if (request.headers["sec-fetch-site"] == "cross-site" || request.headers["sec-fetch-site"] == "same-site") {
+        if (fromAnotherSite(request)) {
             return Response.text(403, words.string(R.string.nearby_join_from_the_page))
         }
 
@@ -438,13 +445,17 @@ class Joining(
     /**
      * The join form, saying `problem` when there is one. Someone the room is
      * full for, or closed to, keeps the form to try again; someone removed,
-     * or a room that ended, gets only the message.
+     * or a room that ended, gets only the message. It goes with referrers
+     * kept to the phone's own address, rather than none: a browser before
+     * `Sec-Fetch-Site` then posts it with its real `Origin`, which tells it
+     * from another site's.
      */
     private fun form(status: Int, problem: String, state: RoomState?, name: String? = null): Response {
         val options = currentOptions.value
         val asking = state == null || state == RoomState.Full || state == RoomState.Closed
         var page = section(template(), "code", keep = false)
         page = section(page, "room", keep = true)
+        page = section(page, "onward", keep = false)
         page = section(page, "name field", keep = asking && options.askNames)
         page = section(page, "pin field", keep = asking && options.requirePin)
         page = section(page, "button", keep = asking)
@@ -461,7 +472,7 @@ class Joining(
             "<!-- button label -->" to escapeHtml(words.string(if (state == null) wording.button else R.string.nearby_try_again)),
             "<!-- problem -->" to escapeHtml(problem),
         )
-        return Response.page(status, fill(page, values))
+        return Response.page(status, fill(page, values), mapOf("Referrer-Policy" to "same-origin"))
     }
 }
 
@@ -479,6 +490,50 @@ private fun formDecode(text: String): String = try {
 
 /** What a room answers anyone not in it who asks for more than its page, in the phone's language. */
 internal fun joinFirst(words: Words): Response = Response.text(403, words.string(R.string.nearby_join_first))
+
+/**
+ * Whether `request` comes from another site's page, as a picture, a script,
+ * a fetch, a form or a frame on it: a browser says so with `Sec-Fetch-Site`,
+ * and one from before that with an `Origin` other than the address it asks,
+ * which it sends with a form or a fetch. What the person opens themselves
+ * (typed, from a QR code or a bookmark) and what a room's page asks for say
+ * otherwise, from whichever of the phone's addresses the page came from. A
+ * request that says neither, or only `Origin: null`, from an older browser
+ * or a tool, can't be told from someone typing the address: the room takes
+ * it as theirs.
+ */
+internal fun fromAnotherSite(request: Request): Boolean {
+    val site = request.headers["sec-fetch-site"]
+
+    if (site != null) {
+        return site != "same-origin" && site != "none"
+    }
+
+    // `null` is what Safari before 16.4 posts a form with from a page without referrers: as good as saying nothing.
+    val origin = request.headers["origin"]?.takeIf { it != "null" } ?: return false
+    return !origin.equals("http://${request.headers["host"]}", ignoreCase = true)
+}
+
+/**
+ * What a request from another site gets at a room's code, right, wrong or
+ * ended, whatever the room asks: no session, no guess counted against
+ * anyone, and the same answer for every code, so nothing can be learned or
+ * used up through it. A room's page, as a link followed from a chat on the
+ * web asks for it, is a page that opens the same address again from itself
+ * (`template`'s onward part, web/join.html): that comes from the room's own
+ * address, so the room then answers it as it answers anyone who typed it.
+ * Anything else is refused.
+ */
+internal fun fromElsewhere(request: Request, rest: List<String>, template: String, words: Words): Response {
+    if (request.method != "GET" || rest.isNotEmpty()) {
+        return Response.text(403, words.string(R.string.nearby_join_from_the_page))
+    }
+
+    var page = section(template, "code", keep = false)
+    page = section(page, "room", keep = false)
+    page = section(page, "onward", keep = true)
+    return Response.page(200, fill(page, mapOf(htmlIn(words.language), "<!-- onward label -->" to escapeHtml(words.string(R.string.common_open)))))
+}
 
 /**
  * The answer for a code that isn't a room's. Where a code is typed or asked
@@ -513,6 +568,7 @@ internal fun unknownRoom(request: Request, rest: List<String>, guard: CodeGuard,
 internal fun codePage(template: String, status: Int, label: String, problem: String, language: String): Response {
     var page = section(template, "code", keep = true)
     page = section(page, "room", keep = false)
+    page = section(page, "onward", keep = false)
     return Response.page(status, fill(page, mapOf(htmlIn(language), "<!-- label -->" to escapeHtml(label), "<!-- problem -->" to escapeHtml(problem))))
 }
 

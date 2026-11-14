@@ -3,6 +3,7 @@ package com.hyuchia.orbit.map
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.hyuchia.orbit.R
 import com.hyuchia.orbit.voice.Listening
 import com.hyuchia.orbit.voice.TestRecognizer
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -108,5 +109,52 @@ class TalkTest {
         assertFalse(talk.active)
         assertTrue(talk.hold())
         assertEquals(2, recognizers.size)
+    }
+
+    @Test
+    fun `the map's screen going ends its talk, and the map still offers to take the talk back`() = runTest {
+        val events = mutableListOf<MapEvent>()
+        var undone = 0
+
+        // The map's side of the talk: its ideas joined one change at a time, and its message once it's over.
+        val spoken = SpokenIdeas(
+            scope = backgroundScope,
+            join = { _, said -> said.size },
+            lastChange = { "# Before" },
+            undo = { undone += 1 },
+            say = events::add,
+            locked = { false },
+        )
+
+        talk.onFinished = { problem ->
+            finished += problem
+            spoken.over()
+        }
+
+        assertTrue(talk.hold())
+        spoken.start()
+        recognizers.single().says("An idea")
+        spoken.add("root", ideas.toList())
+        runCurrent()
+
+        // The screen goes with the talk still listening, as when the map closes or the screen is made again.
+        talk.close()
+        runCurrent()
+
+        assertFalse(talk.active)
+        assertTrue(recognizers.single().destroyed)
+        assertEquals(listOf<String?>(null), finished)
+        val message = events.filterIsInstance<MapEvent.Snackbar>().single()
+        assertEquals(ShownText.Plural(R.plurals.map_added_ideas, 1), message.message)
+        message.onUndo?.invoke()
+        assertEquals(1, undone)
+    }
+
+    @Test
+    fun `the map's screen going with no talk lets the microphone go and says nothing`() {
+        talk.close()
+
+        assertFalse(talk.active)
+        assertEquals(emptyList<String?>(), finished)
     }
 }

@@ -26,6 +26,16 @@ export const showPage = (file: string, fill: Record<string, string> = {}): void 
   document.body.innerHTML = content;
 };
 
+/**
+ * Puts the test's document at `url`, as a browser that opened the page
+ * there has it: a page saved and opened from its file is at a file: URL,
+ * whose origin is `null`, as in Firefox. The tests' pages are at
+ * http://localhost otherwise.
+ */
+export const pageAt = (url: string): void => {
+  (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(url);
+};
+
 /** A wait the page asked for on the test's clock. */
 interface Wait {
   id: number;
