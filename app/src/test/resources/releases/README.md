@@ -18,6 +18,7 @@ Each folder holds the files a release of Orbit for Android left in a phone's app
 | `0.3.0` | 0.3.0 (code 4) | aff450a |
 | `0.4.0` | 0.4.0 (code 5) | 7be3b34 |
 | `0.5.0` | 0.5.0 (code 6) | c78d003 |
+| `0.5.1` | 0.5.1 (code 7) | 44c5528 |
 
 A folder keeps only what's Orbit's in the app's `files/`:
 - `maps/`, with `.layout.json`;

@@ -157,7 +157,10 @@ internal fun FolderSettings() {
         // The maps an older device in the folder keeps only part of, as the notes name maps.
         val partly = sync.partly.mapValues { (_, maps) -> maps.filterNot { concealing && hiddenMap(it) } }.filterValues { it.isNotEmpty() }
         // Unlocked, the notes name private maps, their pictures and videos: Recents gets no picture of Settings then, as of the maps.
-        PrivateOnScreen(!privacy.locked && (shown.namesPrivateMaps(notes.private, privateTitles, ::quoted) || partly.values.flatten().any { it in privateTitles }))
+        // Worked out locked or not: Compose remembers `::quoted` where it's written, with no group of its own after an `&&`, so
+        // skipping it as they lock put what Settings remembered after it out of step, and Orbit closed.
+        val namesPrivateMaps = shown.namesPrivateMaps(notes.private, privateTitles, ::quoted) || partly.values.flatten().any { it in privateTitles }
+        PrivateOnScreen(!privacy.locked && namesPrivateMaps)
 
         if (shown.keptBoth.isNotEmpty()) {
             Note(pluralStringResource(R.plurals.settings_folder_kept_both, shown.keptBoth.size, titles(shown.keptBoth)))
